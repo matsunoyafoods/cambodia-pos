@@ -1,11 +1,12 @@
 'use client';
 
 import type { CartLine, MenuItem } from '@/lib/pos-types';
-import { CATEGORIES, DEMO_MENU } from '@/lib/demo-data';
 import { money } from '@/lib/money';
 
 export function OrderScreen({
   selectedTable,
+  menu,
+  categories,
   activeCategory,
   onCategory,
   cart,
@@ -14,11 +15,15 @@ export function OrderScreen({
   onDec,
   subtotal,
   taxService,
+  vatRate,
+  serviceRate,
   total,
   onBackToTableMap,
   onCheckout,
 }: {
   selectedTable: string | null;
+  menu: MenuItem[];
+  categories: string[];
   activeCategory: string;
   onCategory: (c: string) => void;
   cart: CartLine[];
@@ -27,11 +32,13 @@ export function OrderScreen({
   onDec: (lineId: string) => void;
   subtotal: number;
   taxService: number;
+  vatRate: number;
+  serviceRate: number;
   total: number;
   onBackToTableMap: () => void;
   onCheckout: () => void;
 }) {
-  const items = DEMO_MENU.filter((m) => m.category === activeCategory);
+  const items = menu.filter((m) => m.category === activeCategory);
   const cartCount = cart.reduce((a, l) => a + l.qty, 0);
 
   return (
@@ -51,7 +58,7 @@ export function OrderScreen({
         </div>
 
         <div className="flex gap-1.5 px-5 pt-3.5">
-          {CATEGORIES.map((c) => (
+          {categories.map((c) => (
             <button
               key={c}
               onClick={() => onCategory(c)}
@@ -150,7 +157,7 @@ export function OrderScreen({
             <span>${money(subtotal)}</span>
           </div>
           <div className="flex justify-between text-xs text-muted-foreground">
-            <span>VAT 10% + サービス料 10%</span>
+            <span>VAT {vatRate}% + サービス料 {serviceRate}%</span>
             <span>${money(taxService)}</span>
           </div>
           <div className="mt-1 flex justify-between text-[15px] font-bold">

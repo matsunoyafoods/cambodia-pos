@@ -1,8 +1,9 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { CartLine, MenuItem, PaymentMethod, TableStatus } from '@/lib/pos-types';
 import { DEFAULT_SETTINGS } from '@/lib/pos-types';
+import { getPosMenus, getPosSettings, PosApiError } from '@/lib/api-client';
 import { TableMapScreen } from './table-map-screen';
 import { OrderScreen } from './order-screen';
 import { CheckoutScreen } from './checkout-screen';
@@ -15,13 +16,17 @@ type Screen = 'tablemap' | 'order' | 'checkout' | 'receipt';
 // そのまま React に移植したもの。本番接続 (Supabase / matsunoya-dine API) は
 // 各 on* ハンドラの中身を差し替えていく想定 (integration-spec.md 4章のエンドポイント対応)。
 export function PosApp() {
-  const settings = DEFAULT_SETTINGS; // TODO: GET /api/pos/settings に差し替え
+  const [menu, setMenu] = useState<MenuItem[]>([]);
+  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  const [dataLoading, setDataLoading] = useState(true);
+  const [dataError, setDataError] = useState<string | null>(null);
+  const [loadToken, setLoadToken] = useState(0);
 
   const [screen, setScreen] = useState<Screen>('tablemap');
   const [tableStatus] = useState<Record<string, TableStatus>>({ BC3: 'occupied', C2: 'billing' });
   const [statusFilter, setStatusFilter] = useState<'all' | TableStatus>('all');
   const [selectedTable, setSelectedTable] = useState<string | null>(null);
-  const [activeCategory, setActiveCategory] = useState('メイン');
+  const [activeCategory, setActiveCategory] = useState('');
   const [cart, setCart] = useState<CartLine[]>([]);
   const [customerLinked, setCustomerLinked] = useState(false);
   const [couponApplied, setCouponApplied] = useState(false);
@@ -33,6 +38,50 @@ export function PosApp() {
   const [cardConfirmed, setCardConfirmed] = useState(false);
   const [optionModalItem, setOptionModalItem] = useState<MenuItem | null>(null);
   const [optionSelection, setOptionSelection] = useState<ModalSelection>({});
+
+  // メニュー・カテゴリ一覧は初出順を維持して抽出 (matsunoya-dine 側のカテゴリ表示順に合わせる)
+  const categories = useMemo(() => {
+    const seen: string[] = [];
+    for (const m of menu) {
+      if (!seen.includes(m.category)) seen.push(m.category);
+    }
+    return seen;
+  }, [menu]);
+
+  // GET /api/pos/menus + /api/pos/settings (matsunoya-dine 側) から実データを取得。
+  // loadToken を更新すると再フェッチする (エラー時の「再読み込み」ボタン用)。
+  useEffect(() => {
+    let cancelled = false;
+    setDataLoading(true);
+    setDataError(null);
+    Promise.all([getPosMenus(), getPosSettings()])
+      .then(([menuData, settingsData]) => {
+        if (cancelled) return;
+        setMenu(menuData.map((m) => ({ ...m, category: m.category ?? '未分類' })));
+        setSettings((prev) => ({ ...prev, ...settingsData }));
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        const message =
+          err instanceof PosApiError
+            ? err.message
+            : 'メニュー・設定の取得に失敗しました。通信環境を確認してください。';
+        setDataError(message);
+      })
+      .finally(() => {
+        if (!cancelled) setDataLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [loadToken]);
+
+  // メニュー取得後、最初のカテゴリを選択状態にする
+  useEffect(() => {
+    if (categories.length > 0 && !categories.includes(activeCategory)) {
+      setActiveCategory(categories[0]);
+    }
+  }, [categories, activeCategory]);
 
   const totals = useMemo(() => {
     const subtotal = cart.reduce((s, l) => s + l.unitPrice * l.qty, 0);
@@ -59,7 +108,7 @@ export function PosApp() {
   function selectTable(code: string) {
     setSelectedTable(code);
     setCart([]);
-    setActiveCategory('メイン');
+    setActiveCategory(categories[0] ?? '');
     resetOrderState();
     setScreen('order');
   }
@@ -137,6 +186,28 @@ export function PosApp() {
     resetOrderState();
   }
 
+  if (dataLoading) {
+    return (
+      <div className="flex h-[800px] w-[1280px] flex-col items-center justify-center gap-3 bg-background text-muted-foreground">
+        <div className="text-sm">メニュー・設定を読み込み中…</div>
+      </div>
+    );
+  }
+
+  if (dataError) {
+    return (
+      <div className="flex h-[800px] w-[1280px] flex-col items-center justify-center gap-4 bg-background px-10 text-center">
+        <div className="text-sm font-semibold text-destructive">{dataError}</div>
+        <button
+          onClick={() => setLoadToken((t) => t + 1)}
+          className="h-10 rounded-lg bg-primary px-5 text-[13.5px] font-bold text-primary-foreground"
+        >
+          再読み込み
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="relative flex h-[800px] w-[1280px] flex-col overflow-hidden bg-background">
       <div className="flex h-16 flex-shrink-0 items-center justify-between border-b border-border px-5">
@@ -169,6 +240,8 @@ export function PosApp() {
       {screen === 'order' && (
         <OrderScreen
           selectedTable={selectedTable}
+          menu={menu}
+          categories={categories}
           activeCategory={activeCategory}
           onCategory={setActiveCategory}
           cart={cart}
@@ -177,6 +250,8 @@ export function PosApp() {
           onDec={decLine}
           subtotal={totals.subtotal}
           taxService={totals.vat + totals.service}
+          vatRate={settings.vatRate}
+          serviceRate={settings.serviceRate}
           total={totals.total}
           onBackToTableMap={() => setScreen('tablemap')}
           onCheckout={() => cart.length > 0 && setScreen('checkout')}
