@@ -1,17 +1,23 @@
--- Cambodia POS: pos スキーマ + menus オプション拡張
+-- Cambodia POS: pos スキーマ + menu_items オプション拡張
 -- 元ネタ: matsunoya-dine/docs/integration-spec.md 3.4 詳細スキーマ定義 (DDL 草案)
 -- 適用先: matsunoya-dine と共有の Supabase プロジェクト (別スキーマ方式)
+--
+-- 2026-08-29 修正: 実スキーマ調査の結果、以下のとおり FK 参照先を修正
+--   public.menus        -> public.menu_items
+--   public.staff         -> public.users (store_members.role で権限判定)
+--   public.customers    -> public.users
+--   store_id (無制約)    -> public.stores(id) を参照
 
 create schema if not exists pos;
 create extension if not exists pgcrypto;
 
 -- ============ public (Master, matsunoya-dine 管理画面が編集元) ============
--- public.menus は matsunoya-dine 側の既存マイグレーションで作成済みの前提。
+-- public.menu_items は matsunoya-dine 側の既存マイグレーションで作成済みの前提。
 -- ここでは商品オプション（グラム数・セット選択など）の子テーブルのみ追加する。
 
 create table public.menu_option_groups (
   id           uuid primary key default gen_random_uuid(),
-  menu_id      uuid not null references public.menus(id) on delete cascade,
+  menu_id      uuid not null references public.menu_items(id) on delete cascade,
   key          text not null,             -- 例: 'weight', 'side'
   label        text not null,             -- 例: '量目を選択'
   required     boolean not null default true,
@@ -33,23 +39,23 @@ create table public.menu_option_choices (
 
 create table pos.settings (
   id             uuid primary key default gen_random_uuid(),
-  store_id       uuid not null,
+  store_id       uuid not null references public.stores(id),
   vat_rate       numeric(5,2) not null default 10.00,
   service_rate   numeric(5,2) not null default 10.00,
   khr_rate       integer not null default 4100,   -- 1 USD = ? KHR
   cash_enabled   boolean not null default true,
   qr_enabled     boolean not null default true,
   card_enabled   boolean not null default true,
-  updated_by     uuid references public.staff(id),
+  updated_by     uuid references public.users(id),
   updated_at     timestamptz not null default now(),
   unique (store_id)
 );
 
 create table pos.orders (
   id               uuid primary key default gen_random_uuid(),
-  store_id         uuid not null,
+  store_id         uuid not null references public.stores(id),
   table_code       text,
-  customer_id      uuid references public.customers(id),
+  customer_id      uuid references public.users(id),
   status           text not null default 'open' check (status in ('open','paid','void')),
   subtotal         numeric(10,2) not null,
   vat              numeric(10,2) not null,
@@ -58,7 +64,7 @@ create table pos.orders (
   coupon_discount  numeric(10,2) not null default 0,
   total            numeric(10,2) not null,
   source           text not null default 'pos' check (source in ('pos','grab')),
-  created_by       uuid references public.staff(id),
+  created_by       uuid references public.users(id),
   created_at       timestamptz not null default now(),
   paid_at          timestamptz
 );
@@ -66,7 +72,7 @@ create table pos.orders (
 create table pos.order_items (
   id                   uuid primary key default gen_random_uuid(),
   order_id             uuid not null references pos.orders(id) on delete cascade,
-  menu_id              uuid not null references public.menus(id),
+  menu_id              uuid not null references public.menu_items(id),
   menu_name            text not null,          -- 注文時点の名称スナップショット
   qty                  integer not null check (qty > 0),
   unit_price           numeric(10,2) not null, -- 基準価格 + 選択オプションの price_delta 合計
@@ -85,7 +91,7 @@ create table pos.payments (
   cash_received_khr   integer,
   change_usd          numeric(10,2),
   change_khr          integer,
-  confirmed_by        uuid references public.staff(id),
+  confirmed_by        uuid references public.users(id),
   confirmed_at        timestamptz not null default now()
 );
 
@@ -99,19 +105,19 @@ create table pos.receipts (
 
 create table pos.expenses (
   id                uuid primary key default gen_random_uuid(),
-  store_id          uuid not null,
+  store_id          uuid not null references public.stores(id),
   date              date not null,
   amount_usd        numeric(10,2) not null,
   category          text not null,
   note              text,
   receipt_image_url text,
-  created_by        uuid references public.staff(id),
+  created_by        uuid references public.users(id),
   created_at        timestamptz not null default now()
 );
 
 create table pos.register_closings (
   id                   uuid primary key default gen_random_uuid(),
-  store_id             uuid not null,
+  store_id             uuid not null references public.stores(id),
   date                 date not null,
   shift                text,               -- 例: '夜の部' (任意)
   system_cash_total    numeric(10,2) not null,
@@ -121,13 +127,13 @@ create table pos.register_closings (
   counted_khr_bills    jsonb not null,      -- {"100000":3,...}
   counted_total_usd    numeric(10,2) not null,
   difference_usd       numeric(10,2) not null,
-  confirmed_by         uuid references public.staff(id),
+  confirmed_by         uuid references public.users(id),
   confirmed_at         timestamptz not null default now()
 );
 
 create table pos.table_layouts (
   id           uuid primary key default gen_random_uuid(),
-  store_id     uuid not null,
+  store_id     uuid not null references public.stores(id),
   table_code   text not null,
   label        text,
   area         text,                 -- フロア/テラス/個室/カウンター/Takeaway
@@ -143,7 +149,7 @@ create table pos.table_layouts (
 
 create table pos.delivery_orders (
   id                 uuid primary key default gen_random_uuid(),
-  store_id           uuid not null,
+  store_id           uuid not null references public.stores(id),
   provider           text not null default 'grab',
   provider_order_id  text not null,
   status             text not null default 'received'
@@ -157,14 +163,14 @@ create table pos.delivery_orders (
 -- Phase 1.5
 create table pos.timecards (
   id          uuid primary key default gen_random_uuid(),
-  staff_id    uuid not null references public.staff(id),
+  staff_id    uuid not null references public.users(id),
   clock_in    timestamptz not null,
   clock_out   timestamptz,
   note        text
 );
 
 -- ============ RLS (integration-spec.md 3.3) ============
--- 実装時に staff テーブルの role カラムに合わせて調整する。
+-- 権限判定は public.store_members.role ('owner' | 'manager' | 'staff') を利用する。
 alter table pos.settings enable row level security;
 alter table pos.orders enable row level security;
 alter table pos.order_items enable row level security;
@@ -178,13 +184,22 @@ alter table pos.timecards enable row level security;
 alter table public.menu_option_groups enable row level security;
 alter table public.menu_option_choices enable row level security;
 
--- pos.settings: 全スタッフ read 可、write はオーナー/マネージャーのみ
-create policy "pos_settings_read_staff" on pos.settings
-  for select using (auth.role() = 'authenticated');
+-- pos.settings: そのストアの store_members であれば read 可、write はオーナー/マネージャーのみ
+create policy "pos_settings_read_members" on pos.settings
+  for select using (
+    exists (
+      select 1 from public.store_members sm
+      where sm.store_id = pos.settings.store_id
+        and sm.user_id = auth.uid()
+    )
+  );
+
 create policy "pos_settings_write_manager" on pos.settings
   for all using (
     exists (
-      select 1 from public.staff s
-      where s.id = auth.uid() and s.role in ('owner', 'manager')
+      select 1 from public.store_members sm
+      where sm.store_id = pos.settings.store_id
+        and sm.user_id = auth.uid()
+        and sm.role in ('owner', 'manager')
     )
   );

@@ -27,8 +27,8 @@ npm run dev
 
 ## 次にやること
 
-1. `supabase/migrations/0001_pos_schema.sql` を実際の Supabase プロジェクトに適用（`pos` スキーマ作成）
-2. matsunoya-dine 側に POS 用 API エンドポイントを実装 (`integration-spec.md` 4.2)
-3. 各画面のデモデータ (`src/lib/demo-data.ts`) を実 API 呼び出しに差し替え
-4. スタッフ認証 (matsunoya-dine の `staff` テーブル流用) を実装
-5. Vercel プロジェクト作成 → デプロイ
+1. [x] `supabase/migrations/0001_pos_schema.sql` を実際の Supabase プロジェクトに適用（`pos` スキーマ作成）— 2026-08-29 適用完了
+2. [x] Vercel プロジェクト作成 → デプロイ
+3. matsunoya-dine 側に POS 用 API エンドポイントを実装 (`integration-spec.md` 4.2)
+4. 各画面のデモデータ (`src/lib/demo-data.ts`) を実 API 呼び出しに差し替え
+5. スタッフ認証（`public.users` + `public.store_members.role` を利用、matsunoya-dine の既存ログインを流用）を実装
