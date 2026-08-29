@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 
 type TableLayoutItem = { id: string; code: string; seats: number; x: number; y: number };
 
@@ -16,6 +17,7 @@ const INITIAL_TABLES: TableLayoutItem[] = [
 // pos.table_layouts (integration-spec.md 3.4) にそのまま対応する画面。
 // 保存ボタンは `PUT /api/pos/table-layouts/:id` を叩く想定 (現状はローカル state のみ)。
 export function TableLayoutScreen() {
+  const router = useRouter();
   const [tables, setTables] = useState<TableLayoutItem[]>(INITIAL_TABLES);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -62,9 +64,17 @@ export function TableLayoutScreen() {
   return (
     <div className="flex h-[800px] w-[1280px] flex-col overflow-hidden bg-background">
       <div className="flex h-16 flex-shrink-0 items-center justify-between border-b border-border px-6">
-        <div>
-          <div className="text-base font-bold">テーブルレイアウト編集</div>
-          <div className="text-xs text-muted-foreground">卓をドラッグして見取り図に配置できます</div>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => router.push('/pos')}
+            className="flex h-9 items-center gap-1 rounded-lg px-2.5 text-[12.5px] font-semibold text-muted-foreground hover:bg-secondary"
+          >
+            ← 戻る
+          </button>
+          <div>
+            <div className="text-base font-bold">テーブルレイアウト編集</div>
+            <div className="text-xs text-muted-foreground">卓をドラッグして見取り図に配置できます</div>
+          </div>
         </div>
         <button
           onClick={() => setSaved(true)}

@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 
 const USD_DENOMS = [100, 50, 20, 10, 5, 1];
 const KHR_DENOMS = [100000, 50000, 20000, 10000, 5000, 2000, 1000, 500];
@@ -12,6 +13,7 @@ const SYSTEM_QR_TOTAL = 180.5;
 const SYSTEM_CARD_TOTAL = 95.0;
 
 export function RegisterClosingScreen({ khrRate }: { khrRate: number }) {
+  const router = useRouter();
   const [usd, setUsd] = useState<Record<number, number>>(Object.fromEntries(USD_DENOMS.map((d) => [d, 0])));
   const [khr, setKhr] = useState<Record<number, number>>(Object.fromEntries(KHR_DENOMS.map((d) => [d, 0])));
   const [confirmed, setConfirmed] = useState(false);
@@ -35,9 +37,17 @@ export function RegisterClosingScreen({ khrRate }: { khrRate: number }) {
   return (
     <div className="flex h-[800px] w-[1280px] flex-col overflow-hidden bg-background">
       <div className="flex h-16 flex-shrink-0 items-center justify-between border-b border-border px-6">
-        <div>
-          <div className="text-base font-bold">レジ締め</div>
-          <div className="text-xs text-muted-foreground">{new Date().toISOString().slice(0, 10)} ・ 夜の部</div>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => router.push('/pos')}
+            className="flex h-9 items-center gap-1 rounded-lg px-2.5 text-[12.5px] font-semibold text-muted-foreground hover:bg-secondary"
+          >
+            ← 戻る
+          </button>
+          <div>
+            <div className="text-base font-bold">レジ締め</div>
+            <div className="text-xs text-muted-foreground">{new Date().toISOString().slice(0, 10)} ・ 夜の部</div>
+          </div>
         </div>
         <button
           onClick={() => setConfirmed(true)}

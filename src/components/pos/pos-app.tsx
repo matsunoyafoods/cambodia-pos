@@ -1,9 +1,12 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import type { CartLine, MenuItem, PaymentMethod, TableStatus } from '@/lib/pos-types';
 import { DEFAULT_SETTINGS } from '@/lib/pos-types';
 import { getPosMenus, getPosSettings, PosApiError } from '@/lib/api-client';
+import { logoutPosStaff } from '@/lib/staff-client';
+import { useStaff } from './staff-context';
 import { TableMapScreen } from './table-map-screen';
 import { OrderScreen } from './order-screen';
 import { CheckoutScreen } from './checkout-screen';
@@ -16,6 +19,9 @@ type Screen = 'tablemap' | 'order' | 'checkout' | 'receipt';
 // そのまま React に移植したもの。本番接続 (Supabase / matsunoya-dine API) は
 // 各 on* ハンドラの中身を差し替えていく想定 (integration-spec.md 4章のエンドポイント対応)。
 export function PosApp() {
+  const router = useRouter();
+  const me = useStaff();
+  const [menuOpen, setMenuOpen] = useState(false);
   const [menu, setMenu] = useState<MenuItem[]>([]);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [dataLoading, setDataLoading] = useState(true);
@@ -222,8 +228,58 @@ export function PosApp() {
             <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
             オンライン
           </div>
-          <div className="flex h-[34px] w-[34px] items-center justify-center rounded-full bg-secondary text-xs font-semibold">
-            TM
+          <div className="relative">
+            <button
+              onClick={() => setMenuOpen((v) => !v)}
+              className="flex h-[34px] w-[34px] items-center justify-center rounded-full bg-secondary text-xs font-semibold"
+            >
+              {me.display_name.slice(0, 2).toUpperCase()}
+            </button>
+            {menuOpen && (
+              <>
+                <button
+                  aria-label="close menu"
+                  onClick={() => setMenuOpen(false)}
+                  className="fixed inset-0 z-10 cursor-default"
+                />
+                <div className="absolute right-0 top-[calc(100%+8px)] z-20 w-56 rounded-xl border border-border bg-card py-1.5 shadow-lg">
+                  <div className="border-b border-border px-3.5 py-2.5">
+                    <div className="text-[13px] font-semibold">{me.display_name}</div>
+                    <div className="text-[11px] text-muted-foreground">
+                      {{ owner: 'オーナー', manager: 'マネージャー', staff: 'スタッフ' }[me.role]}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => router.push('/pos/settings')}
+                    className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary"
+                  >
+                    設定
+                  </button>
+                  <button
+                    onClick={() => router.push('/pos/table-layout')}
+                    className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary"
+                  >
+                    テーブルレイアウト
+                  </button>
+                  <button
+                    onClick={() => router.push('/pos/register-closing')}
+                    className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary"
+                  >
+                    レジ締め
+                  </button>
+                  {me.authMode === 'pos_native' && (
+                    <button
+                      onClick={() => {
+                        logoutPosStaff().finally(() => router.replace('/login'));
+                      }}
+                      className="block w-full border-t border-border px-3.5 py-2 text-left text-[12.5px] text-destructive hover:bg-secondary"
+                    >
+                      ログアウト
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>

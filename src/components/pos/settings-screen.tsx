@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { DEFAULT_SETTINGS, type PosSettings } from '@/lib/pos-types';
 import { useStaff } from './staff-context';
 import {
@@ -46,6 +47,7 @@ const ROLE_LABEL: Record<PosStaffRole, string> = { owner: 'オーナー', manage
 // GET/PUT /api/pos/settings (integration-spec.md 4.2) に対応する画面。
 // 保存は将来ここで supabase.from('settings').upsert(...) を叩く。
 export function SettingsScreen() {
+  const router = useRouter();
   const [tab, setTab] = useState<Tab>('general');
   const [settings, setSettings] = useState<PosSettings>(DEFAULT_SETTINGS);
   const [saved, setSaved] = useState(false);
@@ -58,9 +60,17 @@ export function SettingsScreen() {
   return (
     <div className="flex h-[800px] w-[1280px] flex-col overflow-hidden bg-background">
       <div className="flex h-16 flex-shrink-0 items-center justify-between border-b border-border px-6">
-        <div>
-          <div className="text-base font-bold">設定</div>
-          <div className="text-xs text-muted-foreground">店舗の各種設定を管理します</div>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => router.push('/pos')}
+            className="flex h-9 items-center gap-1 rounded-lg px-2.5 text-[12.5px] font-semibold text-muted-foreground hover:bg-secondary"
+          >
+            ← 戻る
+          </button>
+          <div>
+            <div className="text-base font-bold">設定</div>
+            <div className="text-xs text-muted-foreground">店舗の各種設定を管理します</div>
+          </div>
         </div>
         <button
           onClick={() => setSaved(true)}
