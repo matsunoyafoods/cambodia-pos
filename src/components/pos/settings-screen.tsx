@@ -201,7 +201,8 @@ export function SettingsScreen() {
 // API 側は manager 以上のみ許可しているので、こちらは UI 側の補助的なガード。
 function StaffTab() {
   const me = useStaff();
-  const canManage = me.role === 'owner' || me.role === 'manager';
+  const isPosNative = me.authMode === 'pos_native';
+  const canManage = isPosNative && (me.role === 'owner' || me.role === 'manager');
 
   const [staffList, setStaffList] = useState<PosStaffMember[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -220,6 +221,15 @@ function StaffTab() {
   useEffect(() => {
     if (canManage) load();
   }, [canManage, load]);
+
+  if (!isPosNative) {
+    return (
+      <div className="flex max-w-[560px] flex-col gap-3.5">
+        <div className="text-[15px] font-bold">スタッフ管理</div>
+        <PinLoginRequiredNote />
+      </div>
+    );
+  }
 
   if (!canManage) {
     return (
@@ -406,7 +416,8 @@ function ResetPinForm({ staffId, onDone }: { staffId: string; onDone: () => void
 // API 側は manager 以上のみ許可しているので、こちらは UI 側の補助的なガード。
 function MenuTab() {
   const me = useStaff();
-  const canManage = me.role === 'owner' || me.role === 'manager';
+  const isPosNative = me.authMode === 'pos_native';
+  const canManage = isPosNative && (me.role === 'owner' || me.role === 'manager');
 
   const [categories, setCategories] = useState<PosMenuCategory[] | null>(null);
   const [items, setItems] = useState<PosMenuItemRecord[] | null>(null);
@@ -430,6 +441,15 @@ function MenuTab() {
   useEffect(() => {
     if (canManage) load();
   }, [canManage, load]);
+
+  if (!isPosNative) {
+    return (
+      <div className="flex max-w-[560px] flex-col gap-3.5">
+        <div className="text-[15px] font-bold">メニュー・商品オプション</div>
+        <PinLoginRequiredNote />
+      </div>
+    );
+  }
 
   if (!canManage) {
     return (
@@ -839,6 +859,26 @@ function EditItemForm({
         </button>
       </div>
     </form>
+  );
+}
+
+// スタッフ管理・メニュー管理タブは POS ネイティブ (PIN ログイン) のセッションでのみ動作する。
+// matsunoya-dine 連携ログイン (Telegram bot-login) の Cookie は別オリジンのため
+// cambodia-pos のサーバー側からは見えず、API 側で認可できない (multi-tenant-productization-spec.md §3.4)。
+function PinLoginRequiredNote() {
+  const router = useRouter();
+  return (
+    <div className="flex flex-col gap-2 rounded-xl border border-amber-300 bg-amber-50 p-4">
+      <div className="text-[13px] leading-relaxed text-amber-900">
+        この機能はPINログインでのみご利用いただけます。現在 Telegram (matsunoya-dine) 連携ログインでアクセスしているため、一度PINでログインし直してください。
+      </div>
+      <button
+        onClick={() => router.push('/login')}
+        className="mt-1 h-[38px] w-fit rounded-lg bg-primary px-4 text-[12.5px] font-semibold text-primary-foreground"
+      >
+        PINでログインし直す
+      </button>
+    </div>
   );
 }
 
