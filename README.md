@@ -6,6 +6,7 @@ I'mHungry 454 (プノンペン) 店内会計・注文管理システム。matsun
 
 - `docs/cambodia-pos-spec.md`（matsunoya-dine リポジトリ内）— 機能スコープ・ハードウェア・Phase 分け
 - `docs/integration-spec.md`（matsunoya-dine リポジトリ内）— DB スキーマ (3.4章)・API 設計 (4章)
+- `docs/multi-tenant-productization-spec.md`（matsunoya-dine リポジトリ内）— I'mHungryアプリ/POS を別々に販売し、両方購入時のみ連携する マルチテナントSaaS化の設計方針 (2026-08-29〜)
 - 元 UI プロトタイプ: Cowork の design canvas アーティファクト（① 注文〜会計／② レジ締め／③ テーブルレイアウト／④ 設定）
 
 ## 現状 (このコミットの時点)
@@ -43,3 +44,6 @@ npm run dev
 6. 発注確定 (`POST /api/pos/orders`) を実装し、`completeOrder()` から実際に注文をサーバーへ送信するように差し替える（現状はローカル state 遷移のみで保存されない）
 7. `/pos/table-layout` 用の卓管理 API (`table-layouts`) を実装し、テーブル一覧・使用中/会計待ちステータスをデモデータから差し替える
 8. `/pos/settings` 画面を `getPosSettings`/`updatePosSettings` に接続（保存ボタンを実際の PUT に接続。manager 以上のみ保存可）
+9. [マルチテナントSaaS化 Phase A] `supabase/migrations/0002_pos_native_multitenant.sql` を作成済み・**未適用**。POS 単体運用用の `pos.stores`/`pos.staff`/`pos.menu_*`/`pos.integrations` を追加する (matsunoya-dine への依存なしで POS 単体を動かせるようにする第一歩)。適用しても松之屋フーズの現行運用への影響はない (新規テーブルが増えるだけ)。詳細は `docs/multi-tenant-productization-spec.md`
+10. [Phase B] POS 設定画面にメニュー登録・スタッフ PIN 管理の CRUD UI、PIN ログイン (`pos.staff`) を実装
+11. [Phase C] `pos.integrations` の連携ON/OFF 切り替えUIを実装し、既存の松之屋フーズ運用を「連携ON (`menu_source = 'dine_live'`)」として移行
