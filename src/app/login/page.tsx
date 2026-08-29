@@ -44,9 +44,15 @@ export default function LoginPage() {
     }
   }, [router]);
 
-  // 初回マウント時にも一度チェック（すでにログイン済みならすぐ /pos へ）
+  // 初回マウント時は POS ネイティブ (PIN) セッションのみ自動チェックする。
+  // dine (Telegram) セッションまで自動チェックしてしまうと、PIN ログインに
+  // 切り替えたくてこのページに来たユーザーが dine セッションですぐ /pos へ
+  // 押し戻されてしまう (スタッフ管理・メニュー管理画面から誘導されるケース)。
+  // dine 側のチェックは「ログイン状態を確認」ボタンを押した時のみ行う。
   useEffect(() => {
-    check();
+    checkPosStaffSession().then((posStaff) => {
+      if (posStaff) router.replace('/pos');
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
