@@ -11,6 +11,19 @@ import {
   type PosStaffMember,
   type PosStaffRole,
 } from '@/lib/staff-client';
+import {
+  createMenuCategory,
+  createMenuItem,
+  deleteMenuCategory,
+  deleteMenuItem,
+  listMenuCategories,
+  listMenuItems,
+  renameMenuCategory,
+  updateMenuItem,
+  PosMenuApiError,
+  type PosMenuCategory,
+  type PosMenuItemRecord,
+} from '@/lib/menu-client';
 
 type Tab = 'general' | 'printer' | 'payment' | 'staff' | 'menu' | 'layout';
 
@@ -159,13 +172,7 @@ export function SettingsScreen() {
 
           {tab === 'staff' && <StaffTab />}
 
-          {tab === 'menu' && (
-            <InfoNote
-              title="メニュー・商品オプション"
-              body="matsunoya-dine と連携している店舗は matsunoya-dine 管理画面が編集元です。POS単体で運用する店舗は、今後このタブでメニュー登録ができるようになります (対応予定)。"
-              cta="matsunoya-dine 管理画面を開く"
-            />
-          )}
+          {tab === 'menu' && <MenuTab />}
 
           {tab === 'layout' && (
             <InfoNote
@@ -380,6 +387,447 @@ function ResetPinForm({ staffId, onDone }: { staffId: string; onDone: () => void
         キャンセル
       </button>
       {error && <div className="text-xs text-destructive">{error}</div>}
+    </form>
+  );
+}
+
+// メニュー・商品オプションタブ: pos.menu_categories / pos.menu_items の実データを CRUD する
+// (POS単体運用モード用。matsunoya-dine 連携店舗は matsunoya-dine 管理画面が編集元のまま)。
+// API 側は manager 以上のみ許可しているので、こちらは UI 側の補助的なガード。
+function MenuTab() {
+  const me = useStaff();
+  const canManage = me.role === 'owner' || me.role === 'manager';
+
+  const [categories, setCategories] = useState<PosMenuCategory[] | null>(null);
+  const [items, setItems] = useState<PosMenuItemRecord[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [showAddCategory, setShowAddCategory] = useState(false);
+  const [showAddItem, setShowAddItem] = useState(false);
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    setLoadError(null);
+    Promise.all([listMenuCategories(), listMenuItems()])
+      .then(([c, i]) => {
+        setCategories(c.categories);
+        setItems(i.items);
+      })
+      .catch((err) => {
+        setLoadError(err instanceof PosMenuApiError ? err.message : 'メニューの取得に失敗しました');
+      });
+  }, []);
+
+  useEffect(() => {
+    if (canManage) load();
+  }, [canManage, load]);
+
+  if (!canManage) {
+    return (
+      <div className="flex max-w-[560px] flex-col gap-3.5">
+        <div className="text-[15px] font-bold">メニュー・商品オプション</div>
+        <div className="rounded-xl border border-border p-4 text-[13px] text-muted-foreground">
+          メニュー管理には manager 以上の権限が必要です。
+        </div>
+      </div>
+    );
+  }
+
+  const categoryName = (id: string | null) => (id ? (categories?.find((c) => c.id === id)?.name ?? '(不明なカテゴリ)') : '未分類');
+
+  async function handleDeleteCategory(id: string) {
+    try {
+      await deleteMenuCategory(id);
+      load();
+    } catch (err) {
+      setLoadError(err instanceof PosMenuApiError ? err.message : 'カテゴリの削除に失敗しました');
+    }
+  }
+
+  async function handleToggleActive(item: PosMenuItemRecord) {
+    try {
+      await updateMenuItem(item.id, { active: !item.active });
+      load();
+    } catch (err) {
+      setLoadError(err instanceof PosMenuApiError ? err.message : '更新に失敗しました');
+    }
+  }
+
+  async function handleDeleteItem(id: string) {
+    try {
+      await deleteMenuItem(id);
+      load();
+    } catch (err) {
+      setLoadError(err instanceof PosMenuApiError ? err.message : '商品の削除に失敗しました');
+    }
+  }
+
+  return (
+    <div className="flex max-w-[720px] flex-col gap-8">
+      <div>
+        <div className="text-[15px] font-bold">メニュー・商品オプション</div>
+        <div className="mt-1 text-[11.5px] text-muted-foreground">
+          POS単体で運用する店舗向けの設定です。matsunoya-dine と連携している店舗は matsunoya-dine 管理画面が編集元です。
+        </div>
+      </div>
+
+      {loadError && <div className="text-xs text-destructive">{loadError}</div>}
+
+      {/* カテゴリ */}
+      <div className="flex flex-col gap-2.5">
+        <div className="mb-0.5 flex items-center justify-between">
+          <div className="text-[13.5px] font-bold">カテゴリ</div>
+          <button
+            onClick={() => setShowAddCategory((v) => !v)}
+            className="h-8 rounded-lg border border-dashed border-brand px-3 text-[12px] font-semibold text-brand"
+          >
+            {showAddCategory ? 'キャンセル' : '＋ カテゴリを追加'}
+          </button>
+        </div>
+
+        {showAddCategory && (
+          <AddCategoryForm
+            onCreated={() => {
+              setShowAddCategory(false);
+              load();
+            }}
+          />
+        )}
+
+        {categories === null && !loadError && <div className="text-xs text-muted-foreground">読み込み中…</div>}
+        {categories?.length === 0 && (
+          <div className="rounded-xl border border-dashed border-border p-4 text-[13px] text-muted-foreground">
+            カテゴリが未登録です。「＋ カテゴリを追加」から登録してください。
+          </div>
+        )}
+        {categories && categories.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {categories.map((c) => (
+              <CategoryChip key={c.id} category={c} onRenamed={load} onDelete={() => handleDeleteCategory(c.id)} />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* 商品 */}
+      <div className="flex flex-col gap-2.5">
+        <div className="mb-0.5 flex items-center justify-between">
+          <div className="text-[13.5px] font-bold">商品一覧</div>
+          <button
+            onClick={() => setShowAddItem((v) => !v)}
+            disabled={!categories}
+            className="h-8 rounded-lg border border-dashed border-brand px-3 text-[12px] font-semibold text-brand disabled:opacity-50"
+          >
+            {showAddItem ? 'キャンセル' : '＋ 商品を追加'}
+          </button>
+        </div>
+
+        {showAddItem && categories && (
+          <AddItemForm
+            categories={categories}
+            onCreated={() => {
+              setShowAddItem(false);
+              load();
+            }}
+          />
+        )}
+
+        {items === null && !loadError && <div className="text-xs text-muted-foreground">読み込み中…</div>}
+        {items?.length === 0 && (
+          <div className="rounded-xl border border-dashed border-border p-4 text-[13px] text-muted-foreground">
+            商品が未登録です。「＋ 商品を追加」から登録してください。
+          </div>
+        )}
+
+        {items?.map((item) => (
+          <div key={item.id} className="rounded-xl border border-border px-4 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <div className={'truncate text-[13px] font-semibold ' + (item.active ? '' : 'text-muted-foreground line-through')}>
+                    {item.name}
+                  </div>
+                  {!item.active && (
+                    <span className="rounded bg-secondary px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">非表示</span>
+                  )}
+                </div>
+                <div className="mt-0.5 text-[11.5px] text-muted-foreground">
+                  {categoryName(item.category_id)} ・ ${item.price.toFixed(2)}
+                </div>
+              </div>
+              <div className="flex flex-shrink-0 items-center gap-2">
+                <button
+                  onClick={() => handleToggleActive(item)}
+                  className="h-8 rounded-lg border border-border px-3 text-xs font-semibold"
+                >
+                  {item.active ? '非表示にする' : '再表示する'}
+                </button>
+                <button
+                  onClick={() => setEditingItemId((v) => (v === item.id ? null : item.id))}
+                  className="h-8 rounded-lg border border-border px-3 text-xs font-semibold"
+                >
+                  編集
+                </button>
+                <button
+                  onClick={() => handleDeleteItem(item.id)}
+                  className="h-8 rounded-lg border border-border px-3 text-xs font-semibold text-destructive"
+                >
+                  削除
+                </button>
+              </div>
+            </div>
+            {editingItemId === item.id && categories && (
+              <EditItemForm
+                item={item}
+                categories={categories}
+                onDone={() => {
+                  setEditingItemId(null);
+                  load();
+                }}
+              />
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function AddCategoryForm({ onCreated }: { onCreated: () => void }) {
+  const [name, setName] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!name.trim()) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      await createMenuCategory(name.trim());
+      onCreated();
+    } catch (err) {
+      setError(err instanceof PosMenuApiError ? err.message : '登録に失敗しました');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="flex items-center gap-2.5 rounded-xl border border-border bg-secondary/40 p-3">
+      <input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder="カテゴリ名 (例: メイン)"
+        className="h-9 flex-1 rounded-lg border border-border px-3 text-[13px]"
+      />
+      {error && <div className="text-xs text-destructive">{error}</div>}
+      <button
+        type="submit"
+        disabled={submitting || !name.trim()}
+        className="h-9 rounded-lg bg-primary px-4 text-[12.5px] font-semibold text-primary-foreground disabled:opacity-60"
+      >
+        {submitting ? '登録中…' : '登録'}
+      </button>
+    </form>
+  );
+}
+
+function CategoryChip({
+  category,
+  onRenamed,
+  onDelete,
+}: {
+  category: PosMenuCategory;
+  onRenamed: () => void;
+  onDelete: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(category.name);
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!name.trim() || name.trim() === category.name) {
+      setEditing(false);
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await renameMenuCategory(category.id, name.trim());
+      setEditing(false);
+      onRenamed();
+    } catch {
+      // 失敗時は元の名前に戻す (エラーは上位の loadError には出さず、ここではシンプルに黙って戻す)
+      setName(category.name);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (editing) {
+    return (
+      <form onSubmit={submit} className="flex items-center gap-1.5 rounded-full border border-border bg-card px-2 py-1">
+        <input
+          autoFocus
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onBlur={submit}
+          className="h-6 w-28 rounded border border-border px-1.5 text-[12px]"
+        />
+      </form>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-1 rounded-full border border-border bg-card py-1 pl-3 pr-1.5">
+      <button onClick={() => setEditing(true)} disabled={submitting} className="text-[12.5px] font-semibold">
+        {category.name}
+      </button>
+      <button
+        onClick={onDelete}
+        className="flex h-5 w-5 items-center justify-center rounded-full text-[11px] text-muted-foreground hover:text-destructive"
+        title="カテゴリを削除"
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
+function AddItemForm({ categories, onCreated }: { categories: PosMenuCategory[]; onCreated: () => void }) {
+  const [name, setName] = useState('');
+  const [price, setPrice] = useState('');
+  const [categoryId, setCategoryId] = useState<string>(categories[0]?.id ?? '');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const priceValue = parseFloat(price);
+    if (!name.trim() || !Number.isFinite(priceValue) || priceValue < 0) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      await createMenuItem({ categoryId: categoryId || null, name: name.trim(), price: priceValue });
+      onCreated();
+    } catch (err) {
+      setError(err instanceof PosMenuApiError ? err.message : '登録に失敗しました');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="flex flex-col gap-2.5 rounded-xl border border-border bg-secondary/40 p-4">
+      <div className="flex gap-2.5">
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="商品名"
+          className="h-10 flex-1 rounded-lg border border-border px-3 text-[13.5px]"
+        />
+        <input
+          value={price}
+          onChange={(e) => setPrice(e.target.value)}
+          inputMode="decimal"
+          placeholder="価格 ($)"
+          className="h-10 w-28 rounded-lg border border-border px-3 text-[13.5px]"
+        />
+        <select
+          value={categoryId}
+          onChange={(e) => setCategoryId(e.target.value)}
+          className="h-10 w-40 rounded-lg border border-border px-3 text-[13.5px]"
+        >
+          {categories.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+      </div>
+      {error && <div className="text-xs text-destructive">{error}</div>}
+      <button
+        type="submit"
+        disabled={submitting || !name.trim() || !price}
+        className="h-9 w-fit rounded-lg bg-primary px-4 text-[12.5px] font-semibold text-primary-foreground disabled:opacity-60"
+      >
+        {submitting ? '登録中…' : '登録する'}
+      </button>
+    </form>
+  );
+}
+
+function EditItemForm({
+  item,
+  categories,
+  onDone,
+}: {
+  item: PosMenuItemRecord;
+  categories: PosMenuCategory[];
+  onDone: () => void;
+}) {
+  const [name, setName] = useState(item.name);
+  const [price, setPrice] = useState(String(item.price));
+  const [categoryId, setCategoryId] = useState<string>(item.category_id ?? '');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const priceValue = parseFloat(price);
+    if (!name.trim() || !Number.isFinite(priceValue) || priceValue < 0) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      await updateMenuItem(item.id, { name: name.trim(), price: priceValue, categoryId: categoryId || null });
+      onDone();
+    } catch (err) {
+      setError(err instanceof PosMenuApiError ? err.message : '更新に失敗しました');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="mt-3 flex flex-col gap-2.5 border-t border-border pt-3">
+      <div className="flex gap-2.5">
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className="h-9 flex-1 rounded-lg border border-border px-3 text-[13px]"
+        />
+        <input
+          value={price}
+          onChange={(e) => setPrice(e.target.value)}
+          inputMode="decimal"
+          className="h-9 w-24 rounded-lg border border-border px-3 text-[13px]"
+        />
+        <select
+          value={categoryId}
+          onChange={(e) => setCategoryId(e.target.value)}
+          className="h-9 w-36 rounded-lg border border-border px-3 text-[13px]"
+        >
+          <option value="">未分類</option>
+          {categories.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+      </div>
+      {error && <div className="text-xs text-destructive">{error}</div>}
+      <div className="flex gap-2">
+        <button
+          type="submit"
+          disabled={submitting}
+          className="h-9 rounded-lg bg-primary px-3 text-xs font-semibold text-primary-foreground disabled:opacity-60"
+        >
+          {submitting ? '保存中…' : '保存'}
+        </button>
+        <button type="button" onClick={onDone} className="h-9 rounded-lg border border-border px-3 text-xs font-semibold">
+          キャンセル
+        </button>
+      </div>
     </form>
   );
 }
