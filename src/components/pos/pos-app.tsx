@@ -80,6 +80,11 @@ export function PosApp() {
   // ローカルの新規ラウンド分 (これはこれまで通り画面遷移で失われうる = 意図通りの挙動)。
   const [currentOrder, setCurrentOrder] = useState<OpenOrderRecord | null>(null);
   const [confirmedItems, setConfirmedItems] = useState<OrderItemRecord[]>([]);
+  // 会計完了時点の合計額のスナップショット。totals は confirmedItems から算出される
+  // (useMemo) ため、会計完了後に confirmedItems を空にすると totals.total も 0 に戻ってしまい、
+  // レシート画面にそのまま totals.total を渡すと $0.00 と表示されてしまう。そのためレシート
+  // 表示用にこの値だけ別で保持する。
+  const [receiptTotal, setReceiptTotal] = useState(0);
   const [guestModalOpen, setGuestModalOpen] = useState(false);
   const [pendingTapItem, setPendingTapItem] = useState<MenuItem | null>(null);
   const [guestSaving, setGuestSaving] = useState(false);
@@ -482,6 +487,7 @@ export function PosApp() {
           /* 反映失敗時は次回ポーリングで補正される */
         });
       }
+      setReceiptTotal(totals.total);
       setCurrentOrder(null);
       setConfirmedItems([]);
       setScreen('receipt');
@@ -540,9 +546,12 @@ export function PosApp() {
           <div className="relative">
             <button
               onClick={() => setMenuOpen((v) => !v)}
-              className="flex h-[34px] w-[34px] items-center justify-center rounded-full bg-secondary text-xs font-semibold"
+              aria-label="メニュー"
+              className="flex h-[34px] w-[34px] flex-col items-center justify-center gap-[3px] rounded-full bg-secondary"
             >
-              {me.display_name.slice(0, 2).toUpperCase()}
+              <span className="h-[2px] w-4 rounded-full bg-foreground" />
+              <span className="h-[2px] w-4 rounded-full bg-foreground" />
+              <span className="h-[2px] w-4 rounded-full bg-foreground" />
             </button>
             {menuOpen && (
               <>
@@ -679,7 +688,7 @@ export function PosApp() {
       )}
 
       {screen === 'receipt' && (
-        <ReceiptScreen selectedTable={selectedTable} total={totals.total} onNewOrder={newOrder} />
+        <ReceiptScreen selectedTable={selectedTable} total={receiptTotal} onNewOrder={newOrder} />
       )}
 
       {guestModalOpen && (

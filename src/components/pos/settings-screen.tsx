@@ -953,8 +953,12 @@ function AddCategoryForm({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
+  // これは <form> にしない。CategoryCascadeSelect 経由で AddItemForm / EditItemForm の
+  // <form> の中に入れ子で描画されることがあり (商品編集フォーム内の「＋ 追加する」)、
+  // <form> の中に <form> を置くとブラウザのネイティブ送信 (フルページ遷移で
+  // /pos/settings? へ GET され、編集中の内容が全て消える) を引き起こすことを実際の
+  // 動作確認で確認したため。ボタンクリック・Enter キーどちらも直接ハンドラを呼ぶだけにする。
+  async function submitCategory() {
     if (!name.trim()) return;
     setSubmitting(true);
     setError(null);
@@ -969,22 +973,29 @@ function AddCategoryForm({
   }
 
   return (
-    <form onSubmit={submit} className="flex items-center gap-2.5 rounded-xl border border-border bg-secondary/40 p-3">
+    <div className="flex items-center gap-2.5 rounded-xl border border-border bg-secondary/40 p-3">
       <input
         value={name}
         onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            submitCategory();
+          }
+        }}
         placeholder={placeholder ?? 'カテゴリ名'}
         className="h-9 flex-1 rounded-lg border border-border px-3 text-[13px]"
       />
       {error && <div className="text-xs text-destructive">{error}</div>}
       <button
-        type="submit"
+        type="button"
+        onClick={submitCategory}
         disabled={submitting || !name.trim()}
         className="h-9 rounded-lg bg-primary px-4 text-[12.5px] font-semibold text-primary-foreground disabled:opacity-60"
       >
         {submitting ? '登録中…' : '登録'}
       </button>
-    </form>
+    </div>
   );
 }
 
