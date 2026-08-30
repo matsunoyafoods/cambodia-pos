@@ -21,6 +21,8 @@ export type MenuItem = {
   name: string;
   price: number;
   optionGroups?: OptionGroup[];
+  /** ハッピーアワー中のみ使う基準価格 (未設定 = ハッピーアワー対象外の商品) */
+  happyHourPrice?: number;
 };
 
 export type SelectedOption = {
@@ -59,6 +61,10 @@ export type PosSettings = {
   cashEnabled: boolean;
   qrEnabled: boolean;
   cardEnabled: boolean;
+  /** ハッピーアワー (時間帯価格) 設定。対象商品は pos.menu_items.happy_hour_price 側で管理 */
+  happyHourEnabled: boolean;
+  happyHourStart: string; // 'HH:MM' (店舗タイムゾーン基準)
+  happyHourEnd: string; // 'HH:MM'
 };
 
 export const DEFAULT_SETTINGS: PosSettings = {
@@ -69,4 +75,7 @@ export const DEFAULT_SETTINGS: PosSettings = {
   cashEnabled: true,
   qrEnabled: true,
   cardEnabled: true,
+  happyHourEnabled: true,
+  happyHourStart: '17:00',
+  happyHourEnd: '19:00',
 };

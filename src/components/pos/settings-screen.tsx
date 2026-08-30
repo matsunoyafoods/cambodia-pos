@@ -105,8 +105,28 @@ export function SettingsScreen() {
     setSaveError(null);
     try {
       if (isPosNative) {
-        const { vatRate, serviceRate, khrRate, cashEnabled, qrEnabled, cardEnabled } = settings;
-        const s = await updateGeneralSettings({ vatRate, serviceRate, khrRate, cashEnabled, qrEnabled, cardEnabled });
+        const {
+          vatRate,
+          serviceRate,
+          khrRate,
+          cashEnabled,
+          qrEnabled,
+          cardEnabled,
+          happyHourEnabled,
+          happyHourStart,
+          happyHourEnd,
+        } = settings;
+        const s = await updateGeneralSettings({
+          vatRate,
+          serviceRate,
+          khrRate,
+          cashEnabled,
+          qrEnabled,
+          cardEnabled,
+          happyHourEnabled,
+          happyHourStart,
+          happyHourEnd,
+        });
         setSettings((prev) => ({ ...prev, ...s }));
       } else {
         const { vatRate, serviceRate, khrRate, cashEnabled, qrEnabled, cardEnabled } = settings;
@@ -207,6 +227,44 @@ export function SettingsScreen() {
                   レジ締め・会計画面のKHR自動計算に使用されます。日次で更新してください。
                 </div>
               </Field>
+
+              {isPosNative && (
+                <>
+                  <div className="mt-2 border-t border-border pt-4 text-[13.5px] font-bold">
+                    ハッピーアワー (時間帯価格)
+                  </div>
+                  <div className="text-[11.5px] text-muted-foreground">
+                    対象商品(生ビール グラス・ARAWAZA・DAIYAME・いいちこ・カンポットハイボール)は、下記の時間帯のみ自動で割引価格になります。
+                  </div>
+                  <ToggleRow
+                    name="ハッピーアワーを有効にする"
+                    desc="OFFにすると時間帯にかかわらず通常価格のまま"
+                    on={settings.happyHourEnabled}
+                    disabled={!canManageSettings}
+                    onToggle={() => update('happyHourEnabled', !settings.happyHourEnabled)}
+                  />
+                  <div className="flex items-center gap-3">
+                    <Field label="開始時刻">
+                      <input
+                        type="time"
+                        value={settings.happyHourStart}
+                        disabled={!canManageSettings || !settings.happyHourEnabled}
+                        onChange={(e) => update('happyHourStart', e.target.value)}
+                        className="h-10 w-36 rounded-lg border border-border px-3 text-[13.5px] disabled:opacity-60"
+                      />
+                    </Field>
+                    <Field label="終了時刻">
+                      <input
+                        type="time"
+                        value={settings.happyHourEnd}
+                        disabled={!canManageSettings || !settings.happyHourEnabled}
+                        onChange={(e) => update('happyHourEnd', e.target.value)}
+                        className="h-10 w-36 rounded-lg border border-border px-3 text-[13.5px] disabled:opacity-60"
+                      />
+                    </Field>
+                  </div>
+                </>
+              )}
             </div>
           )}
 

@@ -21,6 +21,7 @@ import {
   startTableStay,
   type TableSessionRecord,
 } from '@/lib/table-session-client';
+import { effectiveBasePrice, isHappyHourNow } from '@/lib/happy-hour';
 import { logoutPosStaff } from '@/lib/staff-client';
 import { useStaff } from './staff-context';
 import { TableMapScreen } from './table-map-screen';
@@ -162,6 +163,14 @@ export function PosApp() {
     return status;
   }, [tableSessions, screen, selectedTable]);
 
+  // ハッピーアワー判定用の「現在時刻」。時間帯をまたいだ時にすぐ切り替わるよう定期的に更新する。
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 30000);
+    return () => clearInterval(id);
+  }, []);
+  const happyHourActive = useMemo(() => isHappyHourNow(settings, now), [settings, now]);
+
   function upsertLocalSession(tableCode: string, patch: Partial<TableSessionRecord>) {
     setTableSessions((prev) => {
       const idx = prev.findIndex((s) => s.table_code === tableCode);
@@ -243,10 +252,11 @@ export function PosApp() {
 
   function addToCart(item: MenuItem) {
     onOrderItemEntered(item);
+    const unitPrice = effectiveBasePrice(item, happyHourActive);
     setCart((prev) => {
       const existing = prev.find((l) => l.id === item.id);
       if (existing) return prev.map((l) => (l.id === item.id ? { ...l, qty: l.qty + 1 } : l));
-      return [...prev, { id: item.id, menuId: item.id, name: item.name, unitPrice: item.price, qty: 1, selectedOptions: [] }];
+      return [...prev, { id: item.id, menuId: item.id, name: item.name, unitPrice, qty: 1, selectedOptions: [] }];
     });
   }
 
@@ -280,7 +290,7 @@ export function PosApp() {
       .map((g) => g.choices.find((c) => c.id === optionSelection[g.key])?.label ?? '')
       .join('・');
     const lineId = optionModalItem.id + ':' + groups.map((g) => optionSelection[g.key]).join(',');
-    const unitPrice = optionModalItem.price + priceDeltaTotal;
+    const unitPrice = effectiveBasePrice(optionModalItem, happyHourActive) + priceDeltaTotal;
     const selectedOptions = groups.map((g) => {
       const choice = g.choices.find((c) => c.id === optionSelection[g.key])!;
       return { groupKey: g.key, groupLabel: g.label, choiceId: choice.id, choiceLabel: choice.label, priceDelta: choice.priceDelta };
@@ -393,6 +403,12 @@ export function PosApp() {
                     テーブルレイアウト
                   </button>
                   <button
+                    onClick={() => router.push('/pos/reservations')}
+                    className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary"
+                  >
+                    予約受付
+                  </button>
+                  <button
                     onClick={() => router.push('/pos/register-closing')}
                     className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary"
                   >
@@ -430,6 +446,7 @@ export function PosApp() {
         <OrderScreen
           selectedTable={selectedTable}
           session={tableSessions.find((s) => s.table_code === selectedTable) ?? null}
+          happyHourActive={happyHourActive}
           menu={menu}
           categories={categories}
           activeCategory={activeCategory}

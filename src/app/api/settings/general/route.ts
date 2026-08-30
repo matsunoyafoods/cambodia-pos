@@ -20,6 +20,10 @@ function toPosSettings(storeId: string, raw: unknown): PosSettings {
     cashEnabled: typeof stored.cashEnabled === 'boolean' ? stored.cashEnabled : DEFAULT_SETTINGS.cashEnabled,
     qrEnabled: typeof stored.qrEnabled === 'boolean' ? stored.qrEnabled : DEFAULT_SETTINGS.qrEnabled,
     cardEnabled: typeof stored.cardEnabled === 'boolean' ? stored.cardEnabled : DEFAULT_SETTINGS.cardEnabled,
+    happyHourEnabled:
+      typeof stored.happyHourEnabled === 'boolean' ? stored.happyHourEnabled : DEFAULT_SETTINGS.happyHourEnabled,
+    happyHourStart: typeof stored.happyHourStart === 'string' ? stored.happyHourStart : DEFAULT_SETTINGS.happyHourStart,
+    happyHourEnd: typeof stored.happyHourEnd === 'string' ? stored.happyHourEnd : DEFAULT_SETTINGS.happyHourEnd,
   };
 }
 
@@ -35,6 +39,8 @@ export const GET = withPosStaff('staff', async () => {
   return NextResponse.json(toPosSettings(storeId, data?.settings));
 });
 
+const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+
 const patchSchema = z.object({
   vatRate: z.number().min(0).max(100).optional(),
   serviceRate: z.number().min(0).max(100).optional(),
@@ -42,6 +48,9 @@ const patchSchema = z.object({
   cashEnabled: z.boolean().optional(),
   qrEnabled: z.boolean().optional(),
   cardEnabled: z.boolean().optional(),
+  happyHourEnabled: z.boolean().optional(),
+  happyHourStart: z.string().regex(HHMM_RE, 'HH:MM 形式で入力してください').optional(),
+  happyHourEnd: z.string().regex(HHMM_RE, 'HH:MM 形式で入力してください').optional(),
 });
 
 // 更新。manager 以上のみ。

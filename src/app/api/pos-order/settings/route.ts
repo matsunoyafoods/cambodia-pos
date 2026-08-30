@@ -25,6 +25,10 @@ export async function GET() {
     cashEnabled: typeof stored.cashEnabled === 'boolean' ? stored.cashEnabled : DEFAULT_SETTINGS.cashEnabled,
     qrEnabled: typeof stored.qrEnabled === 'boolean' ? stored.qrEnabled : DEFAULT_SETTINGS.qrEnabled,
     cardEnabled: typeof stored.cardEnabled === 'boolean' ? stored.cardEnabled : DEFAULT_SETTINGS.cardEnabled,
+    happyHourEnabled:
+      typeof stored.happyHourEnabled === 'boolean' ? stored.happyHourEnabled : DEFAULT_SETTINGS.happyHourEnabled,
+    happyHourStart: typeof stored.happyHourStart === 'string' ? stored.happyHourStart : DEFAULT_SETTINGS.happyHourStart,
+    happyHourEnd: typeof stored.happyHourEnd === 'string' ? stored.happyHourEnd : DEFAULT_SETTINGS.happyHourEnd,
   };
   return NextResponse.json(settings);
 }

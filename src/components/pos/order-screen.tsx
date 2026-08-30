@@ -5,6 +5,7 @@ import type { CartLine, MenuItem } from '@/lib/pos-types';
 import { money } from '@/lib/money';
 import type { TableSessionRecord } from '@/lib/table-session-client';
 import { drinkTimerState, elapsedMinutes, formatDuration } from '@/lib/table-timer';
+import { effectiveBasePrice } from '@/lib/happy-hour';
 
 function OrderHeaderTimers({ session }: { session: TableSessionRecord | null }) {
   const [, tick] = useState(0);
@@ -45,6 +46,7 @@ function OrderHeaderTimers({ session }: { session: TableSessionRecord | null }) 
 export function OrderScreen({
   selectedTable,
   session,
+  happyHourActive,
   menu,
   categories,
   activeCategory,
@@ -63,6 +65,7 @@ export function OrderScreen({
 }: {
   selectedTable: string | null;
   session: TableSessionRecord | null;
+  happyHourActive: boolean;
   menu: MenuItem[];
   categories: string[];
   activeCategory: string;
@@ -121,7 +124,9 @@ export function OrderScreen({
         <div className="grid flex-1 auto-rows-min grid-cols-3 gap-3 overflow-auto p-5">
           {items.map((m) => {
             const hasOptions = !!(m.optionGroups && m.optionGroups.length);
-            let priceLabel = money(m.price);
+            const isHappyHourItem = happyHourActive && typeof m.happyHourPrice === 'number';
+            const basePrice = effectiveBasePrice(m, happyHourActive);
+            let priceLabel = money(basePrice);
             if (hasOptions) {
               const minDelta = m.optionGroups!.reduce(
                 (s, g) => s + Math.min(...g.choices.map((c) => c.priceDelta)),
@@ -133,14 +138,17 @@ export function OrderScreen({
               );
               priceLabel =
                 minDelta === maxDelta
-                  ? money(m.price + minDelta)
-                  : `${money(m.price + minDelta)}〜${money(m.price + maxDelta)}`;
+                  ? money(basePrice + minDelta)
+                  : `${money(basePrice + minDelta)}〜${money(basePrice + maxDelta)}`;
             }
             return (
               <button
                 key={m.id}
                 onClick={() => onAddItem(m)}
-                className="flex flex-col gap-6 rounded-xl border border-border bg-card p-3.5 text-left"
+                className={
+                  'flex flex-col gap-6 rounded-xl border p-3.5 text-left ' +
+                  (isHappyHourItem ? 'border-amber-300 bg-amber-50' : 'border-border bg-card')
+                }
               >
                 <div className="flex h-16 items-center justify-center rounded-lg bg-secondary text-muted-foreground">
                   🍽
@@ -153,6 +161,9 @@ export function OrderScreen({
                     </div>
                   </div>
                   {hasOptions && <div className="text-[10px] text-muted-foreground">オプションあり</div>}
+                  {isHappyHourItem && (
+                    <div className="text-[10px] font-semibold text-amber-700">🍻 ハッピーアワー価格</div>
+                  )}
                 </div>
               </button>
             );
