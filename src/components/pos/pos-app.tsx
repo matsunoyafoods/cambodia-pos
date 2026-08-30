@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import type { CartLine, MenuItem, PaymentMethod, TableStatus } from '@/lib/pos-types';
 import { DEFAULT_SETTINGS } from '@/lib/pos-types';
 import { getPosMenus, getPosSettings, PosApiError } from '@/lib/api-client';
+import { getPosOrderMenu, getPosOrderMode, getPosOrderSettings, PosOrderApiError } from '@/lib/pos-order-client';
 import { logoutPosStaff } from '@/lib/staff-client';
 import { useStaff } from './staff-context';
 import { TableMapScreen } from './table-map-screen';
@@ -54,29 +55,40 @@ export function PosApp() {
     return seen;
   }, [menu]);
 
-  // GET /api/pos/menus + /api/pos/settings (matsunoya-dine 側) から実データを取得。
+  // Phase C: まず /api/pos-order/mode (POS_STORE_ID 店舗の pos.integrations.menu_source) を見て、
+  // 'pos_native' なら POS ネイティブの実データ (pos.menu_items 等) を、それ以外 (未移行 = 'dine_live')
+  // なら従来通り matsunoya-dine 側の /api/pos/menus + /api/pos/settings を使う。
+  // 連携先を切り替えていない既存店舗の挙動は変わらない (multi-tenant-productization-spec.md Phase C)。
   // loadToken を更新すると再フェッチする (エラー時の「再読み込み」ボタン用)。
   useEffect(() => {
     let cancelled = false;
     setDataLoading(true);
     setDataError(null);
-    Promise.all([getPosMenus(), getPosSettings()])
-      .then(([menuData, settingsData]) => {
-        if (cancelled) return;
-        setMenu(menuData.map((m) => ({ ...m, category: m.category ?? '未分類' })));
-        setSettings((prev) => ({ ...prev, ...settingsData }));
-      })
-      .catch((err) => {
+    (async () => {
+      try {
+        const { menuSource } = await getPosOrderMode();
+        if (menuSource === 'pos_native') {
+          const [menuData, settingsData] = await Promise.all([getPosOrderMenu(), getPosOrderSettings()]);
+          if (cancelled) return;
+          setMenu(menuData.items);
+          setSettings((prev) => ({ ...prev, ...settingsData }));
+        } else {
+          const [menuData, settingsData] = await Promise.all([getPosMenus(), getPosSettings()]);
+          if (cancelled) return;
+          setMenu(menuData.map((m) => ({ ...m, category: m.category ?? '未分類' })));
+          setSettings((prev) => ({ ...prev, ...settingsData }));
+        }
+      } catch (err) {
         if (cancelled) return;
         const message =
-          err instanceof PosApiError
+          err instanceof PosApiError || err instanceof PosOrderApiError
             ? err.message
             : 'メニュー・設定の取得に失敗しました。通信環境を確認してください。';
         setDataError(message);
-      })
-      .finally(() => {
+      } finally {
         if (!cancelled) setDataLoading(false);
-      });
+      }
+    })();
     return () => {
       cancelled = true;
     };

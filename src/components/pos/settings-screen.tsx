@@ -3,6 +3,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { DEFAULT_SETTINGS, type PosSettings } from '@/lib/pos-types';
+import { getPosSettings, updatePosSettings, PosApiError } from '@/lib/api-client';
+import {
+  getGeneralSettings,
+  getIntegrationSettings,
+  updateGeneralSettings,
+  updateIntegrationSettings,
+  PosSettingsApiError,
+  type IntegrationMode,
+} from '@/lib/settings-client';
 import { useStaff } from './staff-context';
 import {
   createStaff,
@@ -35,7 +44,7 @@ import {
   type PosMenuOptionGroup,
 } from '@/lib/menu-client';
 
-type Tab = 'general' | 'printer' | 'payment' | 'staff' | 'menu' | 'layout';
+type Tab = 'general' | 'printer' | 'payment' | 'staff' | 'menu' | 'layout' | 'integration';
 
 const NAV: { key: Tab; label: string }[] = [
   { key: 'general', label: '一般設定' },
@@ -44,6 +53,7 @@ const NAV: { key: Tab; label: string }[] = [
   { key: 'staff', label: 'スタッフ管理' },
   { key: 'menu', label: 'メニュー・商品オプション' },
   { key: 'layout', label: 'テーブルレイアウト' },
+  { key: 'integration', label: '連携設定' },
 ];
 
 const PRINTERS = [
@@ -54,16 +64,63 @@ const PRINTERS = [
 const ROLE_LABEL: Record<PosStaffRole, string> = { owner: 'オーナー', manager: 'マネージャー', staff: 'スタッフ' };
 
 // GET/PUT /api/pos/settings (integration-spec.md 4.2) に対応する画面。
-// 保存は将来ここで supabase.from('settings').upsert(...) を叩く。
+// dine 連携店舗 (authMode 'dine') は matsunoya-dine 側の /api/pos/settings (api-client.ts) が
+// Source of Truth。POS ネイティブ店舗 (authMode 'pos_native') は /api/settings/general
+// (pos.stores.settings) に保存する。既存の dine 連携動作は変えない。
 export function SettingsScreen() {
   const router = useRouter();
+  const me = useStaff();
+  const isPosNative = me.authMode === 'pos_native';
+  const canManageSettings = !isPosNative || me.role === 'owner' || me.role === 'manager';
+
   const [tab, setTab] = useState<Tab>('general');
   const [settings, setSettings] = useState<PosSettings>(DEFAULT_SETTINGS);
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const s = isPosNative ? await getGeneralSettings() : await getPosSettings();
+        if (!cancelled) setSettings((prev) => ({ ...prev, ...s }));
+      } catch {
+        // 取得に失敗しても DEFAULT_SETTINGS のまま編集は続けられる。保存時にエラーを出す。
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isPosNative]);
 
   function update<K extends keyof PosSettings>(key: K, value: PosSettings[K]) {
     setSettings((prev) => ({ ...prev, [key]: value }));
     setSaved(false);
+    setSaveError(null);
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      if (isPosNative) {
+        const { vatRate, serviceRate, khrRate, cashEnabled, qrEnabled, cardEnabled } = settings;
+        const s = await updateGeneralSettings({ vatRate, serviceRate, khrRate, cashEnabled, qrEnabled, cardEnabled });
+        setSettings((prev) => ({ ...prev, ...s }));
+      } else {
+        const { vatRate, serviceRate, khrRate, cashEnabled, qrEnabled, cardEnabled } = settings;
+        const s = await updatePosSettings({ vatRate, serviceRate, khrRate, cashEnabled, qrEnabled, cardEnabled });
+        setSettings((prev) => ({ ...prev, ...s }));
+      }
+      setSaved(true);
+    } catch (err) {
+      const message =
+        err instanceof PosSettingsApiError || err instanceof PosApiError ? err.message : '保存に失敗しました';
+      setSaveError(message);
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -81,15 +138,21 @@ export function SettingsScreen() {
             <div className="text-xs text-muted-foreground">店舗の各種設定を管理します</div>
           </div>
         </div>
-        <button
-          onClick={() => setSaved(true)}
-          className={
-            'h-10 rounded-lg px-4.5 text-[13.5px] font-bold ' +
-            (saved ? 'bg-emerald-100 text-emerald-600' : 'bg-primary text-primary-foreground')
-          }
-        >
-          {saved ? '保存しました ✓' : '保存'}
-        </button>
+        <div className="flex items-center gap-2.5">
+          {saveError && <div className="text-xs text-destructive">{saveError}</div>}
+          {(tab === 'general' || tab === 'payment') && (
+            <button
+              onClick={handleSave}
+              disabled={saving || !canManageSettings}
+              className={
+                'h-10 rounded-lg px-4.5 text-[13.5px] font-bold disabled:opacity-60 ' +
+                (saved ? 'bg-emerald-100 text-emerald-600' : 'bg-primary text-primary-foreground')
+              }
+            >
+              {saving ? '保存中…' : saved ? '保存しました ✓' : '保存'}
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="flex flex-1 overflow-hidden">
@@ -112,25 +175,33 @@ export function SettingsScreen() {
           {tab === 'general' && (
             <div className="flex max-w-[520px] flex-col gap-5">
               <div className="text-[15px] font-bold">一般設定</div>
+              {!canManageSettings && (
+                <div className="rounded-xl border border-border p-3 text-[12.5px] text-muted-foreground">
+                  一般設定の変更には manager 以上の権限が必要です。
+                </div>
+              )}
               <Field label="VAT率 (%)">
                 <input
                   value={settings.vatRate}
+                  disabled={!canManageSettings}
                   onChange={(e) => update('vatRate', parseFloat(e.target.value) || 0)}
-                  className="h-10 w-40 rounded-lg border border-border px-3 text-[13.5px]"
+                  className="h-10 w-40 rounded-lg border border-border px-3 text-[13.5px] disabled:opacity-60"
                 />
               </Field>
               <Field label="サービス料率 (%)">
                 <input
                   value={settings.serviceRate}
+                  disabled={!canManageSettings}
                   onChange={(e) => update('serviceRate', parseFloat(e.target.value) || 0)}
-                  className="h-10 w-40 rounded-lg border border-border px-3 text-[13.5px]"
+                  className="h-10 w-40 rounded-lg border border-border px-3 text-[13.5px] disabled:opacity-60"
                 />
               </Field>
               <Field label="参考為替レート (1 USD = ? KHR)">
                 <input
                   value={settings.khrRate}
+                  disabled={!canManageSettings}
                   onChange={(e) => update('khrRate', parseInt(e.target.value, 10) || 0)}
-                  className="h-10 w-40 rounded-lg border border-border px-3 text-[13.5px]"
+                  className="h-10 w-40 rounded-lg border border-border px-3 text-[13.5px] disabled:opacity-60"
                 />
                 <div className="mt-1.5 text-[11px] text-muted-foreground">
                   レジ締め・会計画面のKHR自動計算に使用されます。日次で更新してください。
@@ -168,22 +239,30 @@ export function SettingsScreen() {
           {tab === 'payment' && (
             <div className="flex max-w-[560px] flex-col gap-2.5">
               <div className="mb-1.5 text-[15px] font-bold">決済設定</div>
+              {!canManageSettings && (
+                <div className="mb-1 rounded-xl border border-border p-3 text-[12.5px] text-muted-foreground">
+                  決済設定の変更には manager 以上の権限が必要です。
+                </div>
+              )}
               <ToggleRow
                 name="現金"
                 desc="USD / KHR 混在対応"
                 on={settings.cashEnabled}
+                disabled={!canManageSettings}
                 onToggle={() => update('cashEnabled', !settings.cashEnabled)}
               />
               <ToggleRow
                 name="QR (ABA/KHQR)"
                 desc="静的QR表示・手動確認"
                 on={settings.qrEnabled}
+                disabled={!canManageSettings}
                 onToggle={() => update('qrEnabled', !settings.qrEnabled)}
               />
               <ToggleRow
                 name="カード"
                 desc="外部端末決済・手動記録"
                 on={settings.cardEnabled}
+                disabled={!canManageSettings}
                 onToggle={() => update('cardEnabled', !settings.cardEnabled)}
               />
             </div>
@@ -196,10 +275,13 @@ export function SettingsScreen() {
           {tab === 'layout' && (
             <InfoNote
               title="テーブルレイアウト"
-              body="卓の配置・卓番号・席数は専用のレイアウト編集画面から変更できます。ドラッグ＆ドロップで自由に配置を調整できます。"
+              body="卓の配置・卓番号・席数は専用のレイアウト編集画面から変更できます。柱・カウンターなどの障害物の追加や、卓・障害物の大きさ変更もできます。"
               cta="レイアウト編集を開く"
+              onCta={() => router.push('/pos/table-layout')}
             />
           )}
+
+          {tab === 'integration' && <IntegrationTab />}
         </div>
       </div>
     </div>
@@ -1335,7 +1417,19 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function ToggleRow({ name, desc, on, onToggle }: { name: string; desc: string; on: boolean; onToggle: () => void }) {
+function ToggleRow({
+  name,
+  desc,
+  on,
+  onToggle,
+  disabled,
+}: {
+  name: string;
+  desc: string;
+  on: boolean;
+  onToggle: () => void;
+  disabled?: boolean;
+}) {
   return (
     <div className="flex items-center justify-between rounded-xl border border-border px-4 py-3.5">
       <div>
@@ -1344,7 +1438,11 @@ function ToggleRow({ name, desc, on, onToggle }: { name: string; desc: string; o
       </div>
       <button
         onClick={onToggle}
-        className={'flex h-[26px] w-[46px] items-center rounded-full p-0.5 ' + (on ? 'justify-end bg-brand' : 'justify-start bg-secondary')}
+        disabled={disabled}
+        className={
+          'flex h-[26px] w-[46px] items-center rounded-full p-0.5 disabled:opacity-60 ' +
+          (on ? 'justify-end bg-brand' : 'justify-start bg-secondary')
+        }
       >
         <div className="h-[22px] w-[22px] rounded-full bg-card shadow" />
       </button>
@@ -1352,16 +1450,153 @@ function ToggleRow({ name, desc, on, onToggle }: { name: string; desc: string; o
   );
 }
 
-function InfoNote({ title, body, cta }: { title: string; body: string; cta: string }) {
+function InfoNote({ title, body, cta, onCta }: { title: string; body: string; cta: string; onCta?: () => void }) {
   return (
     <div className="flex max-w-[560px] flex-col gap-3.5">
       <div className="text-[15px] font-bold">{title}</div>
       <div className="flex flex-col gap-2 rounded-xl border border-border p-4">
         <div className="text-[13px] leading-relaxed">{body}</div>
-        <button className="mt-1 h-[38px] w-fit rounded-lg bg-primary px-4 text-[12.5px] font-semibold text-primary-foreground">
+        <button
+          onClick={onCta}
+          className="mt-1 h-[38px] w-fit rounded-lg bg-primary px-4 text-[12.5px] font-semibold text-primary-foreground"
+        >
           {cta}
         </button>
       </div>
     </div>
+  );
+}
+
+// 連携設定タブ: pos.integrations.menu_source の ON/OFF 切り替え (Phase C)。
+// owner のみ操作可能。行が無い店舗は 'dine_live' (matsunoya-dine 連携、現状維持) 扱い。
+function IntegrationTab() {
+  const me = useStaff();
+  const isPosNative = me.authMode === 'pos_native';
+
+  const [mode, setMode] = useState<IntegrationMode | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [switching, setSwitching] = useState(false);
+  const [switchError, setSwitchError] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    setLoadError(null);
+    getIntegrationSettings()
+      .then(({ menuSource }) => setMode(menuSource))
+      .catch((err) => {
+        setLoadError(err instanceof PosSettingsApiError ? err.message : '連携設定の取得に失敗しました');
+      });
+  }, []);
+
+  useEffect(() => {
+    if (isPosNative && me.role === 'owner') load();
+  }, [isPosNative, me.role, load]);
+
+  if (!isPosNative) {
+    return (
+      <div className="flex max-w-[560px] flex-col gap-3.5">
+        <div className="text-[15px] font-bold">連携設定</div>
+        <PinLoginRequiredNote />
+      </div>
+    );
+  }
+
+  if (me.role !== 'owner') {
+    return (
+      <div className="flex max-w-[560px] flex-col gap-3.5">
+        <div className="text-[15px] font-bold">連携設定</div>
+        <div className="rounded-xl border border-border p-4 text-[13px] text-muted-foreground">
+          連携設定の変更には owner 権限が必要です。
+        </div>
+      </div>
+    );
+  }
+
+  async function handleSwitch(next: IntegrationMode) {
+    if (mode === next) return;
+    setSwitching(true);
+    setSwitchError(null);
+    try {
+      const { menuSource } = await updateIntegrationSettings(next);
+      setMode(menuSource);
+    } catch (err) {
+      setSwitchError(err instanceof PosSettingsApiError ? err.message : '切り替えに失敗しました');
+    } finally {
+      setSwitching(false);
+    }
+  }
+
+  return (
+    <div className="flex max-w-[640px] flex-col gap-5">
+      <div>
+        <div className="text-[15px] font-bold">連携設定</div>
+        <div className="mt-1 text-[11.5px] text-muted-foreground">
+          レジ画面 (会計・注文) がどちらのメニュー・設定データを使うかを切り替えます。切り替えても過去の注文データや
+          matsunoya-dine 側の予約・スタンプ機能には影響しません。
+        </div>
+      </div>
+
+      {loadError && <div className="text-xs text-destructive">{loadError}</div>}
+      {switchError && <div className="text-xs text-destructive">{switchError}</div>}
+
+      {mode === null && !loadError && <div className="text-xs text-muted-foreground">読み込み中…</div>}
+
+      {mode !== null && (
+        <div className="flex flex-col gap-3">
+          <IntegrationOption
+            title="matsunoya-dine 連携 (現状維持)"
+            desc="メニュー・VAT率・決済手段などは matsunoya-dine 管理画面で編集したものをそのまま使います。"
+            selected={mode === 'dine_live'}
+            disabled={switching}
+            onSelect={() => handleSwitch('dine_live')}
+          />
+          <IntegrationOption
+            title="POS単体運用"
+            desc="この画面の「メニュー・商品オプション」「一般設定」「決済設定」タブで登録したデータを使います。matsunoya-dine とは独立して運用できます。"
+            selected={mode === 'pos_native'}
+            disabled={switching}
+            onSelect={() => handleSwitch('pos_native')}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function IntegrationOption({
+  title,
+  desc,
+  selected,
+  disabled,
+  onSelect,
+}: {
+  title: string;
+  desc: string;
+  selected: boolean;
+  disabled?: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      onClick={onSelect}
+      disabled={disabled}
+      className={
+        'flex flex-col gap-1 rounded-xl border p-4 text-left disabled:opacity-60 ' +
+        (selected ? 'border-brand bg-brand/5' : 'border-border')
+      }
+    >
+      <div className="flex items-center gap-2 text-[13.5px] font-semibold">
+        <span
+          className={
+            'inline-flex h-4 w-4 items-center justify-center rounded-full border ' +
+            (selected ? 'border-brand bg-brand' : 'border-border')
+          }
+        >
+          {selected && <span className="h-1.5 w-1.5 rounded-full bg-brand-foreground" />}
+        </span>
+        {title}
+        {selected && <span className="text-[11px] font-semibold text-brand">使用中</span>}
+      </div>
+      <div className="pl-6 text-[11.5px] leading-relaxed text-muted-foreground">{desc}</div>
+    </button>
   );
 }
