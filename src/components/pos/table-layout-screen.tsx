@@ -54,6 +54,8 @@ export function TableLayoutScreen() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [nameDraft, setNameDraft] = useState('');
+  const [widthDraft, setWidthDraft] = useState('');
+  const [heightDraft, setHeightDraft] = useState('');
   const [clipboard, setClipboard] = useState<Clipboard | null>(null);
   const nextIndex = useRef(1);
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -80,6 +82,16 @@ export function TableLayoutScreen() {
   useEffect(() => {
     setNameDraft(selected?.table_code ?? '');
   }, [selected?.id, selected?.table_code]);
+
+  // 幅・高さの直接入力欄は入力中 (「」や末尾だけ消した状態など) を自由に許すため、
+  // 選択中の item の値を直接 value に束縛せず下書き文字列として持つ。確定 (blur) 時に
+  // パース・クランプして反映する。selected.width/height 自体が変わったとき
+  // (ステッパーやドラッグでのリサイズ・別アイテム選択) は下書きを追従させる。
+  useEffect(() => {
+    setWidthDraft(selected ? String(selected.width) : '');
+    setHeightDraft(selected ? String(selected.height) : '');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected?.id, selected?.width, selected?.height]);
 
   // 保存されていない変更があるまま離れようとしたら一言確認する。
   useEffect(() => {
@@ -254,12 +266,19 @@ export function TableLayoutScreen() {
     updateLocal(selected.id, { width, height });
   }
 
-  function setSizeDirect(field: 'width' | 'height', raw: string) {
+  function commitSize(field: 'width' | 'height') {
     if (!selected) return;
+    const raw = field === 'width' ? widthDraft : heightDraft;
     const value = parseInt(raw, 10);
-    if (Number.isNaN(value)) return;
-    const clamped = Math.max(24, Math.min(600, value));
-    updateLocal(selected.id, { [field]: clamped } as Partial<TableLayoutItemRecord>);
+    const current = selected[field];
+    const clamped = Number.isNaN(value) ? current : Math.max(24, Math.min(600, value));
+    if (clamped !== current) {
+      updateLocal(selected.id, { [field]: clamped } as Partial<TableLayoutItemRecord>);
+    } else if (field === 'width') {
+      setWidthDraft(String(current));
+    } else {
+      setHeightDraft(String(current));
+    }
   }
 
   function seatsDelta(delta: number) {
@@ -521,8 +540,12 @@ export function TableLayoutScreen() {
                   </button>
                   <input
                     type="number"
-                    value={selected.width}
-                    onChange={(e) => setSizeDirect('width', e.target.value)}
+                    value={widthDraft}
+                    onChange={(e) => setWidthDraft(e.target.value)}
+                    onBlur={() => commitSize('width')}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                    }}
                     disabled={!canManage}
                     min={24}
                     max={600}
@@ -545,8 +568,12 @@ export function TableLayoutScreen() {
                   </button>
                   <input
                     type="number"
-                    value={selected.height}
-                    onChange={(e) => setSizeDirect('height', e.target.value)}
+                    value={heightDraft}
+                    onChange={(e) => setHeightDraft(e.target.value)}
+                    onBlur={() => commitSize('height')}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                    }}
                     disabled={!canManage}
                     min={24}
                     max={600}
