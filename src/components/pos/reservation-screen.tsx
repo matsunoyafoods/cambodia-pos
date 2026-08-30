@@ -174,6 +174,16 @@ function buildSteps(type: ReservationType): Step[] {
 
 const DETAIL_KEYS = ['cut', 'weight', 'occasion', 'decoration_request', 'budget_per_person', 'purpose', 'seating_request'];
 
+const DETAIL_LABELS: Record<string, string> = {
+  cut: 'カット',
+  weight: 'グラム数',
+  occasion: 'ご利用の機会',
+  decoration_request: '装飾のご希望',
+  budget_per_person: 'お一人様予算',
+  purpose: 'ご利用目的',
+  seating_request: 'お席のご希望',
+};
+
 export function ReservationScreen() {
   const router = useRouter();
   const [mode, setMode] = useState<'list' | 'select-type' | 'wizard' | 'done'>('list');
@@ -426,12 +436,19 @@ export function ReservationScreen() {
                 <div>
                   {answers.reservationDate || '-'} {answers.reservationTime || ''}
                 </div>
-                {DETAIL_KEYS.filter((k) => answers[k]).map((k) => (
-                  <Fragment key={k}>
-                    <div className="text-muted-foreground">{k}</div>
-                    <div>{answers[k]}</div>
-                  </Fragment>
-                ))}
+                {DETAIL_KEYS.filter((k) => answers[k]).map((k) => {
+                  const stepField = steps.find((s) => s.field.key === k)?.field;
+                  const displayValue =
+                    stepField?.kind === 'select'
+                      ? (stepField.options.find((o) => o.value === answers[k])?.label ?? answers[k])
+                      : answers[k];
+                  return (
+                    <Fragment key={k}>
+                      <div className="text-muted-foreground">{DETAIL_LABELS[k] ?? k}</div>
+                      <div>{displayValue}</div>
+                    </Fragment>
+                  );
+                })}
                 <div className="text-muted-foreground">備考</div>
                 <div>{answers.notes || '-'}</div>
               </div>
