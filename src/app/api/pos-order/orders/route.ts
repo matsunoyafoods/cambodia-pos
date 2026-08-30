@@ -49,7 +49,10 @@ export async function GET(req: Request) {
   return NextResponse.json({ order, items: items ?? [] });
 }
 
-const guestEthnicitySchema = z.record(z.enum(ETHNICITY_KEYS), z.number().int().min(0).max(999));
+// z.record(z.enum(...), ...) requires EVERY enum key to be present (exhaustive) in this zod version —
+// the client only sends keys the staff actually tapped (a partial object), so that would reject every
+// real request. z.partialRecord allows a subset of keys while still rejecting unknown keys.
+const guestEthnicitySchema = z.partialRecord(z.enum(ETHNICITY_KEYS), z.number().int().min(0).max(999));
 
 const createSchema = z.object({
   tableCode: z.string().min(1),
