@@ -45,6 +45,7 @@ import {
   type PosMenuOptionChoice,
   type PosMenuOptionGroup,
 } from '@/lib/menu-client';
+import { indexCategories, resolveCategoryChain, type CategoryNode } from '@/lib/category-tree';
 
 type Tab = 'general' | 'printer' | 'payment' | 'staff' | 'menu' | 'layout' | 'integration';
 
@@ -648,7 +649,15 @@ function MenuTab() {
     );
   }
 
-  const categoryName = (id: string | null) => (id ? (categories?.find((c) => c.id === id)?.name ?? '(不明なカテゴリ)') : '未分類');
+  const categoryName = (id: string | null) => {
+    if (!id || !categories) return '未分類';
+    const resolved = resolveCategoryChain(id, indexCategories(categories as CategoryNode[]));
+    if (!resolved) return '(不明なカテゴリ)';
+    const parts = [resolved.majorName];
+    if (resolved.middleName) parts.push(resolved.middleName);
+    if (resolved.minorName !== resolved.majorName && resolved.minorName !== resolved.middleName) parts.push(resolved.minorName);
+    return parts.join(' > ');
+  };
 
   async function handleDeleteCategory(id: string) {
     try {
@@ -688,20 +697,27 @@ function MenuTab() {
 
       {loadError && <div className="text-xs text-destructive">{loadError}</div>}
 
-      {/* カテゴリ */}
+      {/* カテゴリ (大→中→小の3階層) */}
       <div className="flex flex-col gap-2.5">
         <div className="mb-0.5 flex items-center justify-between">
-          <div className="text-[13.5px] font-bold">カテゴリ</div>
+          <div>
+            <div className="text-[13.5px] font-bold">カテゴリ (大 &gt; 中 &gt; 小)</div>
+            <div className="mt-0.5 text-[11px] text-muted-foreground">
+              レジ画面には大カテゴリーがタブとして表示されます。中カテゴリーはタブの中の見出しになります (無くても登録可)。
+            </div>
+          </div>
           <button
             onClick={() => setShowAddCategory((v) => !v)}
-            className="h-8 rounded-lg border border-dashed border-brand px-3 text-[12px] font-semibold text-brand"
+            className="h-8 flex-shrink-0 rounded-lg border border-dashed border-brand px-3 text-[12px] font-semibold text-brand"
           >
-            {showAddCategory ? 'キャンセル' : '＋ カテゴリを追加'}
+            {showAddCategory ? 'キャンセル' : '＋ 大カテゴリーを追加'}
           </button>
         </div>
 
         {showAddCategory && (
           <AddCategoryForm
+            parentId={null}
+            placeholder="大カテゴリー名 (例: ドリンク)"
             onCreated={() => {
               setShowAddCategory(false);
               load();
@@ -712,15 +728,11 @@ function MenuTab() {
         {categories === null && !loadError && <div className="text-xs text-muted-foreground">読み込み中…</div>}
         {categories?.length === 0 && (
           <div className="rounded-xl border border-dashed border-border p-4 text-[13px] text-muted-foreground">
-            カテゴリが未登録です。「＋ カテゴリを追加」から登録してください。
+            カテゴリが未登録です。「＋ 大カテゴリーを追加」から登録してください。
           </div>
         )}
         {categories && categories.length > 0 && (
-          <div className="flex flex-wrap gap-2">
-            {categories.map((c) => (
-              <CategoryChip key={c.id} category={c} onRenamed={load} onDelete={() => handleDeleteCategory(c.id)} />
-            ))}
-          </div>
+          <CategoryTree categories={categories} onDelete={handleDeleteCategory} onChanged={load} />
         )}
       </div>
 
@@ -764,6 +776,7 @@ function MenuTab() {
         {showAddItem && categories && (
           <AddItemForm
             categories={categories}
+            onCategoriesChanged={load}
             onCreated={() => {
               setShowAddItem(false);
               load();
@@ -784,7 +797,7 @@ function MenuTab() {
               if (groupItems.length === 0) return null;
               return (
                 <div key={c ? c.id : 'uncategorized'} className="flex flex-col gap-2">
-                  <div className="mt-1 text-[12px] font-bold text-muted-foreground">{c ? c.name : '未分類'}</div>
+                  <div className="mt-1 text-[12px] font-bold text-muted-foreground">{c ? categoryName(c.id) : '未分類'}</div>
                   {groupItems.map((item) => (
                     <MenuItemRow
                       key={item.id}
@@ -802,6 +815,7 @@ function MenuTab() {
                         load();
                       }}
                       onRefresh={load}
+                      onCategoriesChanged={load}
                     />
                   ))}
                 </div>
@@ -824,6 +838,7 @@ function MenuTab() {
                   load();
                 }}
                 onRefresh={load}
+                onCategoriesChanged={load}
               />
             ))}
       </div>
@@ -843,6 +858,7 @@ function MenuItemRow({
   onDelete,
   onEditDone,
   onRefresh,
+  onCategoriesChanged,
 }: {
   item: PosMenuItemRecord;
   categories: PosMenuCategory[];
@@ -855,6 +871,7 @@ function MenuItemRow({
   onDelete: () => void;
   onEditDone: () => void;
   onRefresh: () => void;
+  onCategoriesChanged: () => void;
 }) {
   return (
     <div className="rounded-xl border border-border px-4 py-3">
@@ -910,14 +927,28 @@ function MenuItemRow({
         </div>
       </div>
       {isEditing && (
-        <EditItemForm item={item} categories={categories} onDone={onEditDone} onRefresh={onRefresh} />
+        <EditItemForm
+          item={item}
+          categories={categories}
+          onDone={onEditDone}
+          onRefresh={onRefresh}
+          onCategoriesChanged={onCategoriesChanged}
+        />
       )}
       {showOptions && <OptionGroupsPanel itemId={item.id} />}
     </div>
   );
 }
 
-function AddCategoryForm({ onCreated }: { onCreated: () => void }) {
+function AddCategoryForm({
+  parentId,
+  placeholder,
+  onCreated,
+}: {
+  parentId: string | null;
+  placeholder?: string;
+  onCreated: (category: PosMenuCategory) => void;
+}) {
   const [name, setName] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -928,8 +959,8 @@ function AddCategoryForm({ onCreated }: { onCreated: () => void }) {
     setSubmitting(true);
     setError(null);
     try {
-      await createMenuCategory(name.trim());
-      onCreated();
+      const { category } = await createMenuCategory(name.trim(), parentId);
+      onCreated(category);
     } catch (err) {
       setError(err instanceof PosMenuApiError ? err.message : '登録に失敗しました');
     } finally {
@@ -942,7 +973,7 @@ function AddCategoryForm({ onCreated }: { onCreated: () => void }) {
       <input
         value={name}
         onChange={(e) => setName(e.target.value)}
-        placeholder="カテゴリ名 (例: メイン)"
+        placeholder={placeholder ?? 'カテゴリ名'}
         className="h-9 flex-1 rounded-lg border border-border px-3 text-[13px]"
       />
       {error && <div className="text-xs text-destructive">{error}</div>}
@@ -954,6 +985,115 @@ function AddCategoryForm({ onCreated }: { onCreated: () => void }) {
         {submitting ? '登録中…' : '登録'}
       </button>
     </form>
+  );
+}
+
+// 大カテゴリー → 中カテゴリー → 小カテゴリー の3階層ツリー表示。
+// 既存の店舗はカテゴリが全て大カテゴリー (parent_id が null) のままなので、その場合は
+// 各大カテゴリーの下に「＋中/小カテゴリーを追加」が出るだけの見た目になる (今まで通り)。
+function CategoryTree({
+  categories,
+  onDelete,
+  onChanged,
+}: {
+  categories: PosMenuCategory[];
+  onDelete: (id: string) => void;
+  onChanged: () => void;
+}) {
+  const [addingUnder, setAddingUnder] = useState<string | null>(null);
+
+  const byParent = new Map<string | null, PosMenuCategory[]>();
+  for (const c of categories) {
+    const key = c.parent_id;
+    if (!byParent.has(key)) byParent.set(key, []);
+    byParent.get(key)!.push(c);
+  }
+  for (const list of byParent.values()) list.sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
+
+  const majors = byParent.get(null) ?? [];
+
+  function childrenOf(id: string) {
+    return byParent.get(id) ?? [];
+  }
+
+  function toggleAdding(id: string) {
+    setAddingUnder((v) => (v === id ? null : id));
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      {majors.map((major) => {
+        const middles = childrenOf(major.id);
+        return (
+          <div key={major.id} className="rounded-xl border border-border p-3.5">
+            <div className="flex items-center justify-between gap-2">
+              <CategoryChip category={major} onRenamed={onChanged} onDelete={() => onDelete(major.id)} />
+              <button
+                onClick={() => toggleAdding(major.id)}
+                className="h-7 flex-shrink-0 rounded-lg border border-dashed border-brand px-2.5 text-[11px] font-semibold text-brand"
+              >
+                {addingUnder === major.id ? 'キャンセル' : '＋ 中/小カテゴリーを追加'}
+              </button>
+            </div>
+
+            {addingUnder === major.id && (
+              <div className="mt-2.5">
+                <AddCategoryForm
+                  parentId={major.id}
+                  placeholder="中または小カテゴリー名 (例: 焼酎)"
+                  onCreated={() => {
+                    setAddingUnder(null);
+                    onChanged();
+                  }}
+                />
+              </div>
+            )}
+
+            {middles.length > 0 && (
+              <div className="mt-3 flex flex-col gap-2.5 border-l-2 border-border pl-3.5">
+                {middles.map((middle) => {
+                  const minors = childrenOf(middle.id);
+                  return (
+                    <div key={middle.id}>
+                      <div className="flex items-center justify-between gap-2">
+                        <CategoryChip category={middle} onRenamed={onChanged} onDelete={() => onDelete(middle.id)} />
+                        <button
+                          onClick={() => toggleAdding(middle.id)}
+                          className="h-6 flex-shrink-0 rounded-lg border border-dashed border-brand px-2 text-[10.5px] font-semibold text-brand"
+                        >
+                          {addingUnder === middle.id ? 'キャンセル' : '＋ 小カテゴリーを追加'}
+                        </button>
+                      </div>
+
+                      {addingUnder === middle.id && (
+                        <div className="mt-2">
+                          <AddCategoryForm
+                            parentId={middle.id}
+                            placeholder="小カテゴリー名 (例: iichiko)"
+                            onCreated={() => {
+                              setAddingUnder(null);
+                              onChanged();
+                            }}
+                          />
+                        </div>
+                      )}
+
+                      {minors.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-1.5 border-l-2 border-border pl-3.5">
+                          {minors.map((minor) => (
+                            <CategoryChip key={minor.id} category={minor} onRenamed={onChanged} onDelete={() => onDelete(minor.id)} />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -1019,21 +1159,29 @@ function CategoryChip({
   );
 }
 
-function AddItemForm({ categories, onCreated }: { categories: PosMenuCategory[]; onCreated: () => void }) {
+function AddItemForm({
+  categories,
+  onCreated,
+  onCategoriesChanged,
+}: {
+  categories: PosMenuCategory[];
+  onCreated: () => void;
+  onCategoriesChanged: () => void;
+}) {
   const [name, setName] = useState('');
   const [price, setPrice] = useState('');
-  const [categoryId, setCategoryId] = useState<string>(categories[0]?.id ?? '');
+  const [categoryId, setCategoryId] = useState<string>('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     const priceValue = parseFloat(price);
-    if (!name.trim() || !Number.isFinite(priceValue) || priceValue < 0) return;
+    if (!name.trim() || !Number.isFinite(priceValue) || priceValue < 0 || !categoryId) return;
     setSubmitting(true);
     setError(null);
     try {
-      await createMenuItem({ categoryId: categoryId || null, name: name.trim(), price: priceValue });
+      await createMenuItem({ categoryId, name: name.trim(), price: priceValue });
       onCreated();
     } catch (err) {
       setError(err instanceof PosMenuApiError ? err.message : '登録に失敗しました');
@@ -1058,22 +1206,12 @@ function AddItemForm({ categories, onCreated }: { categories: PosMenuCategory[];
           placeholder="価格 ($)"
           className="h-10 w-28 rounded-lg border border-border px-3 text-[13.5px]"
         />
-        <select
-          value={categoryId}
-          onChange={(e) => setCategoryId(e.target.value)}
-          className="h-10 w-40 rounded-lg border border-border px-3 text-[13.5px]"
-        >
-          {categories.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
       </div>
+      <CategoryCascadeSelect categories={categories} value={categoryId} onChange={setCategoryId} onCategoriesChanged={onCategoriesChanged} />
       {error && <div className="text-xs text-destructive">{error}</div>}
       <button
         type="submit"
-        disabled={submitting || !name.trim() || !price}
+        disabled={submitting || !name.trim() || !price || !categoryId}
         className="h-9 w-fit rounded-lg bg-primary px-4 text-[12.5px] font-semibold text-primary-foreground disabled:opacity-60"
       >
         {submitting ? '登録中…' : '登録する'}
@@ -1082,16 +1220,138 @@ function AddItemForm({ categories, onCreated }: { categories: PosMenuCategory[];
   );
 }
 
+// 大 → 中(任意) → 小(必須) のカスケード選択。中カテゴリーを選ばない場合、小カテゴリーの
+// 選択肢には大カテゴリー直下の全カテゴリー (中として作られたものも、中を介さない小として
+// 作られたものも両方) を並べる。選択肢が無い大カテゴリーではその場で小カテゴリーを新規作成できる。
+function CategoryCascadeSelect({
+  categories,
+  value,
+  onChange,
+  onCategoriesChanged,
+}: {
+  categories: PosMenuCategory[];
+  value: string;
+  onChange: (leafId: string) => void;
+  onCategoriesChanged: () => void;
+}) {
+  const byId = new Map(categories.map((c) => [c.id, c]));
+  const sortFn = (a: PosMenuCategory, b: PosMenuCategory) => a.sort_order - b.sort_order || a.name.localeCompare(b.name);
+  const majors = categories.filter((c) => !c.parent_id).sort(sortFn);
+  const childrenOf = (id: string) => categories.filter((c) => c.parent_id === id).sort(sortFn);
+
+  function chainOf(id: string): { majorId: string; middleId: string } {
+    const leaf = id ? byId.get(id) : undefined;
+    if (!leaf) return { majorId: '', middleId: '' };
+    const parent = leaf.parent_id ? byId.get(leaf.parent_id) : undefined;
+    if (!parent) return { majorId: leaf.id, middleId: '' };
+    const grandparent = parent.parent_id ? byId.get(parent.parent_id) : undefined;
+    if (!grandparent) return { majorId: parent.id, middleId: '' };
+    return { majorId: grandparent.id, middleId: parent.id };
+  }
+
+  const initial = chainOf(value);
+  const [majorId, setMajorId] = useState(initial.majorId || majors[0]?.id || '');
+  const [middleId, setMiddleId] = useState(initial.middleId);
+  const [showAddMinor, setShowAddMinor] = useState(false);
+
+  const middleOptions = majorId ? childrenOf(majorId) : [];
+  const minorOptions = middleId ? childrenOf(middleId) : middleOptions.flatMap((m) => [m, ...childrenOf(m.id)]);
+  const minorValue = minorOptions.some((c) => c.id === value) ? value : '';
+
+  function handleMajorChange(id: string) {
+    setMajorId(id);
+    setMiddleId('');
+    setShowAddMinor(false);
+    onChange('');
+  }
+  function handleMiddleChange(id: string) {
+    setMiddleId(id);
+    setShowAddMinor(false);
+    onChange('');
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex gap-2">
+        <select
+          value={majorId}
+          onChange={(e) => handleMajorChange(e.target.value)}
+          className="h-9 flex-1 rounded-lg border border-border px-2 text-[12.5px]"
+        >
+          <option value="" disabled>
+            大カテゴリー
+          </option>
+          {majors.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+        <select
+          value={middleId}
+          onChange={(e) => handleMiddleChange(e.target.value)}
+          disabled={!majorId}
+          className="h-9 flex-1 rounded-lg border border-border px-2 text-[12.5px] disabled:opacity-50"
+        >
+          <option value="">(中カテゴリーなし)</option>
+          {middleOptions.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+        <select
+          value={minorValue}
+          onChange={(e) => onChange(e.target.value)}
+          disabled={!majorId}
+          className="h-9 flex-1 rounded-lg border border-border px-2 text-[12.5px] disabled:opacity-50"
+        >
+          <option value="" disabled>
+            小カテゴリー
+          </option>
+          {minorOptions.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+      </div>
+      {majorId && minorOptions.length === 0 && !showAddMinor && (
+        <button
+          type="button"
+          onClick={() => setShowAddMinor(true)}
+          className="w-fit text-[11px] font-semibold text-brand"
+        >
+          この大カテゴリーには小カテゴリーがまだありません。＋ 追加する
+        </button>
+      )}
+      {showAddMinor && majorId && (
+        <AddCategoryForm
+          parentId={middleId || majorId}
+          placeholder="小カテゴリー名"
+          onCreated={(cat) => {
+            setShowAddMinor(false);
+            onChange(cat.id);
+            onCategoriesChanged();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
 function EditItemForm({
   item,
   categories,
   onDone,
   onRefresh,
+  onCategoriesChanged,
 }: {
   item: PosMenuItemRecord;
   categories: PosMenuCategory[];
   onDone: () => void;
   onRefresh: () => void;
+  onCategoriesChanged: () => void;
 }) {
   const [name, setName] = useState(item.name);
   const [price, setPrice] = useState(String(item.price));
@@ -1200,19 +1460,8 @@ function EditItemForm({
           inputMode="decimal"
           className="h-9 w-24 rounded-lg border border-border px-3 text-[13px]"
         />
-        <select
-          value={categoryId}
-          onChange={(e) => setCategoryId(e.target.value)}
-          className="h-9 w-36 rounded-lg border border-border px-3 text-[13px]"
-        >
-          <option value="">未分類</option>
-          {categories.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
       </div>
+      <CategoryCascadeSelect categories={categories} value={categoryId} onChange={setCategoryId} onCategoriesChanged={onCategoriesChanged} />
       {error && <div className="text-xs text-destructive">{error}</div>}
       <div className="flex gap-2">
         <button

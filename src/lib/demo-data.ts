@@ -5,7 +5,7 @@ import type { MenuItem, TableInfo } from './pos-types';
 export const DEMO_MENU: MenuItem[] = [
   {
     id: 'm1',
-    category: 'メイン',
+    category: 'メイン', minorCategory: 'メイン',
     name: 'OG Beef Misuji',
     price: 18,
     optionGroups: [
@@ -23,7 +23,7 @@ export const DEMO_MENU: MenuItem[] = [
   },
   {
     id: 'm2',
-    category: 'メイン',
+    category: 'メイン', minorCategory: 'メイン',
     name: 'US Prime Tenderloin',
     price: 24,
     optionGroups: [
@@ -39,11 +39,11 @@ export const DEMO_MENU: MenuItem[] = [
       },
     ],
   },
-  { id: 'm3', category: 'メイン', name: '厚切り牛タン', price: 14 },
-  { id: 'm4', category: 'メイン', name: 'サムギョプサル', price: 10 },
+  { id: 'm3', category: 'メイン', minorCategory: 'メイン', name: '厚切り牛タン', price: 14 },
+  { id: 'm4', category: 'メイン', minorCategory: 'メイン', name: 'サムギョプサル', price: 10 },
   {
     id: 'm5',
-    category: 'メイン',
+    category: 'メイン', minorCategory: 'メイン',
     name: 'ステーキセット',
     price: 22,
     optionGroups: [
@@ -58,12 +58,12 @@ export const DEMO_MENU: MenuItem[] = [
       },
     ],
   },
-  { id: 's1', category: 'サイド', name: 'ライス', price: 2 },
-  { id: 's2', category: 'サイド', name: '生野菜サラダ', price: 4 },
-  { id: 's3', category: 'サイド', name: 'キムチ盛り合わせ', price: 3 },
-  { id: 'd1', category: 'ドリンク', name: 'ソフトドリンク', price: 2 },
-  { id: 'd2', category: 'ドリンク', name: 'カンボジアビール', price: 3 },
-  { id: 'd3', category: 'ドリンク', name: 'ハウスワイン(グラス)', price: 5 },
+  { id: 's1', category: 'サイド', minorCategory: 'サイド', name: 'ライス', price: 2 },
+  { id: 's2', category: 'サイド', minorCategory: 'サイド', name: '生野菜サラダ', price: 4 },
+  { id: 's3', category: 'サイド', minorCategory: 'サイド', name: 'キムチ盛り合わせ', price: 3 },
+  { id: 'd1', category: 'ドリンク', minorCategory: 'ドリンク', name: 'ソフトドリンク', price: 2 },
+  { id: 'd2', category: 'ドリンク', minorCategory: 'ドリンク', name: 'カンボジアビール', price: 3 },
+  { id: 'd3', category: 'ドリンク', minorCategory: 'ドリンク', name: 'ハウスワイン(グラス)', price: 5 },
 ];
 
 export const CATEGORIES = ['メイン', 'サイド', 'ドリンク'];

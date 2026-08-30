@@ -17,7 +17,12 @@ export type OptionGroup = {
 
 export type MenuItem = {
   id: string;
+  /** 大カテゴリー名 (レジ画面上部のタブに表示される単位)。旧フラット構成の店舗ではこれがそのままカテゴリ名になる */
   category: string;
+  /** 中カテゴリー名 (未設定 = 中カテゴリーなし。大カテゴリータブの中で商品をグループ化する見出しに使う) */
+  middleCategory?: string;
+  /** 小カテゴリー名 (中カテゴリーが無い場合は大カテゴリー直下の分類名。旧フラット構成では category と同じ値になる) */
+  minorCategory: string;
   name: string;
   price: number;
   optionGroups?: OptionGroup[];
@@ -43,6 +48,19 @@ export type CartLine = {
   qty: number;
   selectedOptions: SelectedOption[];
 };
+
+// 客層記録 (来店時の人種構成)。ファースト注文確定時に必須入力。
+export const ETHNICITY_KEYS = ['khmer', 'japanese', 'chinese', 'korean', 'western', 'other'] as const;
+export type EthnicityKey = (typeof ETHNICITY_KEYS)[number];
+export const ETHNICITY_LABELS: Record<EthnicityKey, string> = {
+  khmer: 'クメール',
+  japanese: '日本人',
+  chinese: '中国人',
+  korean: '韓国人',
+  western: '西洋人',
+  other: 'その他',
+};
+export type GuestEthnicity = Partial<Record<EthnicityKey, number>>;
 
 export type TableStatus = 'available' | 'occupied' | 'billing';
 

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import type { CartLine, MenuItem, PaymentMethod, TableStatus } from '@/lib/pos-types';
+import type { CartLine, GuestEthnicity, MenuItem, PaymentMethod, TableStatus } from '@/lib/pos-types';
 import { DEFAULT_SETTINGS } from '@/lib/pos-types';
 import { getPosMenus, getPosSettings, PosApiError } from '@/lib/api-client';
 import {
@@ -12,6 +12,15 @@ import {
   getPosOrderTableLayout,
   PosOrderApiError,
 } from '@/lib/pos-order-client';
+import {
+  completeOrderPayment,
+  confirmOrderItems,
+  createOpenOrder,
+  getOpenOrder,
+  PosOrderOrdersApiError,
+  type OpenOrderRecord,
+  type OrderItemRecord,
+} from '@/lib/pos-order-orders-client';
 import type { TableLayoutItemRecord } from '@/lib/table-layout-client';
 import {
   clearTableSession,
@@ -22,6 +31,7 @@ import {
   type TableSessionRecord,
 } from '@/lib/table-session-client';
 import { effectiveBasePrice, isHappyHourNow } from '@/lib/happy-hour';
+import { computeChange } from '@/lib/money';
 import { logoutPosStaff } from '@/lib/staff-client';
 import { useStaff } from './staff-context';
 import { TableMapScreen } from './table-map-screen';
@@ -29,6 +39,7 @@ import { OrderScreen } from './order-screen';
 import { CheckoutScreen } from './checkout-screen';
 import { ReceiptScreen } from './receipt-screen';
 import { OptionModal, type ModalSelection } from './option-modal';
+import { GuestDemographicsModal } from './guest-demographics-modal';
 
 type Screen = 'tablemap' | 'order' | 'checkout' | 'receipt';
 
@@ -62,6 +73,21 @@ export function PosApp() {
   const [cardConfirmed, setCardConfirmed] = useState(false);
   const [optionModalItem, setOptionModalItem] = useState<MenuItem | null>(null);
   const [optionSelection, setOptionSelection] = useState<ModalSelection>({});
+
+  // この卓の「開いている伝票」(pos.orders, status='open')。null = まだファースト注文が
+  // 確定されていない (=客層記録が済んでいない) 卓。confirmedItems はサーバーに確定済みの品目
+  // (画面をリロードしたり卓一覧に戻ってきても消えない)。cart はまだ「注文確定」していない
+  // ローカルの新規ラウンド分 (これはこれまで通り画面遷移で失われうる = 意図通りの挙動)。
+  const [currentOrder, setCurrentOrder] = useState<OpenOrderRecord | null>(null);
+  const [confirmedItems, setConfirmedItems] = useState<OrderItemRecord[]>([]);
+  const [guestModalOpen, setGuestModalOpen] = useState(false);
+  const [pendingTapItem, setPendingTapItem] = useState<MenuItem | null>(null);
+  const [guestSaving, setGuestSaving] = useState(false);
+  const [guestError, setGuestError] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [confirmError, setConfirmError] = useState<string | null>(null);
+  const [completing, setCompleting] = useState(false);
+  const [completeError, setCompleteError] = useState<string | null>(null);
 
   // メニュー・カテゴリ一覧は初出順を維持して抽出 (matsunoya-dine 側のカテゴリ表示順に合わせる)
   const categories = useMemo(() => {
@@ -111,7 +137,12 @@ export function PosApp() {
             sessionsPromise,
           ]);
           if (cancelled) return;
-          setMenu(menuData.map((m) => ({ ...m, category: m.category ?? '未分類' })));
+          setMenu(
+            menuData.map((m) => {
+              const category = m.category ?? '未分類';
+              return { ...m, category, minorCategory: category };
+            }),
+          );
           setSettings((prev) => ({ ...prev, ...settingsData }));
           setLayoutItems(layoutData.items);
           setTableSessions(sessionsData.items);
@@ -221,7 +252,11 @@ export function PosApp() {
   }
 
   const totals = useMemo(() => {
-    const subtotal = cart.reduce((s, l) => s + l.unitPrice * l.qty, 0);
+    // 確定済み (サーバーに保存済み、注文確定/会計へ進むを押した分) + 未確定 (このラウンドの
+    // カート) を合算して計算する。
+    const confirmedSubtotal = confirmedItems.reduce((s, it) => s + it.line_total, 0);
+    const cartSubtotal = cart.reduce((s, l) => s + l.unitPrice * l.qty, 0);
+    const subtotal = confirmedSubtotal + cartSubtotal;
     // 税込み(内税)設定の場合、メニュー価格に既にVATが含まれているものとして扱う。
     // VAT額は内訳表示用にsubtotalから逆算するだけで、合計には加算しない
     // (サービス料は税別・税込みどちらでも合計に加算する)。
@@ -234,7 +269,7 @@ export function PosApp() {
       ? Math.max(0, subtotal + service - couponDiscount)
       : Math.max(0, subtotal + vat + service - couponDiscount);
     return { subtotal, vat, service, couponDiscount, total };
-  }, [cart, couponApplied, settings.vatRate, settings.vatInclusive, settings.serviceRate]);
+  }, [cart, confirmedItems, couponApplied, settings.vatRate, settings.vatInclusive, settings.serviceRate]);
 
   function resetOrderState() {
     setCustomerLinked(false);
@@ -247,14 +282,34 @@ export function PosApp() {
     setCardConfirmed(false);
     setOptionModalItem(null);
     setOptionSelection({});
+    setGuestModalOpen(false);
+    setPendingTapItem(null);
+    setGuestError(null);
+    setConfirmError(null);
+    setCompleteError(null);
   }
 
+  // テーブル選択のたびに、この卓の「開いている伝票」をサーバーから取り直す。以前は cart を
+  // 空にするだけで終わっていたため、卓一覧に戻ってから同じ卓に入り直すと確定済みの注文まで
+  // 消えてしまうバグがあった (画面ローカルの state しか無く、どこにも保存されていなかったため)。
+  // 今は「注文確定」/「会計へ進む」を押した時点でサーバー (pos.orders/order_items) に保存され、
+  // ここで読み直すので卓一覧との往復や再読み込みでも確定済み分は残る。
   function selectTable(code: string) {
     setSelectedTable(code);
     setCart([]);
+    setConfirmedItems([]);
+    setCurrentOrder(null);
     setActiveCategory(categories[0] ?? '');
     resetOrderState();
     setScreen('order');
+    getOpenOrder(code)
+      .then(({ order, items }) => {
+        setCurrentOrder(order);
+        setConfirmedItems(items);
+      })
+      .catch(() => {
+        /* 取得失敗時は「まだ開いている伝票が無い」扱いのまま (ファースト注文時に作り直せる) */
+      });
   }
 
   function addToCart(item: MenuItem) {
@@ -274,13 +329,84 @@ export function PosApp() {
     setCart((prev) => prev.map((l) => (l.id === id ? { ...l, qty: l.qty - 1 } : l)).filter((l) => l.qty > 0));
   }
 
-  function onAddItem(item: MenuItem) {
+  // オプション選択が必要な商品ならモーダルを開き、不要ならそのままカートに追加する。
+  // 客層記録が既に済んでいる (currentOrder がある) ことが前提。
+  function proceedAddItem(item: MenuItem) {
     if (item.optionGroups && item.optionGroups.length > 0) {
       setOptionModalItem(item);
       setOptionSelection({});
     } else {
       addToCart(item);
     }
+  }
+
+  // この卓でまだ open 注文が無ければ (=ファースト注文) 客層記録モーダルを先に挟む。
+  // タップした商品は pendingTapItem に覚えておき、モーダル保存後に自動で追加する。
+  function onAddItem(item: MenuItem) {
+    if (!currentOrder) {
+      setPendingTapItem(item);
+      setGuestError(null);
+      setGuestModalOpen(true);
+      return;
+    }
+    proceedAddItem(item);
+  }
+
+  async function handleGuestConfirm(ethnicity: GuestEthnicity, kidsCount: number) {
+    if (!selectedTable) return;
+    setGuestSaving(true);
+    setGuestError(null);
+    try {
+      const { order } = await createOpenOrder({
+        tableCode: selectedTable,
+        guestEthnicity: ethnicity,
+        guestKidsCount: kidsCount,
+        staffId: me.id,
+      });
+      setCurrentOrder(order);
+      setGuestModalOpen(false);
+      const item = pendingTapItem;
+      setPendingTapItem(null);
+      if (item) proceedAddItem(item);
+    } catch (err) {
+      setGuestError(err instanceof PosOrderOrdersApiError ? err.message : '客層の保存に失敗しました');
+    } finally {
+      setGuestSaving(false);
+    }
+  }
+
+  function handleGuestCancel() {
+    setGuestModalOpen(false);
+    setPendingTapItem(null);
+  }
+
+  // 「注文確定」: このラウンドのカートを厨房送信済みとしてサーバーに保存し、確定済み一覧に
+  // 積み上げる。成功したらローカルのカートは空にする (次のラウンドの入力に備える)。
+  async function confirmPendingCart(): Promise<boolean> {
+    if (cart.length === 0) return true;
+    if (!currentOrder) return false;
+    setConfirming(true);
+    setConfirmError(null);
+    try {
+      const { items } = await confirmOrderItems(currentOrder.id, cart);
+      setConfirmedItems((prev) => [...prev, ...items]);
+      setCart([]);
+      return true;
+    } catch (err) {
+      setConfirmError(err instanceof PosOrderOrdersApiError ? err.message : '注文の確定に失敗しました');
+      return false;
+    } finally {
+      setConfirming(false);
+    }
+  }
+
+  // 「会計へ進む」: 未確定のカートが残っていれば先に注文確定してから会計画面へ (確定漏れのまま
+  // 会計に進んでカートの中身が消えることが無いようにする)。
+  async function handleCheckout() {
+    if (cart.length === 0 && confirmedItems.length === 0) return;
+    const ok = await confirmPendingCart();
+    if (!ok) return;
+    setScreen('checkout');
   }
 
   function confirmOptionModal() {
@@ -322,21 +448,56 @@ export function PosApp() {
     setOptionSelection({});
   }
 
-  function completeOrder() {
-    // 会計完了 = この卓の来店セッションが終わるので、滞在・飲み放題タイマーをリセットする。
-    if (selectedTable) {
-      setTableSessions((prev) => prev.filter((s) => s.table_code !== selectedTable));
-      clearTableSession(selectedTable).catch(() => {
-        /* 反映失敗時は次回ポーリングで補正される */
+  async function completeOrder() {
+    if (!currentOrder || completing) return;
+    setCompleting(true);
+    setCompleteError(null);
+    try {
+      const usdReceived = parseFloat(cashUsdReceivedStr) || 0;
+      const khrReceived = parseInt(cashKhrReceivedStr, 10) || 0;
+      const change = computeChange({
+        total: totals.total,
+        usdReceived,
+        khrReceived,
+        khrRate: settings.khrRate,
+        changeUsdOverride: changeUsdStr === '' ? undefined : parseInt(changeUsdStr, 10) || 0,
       });
+      await completeOrderPayment(currentOrder.id, {
+        subtotal: totals.subtotal,
+        vat: totals.vat,
+        service: totals.service,
+        couponDiscount: totals.couponDiscount,
+        total: totals.total,
+        method: paymentTab,
+        amount: totals.total,
+        cashReceivedUsd: paymentTab === 'cash' ? usdReceived : undefined,
+        cashReceivedKhr: paymentTab === 'cash' ? khrReceived : undefined,
+        changeUsd: paymentTab === 'cash' ? change.changeUsd : undefined,
+        changeKhr: paymentTab === 'cash' ? change.changeKhr : undefined,
+      });
+      // 会計完了 = この卓の来店セッションが終わるので、滞在・飲み放題タイマーをリセットする。
+      if (selectedTable) {
+        setTableSessions((prev) => prev.filter((s) => s.table_code !== selectedTable));
+        clearTableSession(selectedTable).catch(() => {
+          /* 反映失敗時は次回ポーリングで補正される */
+        });
+      }
+      setCurrentOrder(null);
+      setConfirmedItems([]);
+      setScreen('receipt');
+    } catch (err) {
+      setCompleteError(err instanceof PosOrderOrdersApiError ? err.message : '会計の確定に失敗しました');
+    } finally {
+      setCompleting(false);
     }
-    setScreen('receipt');
   }
 
   function newOrder() {
     setScreen('tablemap');
     setSelectedTable(null);
     setCart([]);
+    setConfirmedItems([]);
+    setCurrentOrder(null);
     resetOrderState();
   }
 
@@ -459,9 +620,13 @@ export function PosApp() {
           activeCategory={activeCategory}
           onCategory={setActiveCategory}
           cart={cart}
+          confirmedItems={confirmedItems}
           onAddItem={onAddItem}
           onInc={incLine}
           onDec={decLine}
+          onConfirmOrder={confirmPendingCart}
+          confirming={confirming}
+          confirmError={confirmError}
           subtotal={totals.subtotal}
           vat={totals.vat}
           service={totals.service}
@@ -470,14 +635,14 @@ export function PosApp() {
           vatInclusive={settings.vatInclusive}
           total={totals.total}
           onBackToTableMap={() => setScreen('tablemap')}
-          onCheckout={() => cart.length > 0 && setScreen('checkout')}
+          onCheckout={handleCheckout}
         />
       )}
 
       {screen === 'checkout' && (
         <CheckoutScreen
           selectedTable={selectedTable}
-          cart={cart}
+          confirmedItems={confirmedItems}
           totals={totals}
           vatRate={settings.vatRate}
           serviceRate={settings.serviceRate}
@@ -508,11 +673,22 @@ export function PosApp() {
           onConfirmCard={() => setCardConfirmed(true)}
           onBackToOrder={() => setScreen('order')}
           onComplete={completeOrder}
+          completing={completing}
+          completeError={completeError}
         />
       )}
 
       {screen === 'receipt' && (
         <ReceiptScreen selectedTable={selectedTable} total={totals.total} onNewOrder={newOrder} />
+      )}
+
+      {guestModalOpen && (
+        <GuestDemographicsModal
+          onCancel={handleGuestCancel}
+          onConfirm={handleGuestConfirm}
+          submitting={guestSaving}
+          error={guestError}
+        />
       )}
 
       {optionModalItem && (

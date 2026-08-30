@@ -2,20 +2,23 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createPosAdminClient, getPosStoreId } from '@/lib/supabase/admin';
 import { withPosStaff } from '@/lib/pos-auth';
+import { indexCategories, categoryDepth, type CategoryNode } from '@/lib/category-tree';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
 const updateSchema = z.object({
   name: z.string().trim().min(1).max(50).optional(),
   sortOrder: z.number().int().optional(),
+  // 親カテゴリーの付け替え。null = 大カテゴリーに昇格。
+  parentId: z.string().uuid().nullable().optional(),
 });
 
-// カテゴリ更新 (名前 / 並び順)。manager 以上のみ。
+// カテゴリ更新 (名前 / 並び順 / 親カテゴリーの付け替え)。manager 以上のみ。
 export const PATCH = withPosStaff('manager', async (_session, req, ctx: RouteContext) => {
   const { id } = await ctx.params;
   const json = await req.json().catch(() => null);
   const parsed = updateSchema.safeParse(json);
-  if (!parsed.success || (!parsed.data.name && parsed.data.sortOrder === undefined)) {
+  if (!parsed.success || (parsed.data.name === undefined && parsed.data.sortOrder === undefined && parsed.data.parentId === undefined)) {
     return NextResponse.json({ error: 'invalid_request' }, { status: 400 });
   }
 
@@ -25,12 +28,52 @@ export const PATCH = withPosStaff('manager', async (_session, req, ctx: RouteCon
   if (parsed.data.name !== undefined) patch.name = parsed.data.name;
   if (parsed.data.sortOrder !== undefined) patch.sort_order = parsed.data.sortOrder;
 
+  if (parsed.data.parentId !== undefined) {
+    const newParentId = parsed.data.parentId;
+    if (newParentId === id) {
+      return NextResponse.json({ error: '自分自身を親カテゴリーにはできません' }, { status: 400 });
+    }
+    if (newParentId !== null) {
+      const { data: all, error: allError } = await supabase
+        .from('menu_categories')
+        .select('id, name, sort_order, parent_id')
+        .eq('store_id', storeId);
+      if (allError) return NextResponse.json({ error: allError.message }, { status: 500 });
+
+      const byId = indexCategories((all ?? []) as CategoryNode[]);
+      if (!byId.has(newParentId)) {
+        return NextResponse.json({ error: '親カテゴリーが見つかりません' }, { status: 400 });
+      }
+      // 循環防止: 新しい親が、このカテゴリの子孫でないことを確認する。
+      let cursor: string | null = newParentId;
+      while (cursor) {
+        if (cursor === id) {
+          return NextResponse.json({ error: '自分の子孫を親カテゴリーにはできません' }, { status: 400 });
+        }
+        cursor = byId.get(cursor)?.parent_id ?? null;
+      }
+      const parentDepth = categoryDepth(newParentId, byId);
+      if (parentDepth === null || parentDepth >= 2) {
+        return NextResponse.json({ error: 'これ以上深い階層のカテゴリーは作成できません (大→中→小の3階層まで)' }, { status: 400 });
+      }
+      // 移動先の階層に、このカテゴリ自身の子がいると4階層になってしまうため禁止する。
+      const hasChildren = (all ?? []).some((c) => c.parent_id === id);
+      if (hasChildren && parentDepth >= 1) {
+        return NextResponse.json(
+          { error: '子カテゴリーを持つカテゴリーは、大カテゴリー以外の下には移動できません (4階層になってしまうため)' },
+          { status: 400 },
+        );
+      }
+    }
+    patch.parent_id = newParentId;
+  }
+
   const { data, error } = await supabase
     .from('menu_categories')
     .update(patch)
     .eq('id', id)
     .eq('store_id', storeId)
-    .select('id, name, sort_order')
+    .select('id, name, sort_order, parent_id')
     .maybeSingle();
 
   if (error) {
@@ -45,6 +88,7 @@ export const PATCH = withPosStaff('manager', async (_session, req, ctx: RouteCon
 });
 
 // カテゴリ削除。所属していた商品は「未分類」扱いになる (category_id が null になるだけ、商品自体は消えない)。
+// 子カテゴリーがあった場合は親を1階層上に昇格させる (ON DELETE SET NULL、消えない)。
 export const DELETE = withPosStaff('manager', async (_session, _req, ctx: RouteContext) => {
   const { id } = await ctx.params;
   const storeId = getPosStoreId();

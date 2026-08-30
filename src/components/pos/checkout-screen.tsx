@@ -1,13 +1,14 @@
 'use client';
 
-import type { CartLine, PaymentMethod } from '@/lib/pos-types';
+import type { PaymentMethod } from '@/lib/pos-types';
+import type { OrderItemRecord } from '@/lib/pos-order-orders-client';
 import { computeChange, money } from '@/lib/money';
 
 type Totals = { subtotal: number; vat: number; service: number; couponDiscount: number; total: number };
 
 export function CheckoutScreen({
   selectedTable,
-  cart,
+  confirmedItems,
   totals,
   vatRate,
   serviceRate,
@@ -32,9 +33,11 @@ export function CheckoutScreen({
   onConfirmCard,
   onBackToOrder,
   onComplete,
+  completing,
+  completeError,
 }: {
   selectedTable: string | null;
-  cart: CartLine[];
+  confirmedItems: OrderItemRecord[];
   totals: Totals;
   vatRate: number;
   serviceRate: number;
@@ -59,6 +62,8 @@ export function CheckoutScreen({
   onConfirmCard: () => void;
   onBackToOrder: () => void;
   onComplete: () => void;
+  completing: boolean;
+  completeError: string | null;
 }) {
   const usdReceived = parseFloat(cashUsdReceivedStr) || 0;
   const khrReceived = parseInt(cashKhrReceivedStr, 10) || 0;
@@ -76,9 +81,10 @@ export function CheckoutScreen({
   const khrPresets = [0, 1000, 2000, 5000];
 
   const canComplete =
-    (paymentTab === 'cash' && change.ok) ||
-    (paymentTab === 'qr' && qrConfirmed) ||
-    (paymentTab === 'card' && cardConfirmed);
+    !completing &&
+    ((paymentTab === 'cash' && change.ok) ||
+      (paymentTab === 'qr' && qrConfirmed) ||
+      (paymentTab === 'card' && cardConfirmed));
 
   const tabs: { key: PaymentMethod; label: string }[] = [
     { key: 'cash', label: '現金' },
@@ -99,12 +105,12 @@ export function CheckoutScreen({
           <div className="text-sm font-bold">テーブル {selectedTable} の会計</div>
         </div>
         <div className="flex flex-1 flex-col gap-2 overflow-auto px-4.5 py-3.5">
-          {cart.map((line) => (
+          {confirmedItems.map((line) => (
             <div key={line.id} className="flex justify-between text-[13px]">
               <span>
-                {line.name} × {line.qty}
+                {line.menu_name} × {line.qty}
               </span>
-              <span className="text-muted-foreground">${money(line.unitPrice * line.qty)}</span>
+              <span className="text-muted-foreground">${money(line.line_total)}</span>
             </div>
           ))}
         </div>
@@ -310,6 +316,7 @@ export function CheckoutScreen({
           </div>
         )}
 
+        {completeError && <div className="text-[12px] text-destructive">{completeError}</div>}
         <button
           onClick={onComplete}
           disabled={!canComplete}
@@ -318,7 +325,7 @@ export function CheckoutScreen({
             (canComplete ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground')
           }
         >
-          会計を完了する
+          {completing ? '処理中…' : '会計を完了する'}
         </button>
       </div>
     </div>

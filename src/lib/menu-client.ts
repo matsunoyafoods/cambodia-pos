@@ -36,7 +36,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export type PosMenuCategory = { id: string; name: string; sort_order: number };
+export type PosMenuCategory = { id: string; name: string; sort_order: number; parent_id: string | null };
 
 export type PosMenuItemRecord = {
   id: string;
@@ -52,12 +52,16 @@ export function listMenuCategories(): Promise<{ categories: PosMenuCategory[] }>
   return request('/api/menu/categories');
 }
 
-export function createMenuCategory(name: string): Promise<{ category: PosMenuCategory }> {
-  return request('/api/menu/categories', { method: 'POST', body: JSON.stringify({ name }) });
+export function createMenuCategory(name: string, parentId: string | null = null): Promise<{ category: PosMenuCategory }> {
+  return request('/api/menu/categories', { method: 'POST', body: JSON.stringify({ name, parentId }) });
 }
 
 export function renameMenuCategory(id: string, name: string): Promise<{ category: PosMenuCategory }> {
   return request(`/api/menu/categories/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) });
+}
+
+export function reparentMenuCategory(id: string, parentId: string | null): Promise<{ category: PosMenuCategory }> {
+  return request(`/api/menu/categories/${id}`, { method: 'PATCH', body: JSON.stringify({ parentId }) });
 }
 
 export function deleteMenuCategory(id: string): Promise<{ ok: boolean }> {
