@@ -37,7 +37,7 @@ export const PATCH = withPosStaff('manager', async (_session, req, ctx: RouteCon
     .update(patch)
     .eq('id', id)
     .eq('store_id', storeId)
-    .select('id, category_id, name, price, active, sort_order')
+    .select('id, category_id, name, price, active, sort_order, image_url')
     .maybeSingle();
 
   if (error) {

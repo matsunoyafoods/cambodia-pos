@@ -37,6 +37,8 @@ import {
   updateMenuItem,
   updateMenuOptionChoice,
   updateMenuOptionGroup,
+  uploadMenuItemImage,
+  deleteMenuItemImage,
   PosMenuApiError,
   type PosMenuCategory,
   type PosMenuItemRecord,
@@ -107,6 +109,7 @@ export function SettingsScreen() {
       if (isPosNative) {
         const {
           vatRate,
+          vatInclusive,
           serviceRate,
           khrRate,
           cashEnabled,
@@ -118,6 +121,7 @@ export function SettingsScreen() {
         } = settings;
         const s = await updateGeneralSettings({
           vatRate,
+          vatInclusive,
           serviceRate,
           khrRate,
           cashEnabled,
@@ -208,6 +212,37 @@ export function SettingsScreen() {
                   className="h-10 w-40 rounded-lg border border-border px-3 text-[13.5px] disabled:opacity-60"
                 />
               </Field>
+              {isPosNative && (
+                <Field label="VATの扱い">
+                  <div className="flex w-fit gap-1.5 rounded-lg bg-secondary p-1">
+                    <button
+                      type="button"
+                      disabled={!canManageSettings}
+                      onClick={() => update('vatInclusive', false)}
+                      className={
+                        'h-9 rounded-md px-4 text-[12.5px] font-semibold disabled:opacity-60 ' +
+                        (!settings.vatInclusive ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground')
+                      }
+                    >
+                      税別 (外税)
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!canManageSettings}
+                      onClick={() => update('vatInclusive', true)}
+                      className={
+                        'h-9 rounded-md px-4 text-[12.5px] font-semibold disabled:opacity-60 ' +
+                        (settings.vatInclusive ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground')
+                      }
+                    >
+                      税込み (内税)
+                    </button>
+                  </div>
+                  <div className="mt-1.5 text-[11px] text-muted-foreground">
+                    税別: メニュー価格にVATを上乗せして合計を計算します。税込み: メニュー価格に既にVATが含まれているものとして扱い、VAT額は内訳表示のみで合計には加算しません(サービス料は税別・税込みどちらでも合計に加算されます)。
+                  </div>
+                </Field>
+              )}
               <Field label="サービス料率 (%)">
                 <input
                   value={settings.serviceRate}
@@ -575,6 +610,7 @@ function MenuTab() {
   const [showAddItem, setShowAddItem] = useState(false);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [optionsItemId, setOptionsItemId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'category' | 'flat'>('category');
 
   const load = useCallback(() => {
     setLoadError(null);
@@ -691,7 +727,31 @@ function MenuTab() {
       {/* 商品 */}
       <div className="flex flex-col gap-2.5">
         <div className="mb-0.5 flex items-center justify-between">
-          <div className="text-[13.5px] font-bold">商品一覧</div>
+          <div className="flex items-center gap-3">
+            <div className="text-[13.5px] font-bold">商品一覧</div>
+            {items && items.length > 0 && (
+              <div className="flex w-fit gap-1 rounded-lg bg-secondary p-0.5">
+                <button
+                  onClick={() => setViewMode('category')}
+                  className={
+                    'h-7 rounded-md px-2.5 text-[11.5px] font-semibold ' +
+                    (viewMode === 'category' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground')
+                  }
+                >
+                  カテゴリ別
+                </button>
+                <button
+                  onClick={() => setViewMode('flat')}
+                  className={
+                    'h-7 rounded-md px-2.5 text-[11.5px] font-semibold ' +
+                    (viewMode === 'flat' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground')
+                  }
+                >
+                  一覧
+                </button>
+              </div>
+            )}
+          </div>
           <button
             onClick={() => setShowAddItem((v) => !v)}
             disabled={!categories}
@@ -718,63 +778,141 @@ function MenuTab() {
           </div>
         )}
 
-        {items?.map((item) => (
-          <div key={item.id} className="rounded-xl border border-border px-4 py-3">
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <div className={'truncate text-[13px] font-semibold ' + (item.active ? '' : 'text-muted-foreground line-through')}>
-                    {item.name}
-                  </div>
-                  {!item.active && (
-                    <span className="rounded bg-secondary px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">非表示</span>
-                  )}
+        {items && items.length > 0 && categories && viewMode === 'category'
+          ? [...categories, null].map((c) => {
+              const groupItems = items.filter((it) => it.category_id === (c ? c.id : null) || (c === null && !categories.some((cc) => cc.id === it.category_id)));
+              if (groupItems.length === 0) return null;
+              return (
+                <div key={c ? c.id : 'uncategorized'} className="flex flex-col gap-2">
+                  <div className="mt-1 text-[12px] font-bold text-muted-foreground">{c ? c.name : '未分類'}</div>
+                  {groupItems.map((item) => (
+                    <MenuItemRow
+                      key={item.id}
+                      item={item}
+                      categories={categories}
+                      categoryName={categoryName}
+                      isEditing={editingItemId === item.id}
+                      showOptions={optionsItemId === item.id}
+                      onToggleActive={() => handleToggleActive(item)}
+                      onToggleEdit={() => setEditingItemId((v) => (v === item.id ? null : item.id))}
+                      onToggleOptions={() => setOptionsItemId((v) => (v === item.id ? null : item.id))}
+                      onDelete={() => handleDeleteItem(item.id)}
+                      onEditDone={() => {
+                        setEditingItemId(null);
+                        load();
+                      }}
+                      onRefresh={load}
+                    />
+                  ))}
                 </div>
-                <div className="mt-0.5 text-[11.5px] text-muted-foreground">
-                  {categoryName(item.category_id)} ・ ${item.price.toFixed(2)}
-                </div>
-              </div>
-              <div className="flex flex-shrink-0 items-center gap-2">
-                <button
-                  onClick={() => handleToggleActive(item)}
-                  className="h-8 rounded-lg border border-border px-3 text-xs font-semibold"
-                >
-                  {item.active ? '非表示にする' : '再表示する'}
-                </button>
-                <button
-                  onClick={() => setEditingItemId((v) => (v === item.id ? null : item.id))}
-                  className="h-8 rounded-lg border border-border px-3 text-xs font-semibold"
-                >
-                  編集
-                </button>
-                <button
-                  onClick={() => setOptionsItemId((v) => (v === item.id ? null : item.id))}
-                  className="h-8 rounded-lg border border-border px-3 text-xs font-semibold"
-                >
-                  オプション
-                </button>
-                <button
-                  onClick={() => handleDeleteItem(item.id)}
-                  className="h-8 rounded-lg border border-border px-3 text-xs font-semibold text-destructive"
-                >
-                  削除
-                </button>
-              </div>
-            </div>
-            {editingItemId === item.id && categories && (
-              <EditItemForm
+              );
+            })
+          : items?.map((item) => (
+              <MenuItemRow
+                key={item.id}
                 item={item}
-                categories={categories}
-                onDone={() => {
+                categories={categories ?? []}
+                categoryName={categoryName}
+                isEditing={editingItemId === item.id}
+                showOptions={optionsItemId === item.id}
+                onToggleActive={() => handleToggleActive(item)}
+                onToggleEdit={() => setEditingItemId((v) => (v === item.id ? null : item.id))}
+                onToggleOptions={() => setOptionsItemId((v) => (v === item.id ? null : item.id))}
+                onDelete={() => handleDeleteItem(item.id)}
+                onEditDone={() => {
                   setEditingItemId(null);
                   load();
                 }}
+                onRefresh={load}
               />
-            )}
-            {optionsItemId === item.id && <OptionGroupsPanel itemId={item.id} />}
-          </div>
-        ))}
+            ))}
       </div>
+    </div>
+  );
+}
+
+function MenuItemRow({
+  item,
+  categories,
+  categoryName,
+  isEditing,
+  showOptions,
+  onToggleActive,
+  onToggleEdit,
+  onToggleOptions,
+  onDelete,
+  onEditDone,
+  onRefresh,
+}: {
+  item: PosMenuItemRecord;
+  categories: PosMenuCategory[];
+  categoryName: (id: string | null) => string;
+  isEditing: boolean;
+  showOptions: boolean;
+  onToggleActive: () => void;
+  onToggleEdit: () => void;
+  onToggleOptions: () => void;
+  onDelete: () => void;
+  onEditDone: () => void;
+  onRefresh: () => void;
+}) {
+  return (
+    <div className="rounded-xl border border-border px-4 py-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg bg-secondary text-muted-foreground">
+            {item.image_url ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={item.image_url} alt="" className="h-full w-full object-cover" />
+            ) : (
+              <span className="text-base">🍽</span>
+            )}
+          </div>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <div className={'truncate text-[13px] font-semibold ' + (item.active ? '' : 'text-muted-foreground line-through')}>
+                {item.name}
+              </div>
+              {!item.active && (
+                <span className="rounded bg-secondary px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">非表示</span>
+              )}
+            </div>
+            <div className="mt-0.5 text-[11.5px] text-muted-foreground">
+              {categoryName(item.category_id)} ・ ${item.price.toFixed(2)}
+            </div>
+          </div>
+        </div>
+        <div className="flex flex-shrink-0 items-center gap-2">
+          <button
+            onClick={onToggleActive}
+            className="h-8 rounded-lg border border-border px-3 text-xs font-semibold"
+          >
+            {item.active ? '非表示にする' : '再表示する'}
+          </button>
+          <button
+            onClick={onToggleEdit}
+            className="h-8 rounded-lg border border-border px-3 text-xs font-semibold"
+          >
+            編集
+          </button>
+          <button
+            onClick={onToggleOptions}
+            className="h-8 rounded-lg border border-border px-3 text-xs font-semibold"
+          >
+            オプション
+          </button>
+          <button
+            onClick={onDelete}
+            className="h-8 rounded-lg border border-border px-3 text-xs font-semibold text-destructive"
+          >
+            削除
+          </button>
+        </div>
+      </div>
+      {isEditing && (
+        <EditItemForm item={item} categories={categories} onDone={onEditDone} onRefresh={onRefresh} />
+      )}
+      {showOptions && <OptionGroupsPanel itemId={item.id} />}
     </div>
   );
 }
@@ -948,16 +1086,22 @@ function EditItemForm({
   item,
   categories,
   onDone,
+  onRefresh,
 }: {
   item: PosMenuItemRecord;
   categories: PosMenuCategory[];
   onDone: () => void;
+  onRefresh: () => void;
 }) {
   const [name, setName] = useState(item.name);
   const [price, setPrice] = useState(String(item.price));
   const [categoryId, setCategoryId] = useState<string>(item.category_id ?? '');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [imageUrl, setImageUrl] = useState<string | null>(item.image_url);
+  const [imageUploading, setImageUploading] = useState(false);
+  const [imageError, setImageError] = useState<string | null>(null);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -975,8 +1119,75 @@ function EditItemForm({
     }
   }
 
+  async function handleImageSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setImageUploading(true);
+    setImageError(null);
+    try {
+      const { item: updated } = await uploadMenuItemImage(item.id, file);
+      setImageUrl(updated.image_url);
+      onRefresh();
+    } catch (err) {
+      setImageError(err instanceof PosMenuApiError ? err.message : '画像のアップロードに失敗しました');
+    } finally {
+      setImageUploading(false);
+    }
+  }
+
+  async function handleImageRemove() {
+    setImageUploading(true);
+    setImageError(null);
+    try {
+      const { item: updated } = await deleteMenuItemImage(item.id);
+      setImageUrl(updated.image_url);
+      onRefresh();
+    } catch (err) {
+      setImageError(err instanceof PosMenuApiError ? err.message : '画像の削除に失敗しました');
+    } finally {
+      setImageUploading(false);
+    }
+  }
+
   return (
     <form onSubmit={submit} className="mt-3 flex flex-col gap-2.5 border-t border-border pt-3">
+      <div className="flex items-center gap-3">
+        <div className="flex h-16 w-16 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-secondary text-muted-foreground">
+          {imageUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={imageUrl} alt="" className="h-full w-full object-cover" />
+          ) : (
+            <span className="text-xl">🍽</span>
+          )}
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <div className="flex gap-2">
+            <label className="flex h-8 cursor-pointer items-center rounded-lg border border-border px-3 text-xs font-semibold">
+              {imageUploading ? 'アップロード中…' : imageUrl ? '画像を変更' : '＋ 画像を追加'}
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                onChange={handleImageSelect}
+                disabled={imageUploading}
+                className="hidden"
+              />
+            </label>
+            {imageUrl && (
+              <button
+                type="button"
+                onClick={handleImageRemove}
+                disabled={imageUploading}
+                className="h-8 rounded-lg border border-border px-3 text-xs font-semibold text-destructive disabled:opacity-60"
+              >
+                削除
+              </button>
+            )}
+          </div>
+          <div className="text-[10.5px] text-muted-foreground">jpg・png・webp / 3MBまで</div>
+          {imageError && <div className="text-[11px] text-destructive">{imageError}</div>}
+        </div>
+      </div>
       <div className="flex gap-2.5">
         <input
           value={name}

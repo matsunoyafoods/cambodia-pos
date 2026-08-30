@@ -222,12 +222,19 @@ export function PosApp() {
 
   const totals = useMemo(() => {
     const subtotal = cart.reduce((s, l) => s + l.unitPrice * l.qty, 0);
-    const vat = subtotal * (settings.vatRate / 100);
+    // 税込み(内税)設定の場合、メニュー価格に既にVATが含まれているものとして扱う。
+    // VAT額は内訳表示用にsubtotalから逆算するだけで、合計には加算しない
+    // (サービス料は税別・税込みどちらでも合計に加算する)。
+    const vat = settings.vatInclusive
+      ? subtotal - subtotal / (1 + settings.vatRate / 100)
+      : subtotal * (settings.vatRate / 100);
     const service = subtotal * (settings.serviceRate / 100);
     const couponDiscount = couponApplied ? Math.min(5, subtotal) : 0;
-    const total = Math.max(0, subtotal + vat + service - couponDiscount);
+    const total = settings.vatInclusive
+      ? Math.max(0, subtotal + service - couponDiscount)
+      : Math.max(0, subtotal + vat + service - couponDiscount);
     return { subtotal, vat, service, couponDiscount, total };
-  }, [cart, couponApplied, settings.vatRate, settings.serviceRate]);
+  }, [cart, couponApplied, settings.vatRate, settings.vatInclusive, settings.serviceRate]);
 
   function resetOrderState() {
     setCustomerLinked(false);
@@ -456,9 +463,11 @@ export function PosApp() {
           onInc={incLine}
           onDec={decLine}
           subtotal={totals.subtotal}
-          taxService={totals.vat + totals.service}
+          vat={totals.vat}
+          service={totals.service}
           vatRate={settings.vatRate}
           serviceRate={settings.serviceRate}
+          vatInclusive={settings.vatInclusive}
           total={totals.total}
           onBackToTableMap={() => setScreen('tablemap')}
           onCheckout={() => cart.length > 0 && setScreen('checkout')}
@@ -470,6 +479,9 @@ export function PosApp() {
           selectedTable={selectedTable}
           cart={cart}
           totals={totals}
+          vatRate={settings.vatRate}
+          serviceRate={settings.serviceRate}
+          vatInclusive={settings.vatInclusive}
           couponApplied={couponApplied}
           customerLinked={customerLinked}
           onLinkCustomer={() => setCustomerLinked(true)}

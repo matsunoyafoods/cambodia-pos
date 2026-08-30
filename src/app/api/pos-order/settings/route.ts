@@ -20,6 +20,7 @@ export async function GET() {
   const settings: PosSettings = {
     storeId,
     vatRate: typeof stored.vatRate === 'number' ? stored.vatRate : DEFAULT_SETTINGS.vatRate,
+    vatInclusive: typeof stored.vatInclusive === 'boolean' ? stored.vatInclusive : DEFAULT_SETTINGS.vatInclusive,
     serviceRate: typeof stored.serviceRate === 'number' ? stored.serviceRate : DEFAULT_SETTINGS.serviceRate,
     khrRate: typeof stored.khrRate === 'number' ? stored.khrRate : DEFAULT_SETTINGS.khrRate,
     cashEnabled: typeof stored.cashEnabled === 'boolean' ? stored.cashEnabled : DEFAULT_SETTINGS.cashEnabled,

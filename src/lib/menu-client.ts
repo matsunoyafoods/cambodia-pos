@@ -45,6 +45,7 @@ export type PosMenuItemRecord = {
   price: number;
   active: boolean;
   sort_order: number;
+  image_url: string | null;
 };
 
 export function listMenuCategories(): Promise<{ categories: PosMenuCategory[] }> {
@@ -82,6 +83,27 @@ export function updateMenuItem(
 
 export function deleteMenuItem(id: string): Promise<{ ok: boolean }> {
   return request(`/api/menu/items/${id}`, { method: 'DELETE' });
+}
+
+export async function uploadMenuItemImage(id: string, file: File): Promise<{ item: PosMenuItemRecord }> {
+  const form = new FormData();
+  form.append('file', file);
+  const res = await fetch(`/api/menu/items/${id}/image`, { method: 'POST', body: form });
+  if (!res.ok) {
+    let message = `アップロードに失敗しました (${res.status})`;
+    try {
+      const body = (await res.json()) as { error?: string };
+      if (body?.error) message = body.error;
+    } catch {
+      // ignore
+    }
+    throw new PosMenuApiError(message, res.status);
+  }
+  return res.json() as Promise<{ item: PosMenuItemRecord }>;
+}
+
+export function deleteMenuItemImage(id: string): Promise<{ item: PosMenuItemRecord }> {
+  return request(`/api/menu/items/${id}/image`, { method: 'DELETE' });
 }
 
 export type PosMenuOptionChoice = {

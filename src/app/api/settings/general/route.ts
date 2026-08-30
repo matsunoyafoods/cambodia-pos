@@ -15,6 +15,7 @@ function toPosSettings(storeId: string, raw: unknown): PosSettings {
   return {
     storeId,
     vatRate: typeof stored.vatRate === 'number' ? stored.vatRate : DEFAULT_SETTINGS.vatRate,
+    vatInclusive: typeof stored.vatInclusive === 'boolean' ? stored.vatInclusive : DEFAULT_SETTINGS.vatInclusive,
     serviceRate: typeof stored.serviceRate === 'number' ? stored.serviceRate : DEFAULT_SETTINGS.serviceRate,
     khrRate: typeof stored.khrRate === 'number' ? stored.khrRate : DEFAULT_SETTINGS.khrRate,
     cashEnabled: typeof stored.cashEnabled === 'boolean' ? stored.cashEnabled : DEFAULT_SETTINGS.cashEnabled,
@@ -43,6 +44,7 @@ const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 const patchSchema = z.object({
   vatRate: z.number().min(0).max(100).optional(),
+  vatInclusive: z.boolean().optional(),
   serviceRate: z.number().min(0).max(100).optional(),
   khrRate: z.number().positive().optional(),
   cashEnabled: z.boolean().optional(),

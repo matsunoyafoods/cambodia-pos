@@ -23,6 +23,8 @@ export type MenuItem = {
   optionGroups?: OptionGroup[];
   /** ハッピーアワー中のみ使う基準価格 (未設定 = ハッピーアワー対象外の商品) */
   happyHourPrice?: number;
+  /** 商品画像の公開URL (未設定 = 画像なし、レジ画面ではプレースホルダーアイコン表示) */
+  imageUrl?: string;
 };
 
 export type SelectedOption = {
@@ -56,6 +58,8 @@ export type PaymentMethod = 'cash' | 'qr' | 'card';
 export type PosSettings = {
   storeId: string;
   vatRate: number; // %
+  /** true = メニュー価格はVAT込み表示 (内税、VATはsubtotalから逆算し合計には加算しない)。false = 従来通りVAT別 (外税、合計に加算) */
+  vatInclusive: boolean;
   serviceRate: number; // %
   khrRate: number; // 1 USD = ? KHR
   cashEnabled: boolean;
@@ -70,6 +74,7 @@ export type PosSettings = {
 export const DEFAULT_SETTINGS: PosSettings = {
   storeId: 'default',
   vatRate: 10,
+  vatInclusive: false,
   serviceRate: 10,
   khrRate: 4100,
   cashEnabled: true,

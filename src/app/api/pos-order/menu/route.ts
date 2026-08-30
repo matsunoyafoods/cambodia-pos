@@ -12,6 +12,7 @@ type Row = {
   name: string;
   price: number;
   happy_hour_price: number | null;
+  image_url: string | null;
   sort_order: number;
   menu_categories: { name: string } | null;
   menu_option_groups: {
@@ -31,7 +32,7 @@ export async function GET() {
   const { data, error } = await supabase
     .from('menu_items')
     .select(
-      `id, name, price, happy_hour_price, sort_order,
+      `id, name, price, happy_hour_price, image_url, sort_order,
        menu_categories ( name ),
        menu_option_groups ( id, key, label, required, sort_order,
          menu_option_choices ( id, choice_key, label, price_delta, sort_order )
@@ -53,6 +54,7 @@ export async function GET() {
     name: row.name,
     price: Number(row.price),
     happyHourPrice: row.happy_hour_price != null ? Number(row.happy_hour_price) : undefined,
+    imageUrl: row.image_url ?? undefined,
     optionGroups: (row.menu_option_groups ?? [])
       .slice()
       .sort((a, b) => a.sort_order - b.sort_order)

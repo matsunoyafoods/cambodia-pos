@@ -9,6 +9,9 @@ export function CheckoutScreen({
   selectedTable,
   cart,
   totals,
+  vatRate,
+  serviceRate,
+  vatInclusive,
   couponApplied,
   customerLinked,
   onLinkCustomer,
@@ -33,6 +36,9 @@ export function CheckoutScreen({
   selectedTable: string | null;
   cart: CartLine[];
   totals: Totals;
+  vatRate: number;
+  serviceRate: number;
+  vatInclusive: boolean;
   couponApplied: boolean;
   customerLinked: boolean;
   onLinkCustomer: () => void;
@@ -107,14 +113,18 @@ export function CheckoutScreen({
             <span>小計</span>
             <span>${money(totals.subtotal)}</span>
           </div>
-          <div className="flex justify-between text-[12.5px]">
-            <span>VAT 10%</span>
-            <span>${money(totals.vat)}</span>
-          </div>
-          <div className="flex justify-between text-[12.5px]">
-            <span>サービス料 10%</span>
-            <span>${money(totals.service)}</span>
-          </div>
+          {vatRate > 0 && (
+            <div className="flex justify-between text-[12.5px]">
+              <span>VAT {vatRate}%{vatInclusive ? ' (税込み)' : ''}</span>
+              <span>${money(totals.vat)}</span>
+            </div>
+          )}
+          {serviceRate > 0 && (
+            <div className="flex justify-between text-[12.5px]">
+              <span>サービス料 {serviceRate}%</span>
+              <span>${money(totals.service)}</span>
+            </div>
+          )}
           {couponApplied && (
             <div className="flex justify-between text-[12.5px] text-brand">
               <span>クーポン割引</span>

@@ -56,9 +56,11 @@ export function OrderScreen({
   onInc,
   onDec,
   subtotal,
-  taxService,
+  vat,
+  service,
   vatRate,
   serviceRate,
+  vatInclusive,
   total,
   onBackToTableMap,
   onCheckout,
@@ -75,9 +77,11 @@ export function OrderScreen({
   onInc: (lineId: string) => void;
   onDec: (lineId: string) => void;
   subtotal: number;
-  taxService: number;
+  vat: number;
+  service: number;
   vatRate: number;
   serviceRate: number;
+  vatInclusive: boolean;
   total: number;
   onBackToTableMap: () => void;
   onCheckout: () => void;
@@ -104,13 +108,13 @@ export function OrderScreen({
           <OrderHeaderTimers session={session} />
         </div>
 
-        <div className="flex gap-1.5 px-5 pt-3.5">
+        <div className="flex gap-1.5 overflow-x-auto px-5 pt-3.5 [scrollbar-width:thin]">
           {categories.map((c) => (
             <button
               key={c}
               onClick={() => onCategory(c)}
               className={
-                'h-[34px] rounded-lg border px-4 text-sm font-semibold ' +
+                'h-[34px] flex-shrink-0 whitespace-nowrap rounded-lg border px-4 text-sm font-semibold ' +
                 (activeCategory === c
                   ? 'border-primary bg-primary text-primary-foreground'
                   : 'border-border bg-card text-foreground')
@@ -150,8 +154,13 @@ export function OrderScreen({
                   (isHappyHourItem ? 'border-amber-300 bg-amber-50' : 'border-border bg-card')
                 }
               >
-                <div className="flex h-16 items-center justify-center rounded-lg bg-secondary text-muted-foreground">
-                  🍽
+                <div className="flex h-16 items-center justify-center overflow-hidden rounded-lg bg-secondary text-muted-foreground">
+                  {m.imageUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={m.imageUrl} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    '🍽'
+                  )}
                 </div>
                 <div>
                   <div className="flex items-end justify-between">
@@ -211,10 +220,18 @@ export function OrderScreen({
             <span>小計</span>
             <span>${money(subtotal)}</span>
           </div>
-          <div className="flex justify-between text-xs text-muted-foreground">
-            <span>VAT {vatRate}% + サービス料 {serviceRate}%</span>
-            <span>${money(taxService)}</span>
-          </div>
+          {vatRate > 0 && (
+            <div className="flex justify-between text-xs text-muted-foreground">
+              <span>VAT {vatRate}%{vatInclusive ? ' (税込み)' : ''}</span>
+              <span>${money(vat)}</span>
+            </div>
+          )}
+          {serviceRate > 0 && (
+            <div className="flex justify-between text-xs text-muted-foreground">
+              <span>サービス料 {serviceRate}%</span>
+              <span>${money(service)}</span>
+            </div>
+          )}
           <div className="mt-1 flex justify-between text-[15px] font-bold">
             <span>合計</span>
             <span>${money(total)}</span>

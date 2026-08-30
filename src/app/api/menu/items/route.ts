@@ -10,7 +10,7 @@ export const GET = withPosStaff('manager', async () => {
 
   const { data, error } = await supabase
     .from('menu_items')
-    .select('id, category_id, name, price, active, sort_order')
+    .select('id, category_id, name, price, active, sort_order, image_url')
     .eq('store_id', storeId)
     .order('sort_order')
     .order('name');
@@ -62,7 +62,7 @@ export const POST = withPosStaff('manager', async (_session, req) => {
       price: parsed.data.price,
       sort_order: nextSortOrder,
     })
-    .select('id, category_id, name, price, active, sort_order')
+    .select('id, category_id, name, price, active, sort_order, image_url')
     .single();
 
   if (error) {
