@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useStaff } from './staff-context';
 import {
@@ -12,6 +12,7 @@ import {
   type TableLayoutItemRecord,
   type TableLayoutKind,
 } from '@/lib/table-layout-client';
+import { TABLE_LAYOUT_CANVAS_HEIGHT, TABLE_LAYOUT_CANVAS_WIDTH } from '@/lib/table-layout-geometry';
 
 const KIND_META: Record<TableLayoutKind, { label: string; addLabel: string; defaultCode: string }> = {
   table: { label: '卓', addLabel: '＋ 卓を追加', defaultCode: '新卓' },
@@ -21,8 +22,23 @@ const KIND_META: Record<TableLayoutKind, { label: string; addLabel: string; defa
 };
 const ADD_KINDS: TableLayoutKind[] = ['table', 'pillar', 'counter'];
 
-// pos.table_layouts (POS ネイティブ) にそのまま対応する画面。位置・サイズ・名前・席数の
-// 変更はすべて都度 API に反映される (以前はローカル state のみでリロードで消えていた)。
+// クライアント側だけで作った未保存の新規項目には tmp- プレフィックスの仮IDを振る。
+// 「保存」を押した時点で isNewItem() で見分けて POST するか PATCH するかを判定する。
+function isNewItem(id: string) {
+  return id.startsWith('tmp-');
+}
+
+type Clipboard = {
+  table_code: string;
+  kind: TableLayoutKind;
+  seats: number;
+  width: number;
+  height: number;
+};
+
+// pos.table_layouts (POS ネイティブ) に対応する画面。
+// 編集はまずローカル state だけに反映し (ドラッグ・サイズ変更・複製など)、
+// ヘッダーの「保存」を押した時点でまとめて API に反映する。
 export function TableLayoutScreen() {
   const router = useRouter();
   const me = useStaff();
@@ -30,17 +46,27 @@ export function TableLayoutScreen() {
   const canManage = isPosNative && (me.role === 'owner' || me.role === 'manager');
 
   const [items, setItems] = useState<TableLayoutItemRecord[] | null>(null);
+  const [dirtyIds, setDirtyIds] = useState<Set<string>>(new Set());
+  const [deletedIds, setDeletedIds] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [nameDraft, setNameDraft] = useState('');
+  const [clipboard, setClipboard] = useState<Clipboard | null>(null);
   const nextIndex = useRef(1);
   const canvasRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(() => {
     setError(null);
     listTableLayout()
-      .then((res) => setItems(res.items))
+      .then((res) => {
+        setItems(res.items);
+        setDirtyIds(new Set());
+        setDeletedIds(new Set());
+        setSaved(false);
+      })
       .catch((err) => setError(err instanceof PosTableLayoutApiError ? err.message : '取得に失敗しました'));
   }, []);
 
@@ -49,49 +75,154 @@ export function TableLayoutScreen() {
   }, [load]);
 
   const selected = items?.find((t) => t.id === selectedId) ?? null;
+  const hasUnsavedChanges = dirtyIds.size > 0 || deletedIds.size > 0 || (items ?? []).some((t) => isNewItem(t.id));
 
   useEffect(() => {
     setNameDraft(selected?.table_code ?? '');
   }, [selected?.id, selected?.table_code]);
 
-  async function addItem(kind: TableLayoutKind) {
+  // 保存されていない変更があるまま離れようとしたら一言確認する。
+  useEffect(() => {
+    function onBeforeUnload(e: BeforeUnloadEvent) {
+      if (!hasUnsavedChanges) return;
+      e.preventDefault();
+      e.returnValue = '';
+    }
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [hasUnsavedChanges]);
+
+  function goBack() {
+    if (hasUnsavedChanges && !window.confirm('保存されていない変更があります。保存せずに戻りますか？')) {
+      return;
+    }
+    router.push('/pos');
+  }
+
+  function markDirty(id: string) {
+    if (isNewItem(id)) return; // 新規はどのみち保存時に POST するので dirty 管理は不要
+    setDirtyIds((prev) => {
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+  }
+
+  function updateLocal(id: string, patch: Partial<TableLayoutItemRecord>) {
+    setItems((prev) => (prev ?? []).map((t) => (t.id === id ? { ...t, ...patch } : t)));
+    markDirty(id);
+    setSaved(false);
+  }
+
+  function nextAvailableName(base: string, existing: Set<string>): string {
+    const m = base.match(/^(.*?)(\d+)$/);
+    if (m) {
+      let n = parseInt(m[2], 10) + 1;
+      let candidate = `${m[1]}${n}`;
+      while (existing.has(candidate)) {
+        n += 1;
+        candidate = `${m[1]}${n}`;
+      }
+      return candidate;
+    }
+    let candidate = `${base}コピー`;
+    let i = 2;
+    while (existing.has(candidate)) {
+      candidate = `${base}コピー${i}`;
+      i += 1;
+    }
+    return candidate;
+  }
+
+  function addItem(kind: TableLayoutKind) {
     const n = nextIndex.current++;
     const meta = KIND_META[kind];
-    try {
-      const { item } = await createTableLayoutItem({
-        tableCode: `${meta.defaultCode}${n}`,
-        kind,
-        x: 24 + ((n * 37) % 500),
-        y: 24 + ((n * 53) % 400),
-      });
-      setItems((prev) => [...(prev ?? []), item]);
-      setSelectedId(item.id);
-    } catch (err) {
-      setError(err instanceof PosTableLayoutApiError ? err.message : '追加に失敗しました');
-    }
+    const width = kind === 'table' ? 84 : kind === 'pillar' ? 32 : 160;
+    const height = kind === 'table' ? 64 : kind === 'pillar' ? 32 : 40;
+    const existing = new Set((items ?? []).map((t) => t.table_code));
+    const newItem: TableLayoutItemRecord = {
+      id: `tmp-${Date.now()}-${n}`,
+      table_code: nextAvailableName(`${meta.defaultCode}${n}`, existing),
+      kind,
+      seats: kind === 'table' ? 4 : 0,
+      x: Math.min(TABLE_LAYOUT_CANVAS_WIDTH - width - 4, 24 + ((n * 37) % 500)),
+      y: Math.min(TABLE_LAYOUT_CANVAS_HEIGHT - height - 4, 24 + ((n * 53) % 400)),
+      width,
+      height,
+      sort_order: (items ?? []).length,
+    };
+    setItems((prev) => [...(prev ?? []), newItem]);
+    setSelectedId(newItem.id);
+    setSaved(false);
   }
 
-  async function patchItem(id: string, patch: Parameters<typeof updateTableLayoutItem>[1]) {
-    try {
-      const { item } = await updateTableLayoutItem(id, patch);
-      setItems((prev) => (prev ?? []).map((t) => (t.id === id ? item : t)));
-    } catch (err) {
-      setError(err instanceof PosTableLayoutApiError ? err.message : '更新に失敗しました');
-      load();
-    }
+  function copySelected() {
+    if (!selected) return;
+    setClipboard({
+      table_code: selected.table_code,
+      kind: selected.kind,
+      seats: selected.seats,
+      width: selected.width,
+      height: selected.height,
+    });
   }
 
-  async function deleteSelected() {
+  function pasteClipboard() {
+    if (!clipboard) return;
+    const n = nextIndex.current++;
+    const existing = new Set((items ?? []).map((t) => t.table_code));
+    const base = selected && selected.kind === clipboard.kind ? selected : null;
+    const x = Math.max(4, Math.min(TABLE_LAYOUT_CANVAS_WIDTH - clipboard.width - 4, (base?.x ?? 24) + 20));
+    const y = Math.max(4, Math.min(TABLE_LAYOUT_CANVAS_HEIGHT - clipboard.height - 4, (base?.y ?? 24) + 20));
+    const newItem: TableLayoutItemRecord = {
+      id: `tmp-${Date.now()}-${n}`,
+      table_code: nextAvailableName(clipboard.table_code, existing),
+      kind: clipboard.kind,
+      seats: clipboard.seats,
+      x,
+      y,
+      width: clipboard.width,
+      height: clipboard.height,
+      sort_order: (items ?? []).length,
+    };
+    setItems((prev) => [...(prev ?? []), newItem]);
+    setSelectedId(newItem.id);
+    setSaved(false);
+  }
+
+  // Cmd/Ctrl+C ・ Cmd/Ctrl+V での複製もサポートする (入力欄にフォーカス中は無効)。
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (!canManage) return;
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return;
+      if (!(e.metaKey || e.ctrlKey)) return;
+      if (e.key === 'c' || e.key === 'C') {
+        copySelected();
+      } else if (e.key === 'v' || e.key === 'V') {
+        e.preventDefault();
+        pasteClipboard();
+      }
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canManage, selected, clipboard, items]);
+
+  function deleteSelected() {
     if (!selectedId) return;
     const id = selectedId;
     setSelectedId(null);
-    try {
-      await deleteTableLayoutItem(id);
-      setItems((prev) => (prev ?? []).filter((t) => t.id !== id));
-    } catch (err) {
-      setError(err instanceof PosTableLayoutApiError ? err.message : '削除に失敗しました');
-      load();
+    setItems((prev) => (prev ?? []).filter((t) => t.id !== id));
+    setDirtyIds((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+    if (!isNewItem(id)) {
+      setDeletedIds((prev) => new Set(prev).add(id));
     }
+    setSaved(false);
   }
 
   function onDrop(e: React.DragEvent<HTMLDivElement>) {
@@ -102,8 +233,7 @@ export function TableLayoutScreen() {
     const rect = canvasRef.current.getBoundingClientRect();
     const x = Math.max(4, Math.min(rect.width - item.width - 4, e.clientX - rect.left - item.width / 2));
     const y = Math.max(4, Math.min(rect.height - item.height - 4, e.clientY - rect.top - item.height / 2));
-    setItems((prev) => (prev ?? []).map((t) => (t.id === draggingId ? { ...t, x: Math.round(x), y: Math.round(y) } : t)));
-    patchItem(draggingId, { x: Math.round(x), y: Math.round(y) });
+    updateLocal(draggingId, { x: Math.round(x), y: Math.round(y) });
     setDraggingId(null);
   }
 
@@ -114,23 +244,102 @@ export function TableLayoutScreen() {
       setNameDraft(selected.table_code);
       return;
     }
-    patchItem(selected.id, { tableCode: value });
+    updateLocal(selected.id, { table_code: value });
   }
 
   function resizeSelected(dw: number, dh: number) {
     if (!selected) return;
     const width = Math.max(24, Math.min(600, selected.width + dw));
     const height = Math.max(24, Math.min(600, selected.height + dh));
-    setItems((prev) => (prev ?? []).map((t) => (t.id === selected.id ? { ...t, width, height } : t)));
-    patchItem(selected.id, { width, height });
+    updateLocal(selected.id, { width, height });
+  }
+
+  function setSizeDirect(field: 'width' | 'height', raw: string) {
+    if (!selected) return;
+    const value = parseInt(raw, 10);
+    if (Number.isNaN(value)) return;
+    const clamped = Math.max(24, Math.min(600, value));
+    updateLocal(selected.id, { [field]: clamped } as Partial<TableLayoutItemRecord>);
   }
 
   function seatsDelta(delta: number) {
     if (!selected) return;
     const seats = Math.max(0, selected.seats + delta);
-    setItems((prev) => (prev ?? []).map((t) => (t.id === selected.id ? { ...t, seats } : t)));
-    patchItem(selected.id, { seats });
+    updateLocal(selected.id, { seats });
   }
+
+  async function saveAll() {
+    if (!items) return;
+    setSaving(true);
+    setError(null);
+    let hadError = false;
+    const stillDirty = new Set<string>();
+    const stillDeleted = new Set<string>();
+
+    for (const id of deletedIds) {
+      try {
+        await deleteTableLayoutItem(id);
+      } catch (err) {
+        stillDeleted.add(id);
+        hadError = true;
+        setError(err instanceof PosTableLayoutApiError ? err.message : '削除に失敗しました');
+      }
+    }
+
+    const nextItems: TableLayoutItemRecord[] = [];
+    for (const item of items) {
+      if (isNewItem(item.id)) {
+        try {
+          const { item: created } = await createTableLayoutItem({
+            tableCode: item.table_code,
+            kind: item.kind,
+            seats: item.seats,
+            x: item.x,
+            y: item.y,
+            width: item.width,
+            height: item.height,
+          });
+          nextItems.push(created);
+          if (selectedId === item.id) setSelectedId(created.id);
+        } catch (err) {
+          nextItems.push(item);
+          hadError = true;
+          setError(err instanceof PosTableLayoutApiError ? err.message : '保存に失敗しました');
+        }
+      } else if (dirtyIds.has(item.id)) {
+        try {
+          const { item: updated } = await updateTableLayoutItem(item.id, {
+            tableCode: item.table_code,
+            kind: item.kind,
+            seats: item.seats,
+            x: item.x,
+            y: item.y,
+            width: item.width,
+            height: item.height,
+          });
+          nextItems.push(updated);
+        } catch (err) {
+          nextItems.push(item);
+          stillDirty.add(item.id);
+          hadError = true;
+          setError(err instanceof PosTableLayoutApiError ? err.message : '保存に失敗しました');
+        }
+      } else {
+        nextItems.push(item);
+      }
+    }
+
+    setItems(nextItems);
+    setDirtyIds(stillDirty);
+    setDeletedIds(stillDeleted);
+    setSaving(false);
+    setSaved(!hadError);
+  }
+
+  const clipboardLabel = useMemo(() => {
+    if (!clipboard) return null;
+    return `${KIND_META[clipboard.kind].label}「${clipboard.table_code}」をコピー中`;
+  }, [clipboard]);
 
   if (!isPosNative) {
     return (
@@ -156,7 +365,7 @@ export function TableLayoutScreen() {
       <div className="flex h-16 flex-shrink-0 items-center justify-between border-b border-border px-6">
         <div className="flex items-center gap-3">
           <button
-            onClick={() => router.push('/pos')}
+            onClick={goBack}
             className="flex h-9 items-center gap-1 rounded-lg px-2.5 text-[12.5px] font-semibold text-muted-foreground hover:bg-secondary"
           >
             ← 戻る
@@ -164,7 +373,9 @@ export function TableLayoutScreen() {
           <div>
             <div className="text-base font-bold">テーブルレイアウト編集</div>
             <div className="text-xs text-muted-foreground">
-              {canManage ? '卓・柱・カウンターをドラッグして配置できます (自動保存)' : '閲覧のみ (編集には manager 以上の権限が必要です)'}
+              {canManage
+                ? '卓・柱・カウンターをドラッグして配置できます。変更後は「保存」を押してください'
+                : '閲覧のみ (編集には manager 以上の権限が必要です)'}
             </div>
           </div>
         </div>
@@ -179,53 +390,83 @@ export function TableLayoutScreen() {
                 {KIND_META[kind].addLabel}
               </button>
             ))}
+            <button
+              onClick={pasteClipboard}
+              disabled={!clipboard}
+              className="h-9 rounded-lg border border-border px-3 text-[12.5px] font-semibold disabled:opacity-40"
+            >
+              貼り付け
+            </button>
+            <button
+              onClick={saveAll}
+              disabled={saving || !hasUnsavedChanges}
+              className={
+                'h-9 rounded-lg px-4 text-[12.5px] font-bold disabled:opacity-60 ' +
+                (saved ? 'bg-emerald-100 text-emerald-600' : 'bg-primary text-primary-foreground')
+              }
+            >
+              {saving ? '保存中…' : saved ? '保存しました ✓' : hasUnsavedChanges ? '保存 ●' : '保存'}
+            </button>
           </div>
         )}
       </div>
 
       {error && <div className="border-b border-border px-6 py-2 text-xs text-destructive">{error}</div>}
+      {clipboardLabel && (
+        <div className="border-b border-border bg-secondary/50 px-6 py-1.5 text-[11px] text-muted-foreground">
+          {clipboardLabel} (卓を選んで「貼り付け」、または ⌘/Ctrl+V)
+        </div>
+      )}
 
       <div className="flex flex-1 overflow-hidden">
-        <div
-          ref={canvasRef}
-          onDragOver={(e) => canManage && e.preventDefault()}
-          onDrop={canManage ? onDrop : undefined}
-          className="relative m-5 flex-1 overflow-hidden rounded-2xl border-[1.5px] border-dashed border-border"
-          style={{
-            backgroundImage: 'radial-gradient(hsl(var(--border)) 1px, transparent 1px)',
-            backgroundSize: '24px 24px',
-          }}
-        >
-          {items === null && !error && (
-            <div className="p-5 text-[12.5px] text-muted-foreground">読み込み中…</div>
-          )}
-          {items?.map((t) => {
-            const isSel = t.id === selectedId;
-            const isTable = t.kind === 'table';
-            return (
-              <div
-                key={t.id}
-                draggable={canManage}
-                onDragStart={() => setDraggingId(t.id)}
-                onClick={() => setSelectedId(t.id)}
-                className={
-                  'absolute flex select-none flex-col items-center justify-center gap-0.5 rounded-lg ' +
-                  (canManage ? 'cursor-grab' : 'cursor-pointer') +
-                  ' ' +
-                  (isSel
-                    ? 'bg-brand text-brand-foreground shadow-[0_0_0_3px_hsl(var(--brand)/0.3)]'
-                    : isTable
-                      ? 'border-[1.5px] border-border bg-card text-foreground'
-                      : 'border-[1.5px] border-dashed border-muted-foreground/50 bg-secondary/70 text-muted-foreground')
-                }
-                style={{ left: t.x, top: t.y, width: t.width, height: t.height }}
-              >
-                <div className="px-1 text-center text-[13px] font-bold leading-tight">{t.table_code}</div>
-                {isTable && <div className="text-[10.5px] opacity-85">{t.seats}席</div>}
-                {!isTable && <div className="text-[10px] opacity-75">{KIND_META[t.kind].label}</div>}
-              </div>
-            );
-          })}
+        <div className="flex-1 overflow-auto p-5">
+          <div
+            ref={canvasRef}
+            onDragOver={(e) => canManage && e.preventDefault()}
+            onDrop={canManage ? onDrop : undefined}
+            className="relative overflow-hidden rounded-2xl border-[1.5px] border-dashed border-border"
+            style={{
+              width: TABLE_LAYOUT_CANVAS_WIDTH,
+              height: TABLE_LAYOUT_CANVAS_HEIGHT,
+              backgroundImage: 'radial-gradient(hsl(var(--border)) 1px, transparent 1px)',
+              backgroundSize: '24px 24px',
+            }}
+          >
+            {items === null && !error && (
+              <div className="p-5 text-[12.5px] text-muted-foreground">読み込み中…</div>
+            )}
+            {items?.map((t) => {
+              const isSel = t.id === selectedId;
+              const isTable = t.kind === 'table';
+              const dirty = isNewItem(t.id) || dirtyIds.has(t.id);
+              return (
+                <div
+                  key={t.id}
+                  draggable={canManage}
+                  onDragStart={() => setDraggingId(t.id)}
+                  onClick={() => setSelectedId(t.id)}
+                  className={
+                    'absolute flex select-none flex-col items-center justify-center gap-0.5 rounded-lg ' +
+                    (canManage ? 'cursor-grab' : 'cursor-pointer') +
+                    ' ' +
+                    (isSel
+                      ? 'bg-brand text-brand-foreground shadow-[0_0_0_3px_hsl(var(--brand)/0.3)]'
+                      : isTable
+                        ? 'border-[1.5px] border-border bg-card text-foreground'
+                        : 'border-[1.5px] border-dashed border-muted-foreground/50 bg-secondary/70 text-muted-foreground')
+                  }
+                  style={{ left: t.x, top: t.y, width: t.width, height: t.height }}
+                >
+                  {dirty && (
+                    <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-amber-500" title="未保存の変更があります" />
+                  )}
+                  <div className="px-1 text-center text-[13px] font-bold leading-tight">{t.table_code}</div>
+                  {isTable && <div className="text-[10.5px] opacity-85">{t.seats}席</div>}
+                  {!isTable && <div className="text-[10px] opacity-75">{KIND_META[t.kind].label}</div>}
+                </div>
+              );
+            })}
+          </div>
         </div>
 
         <div className="flex w-[280px] flex-col gap-3.5 overflow-auto border-l border-border p-4.5">
@@ -269,59 +510,83 @@ export function TableLayoutScreen() {
               )}
 
               <div>
-                <div className="mb-1 text-[11.5px] text-muted-foreground">大きさ (幅 × 高さ)</div>
-                <div className="flex items-center gap-2">
+                <div className="mb-1 text-[11.5px] text-muted-foreground">大きさ (幅 × 高さ、直接入力可)</div>
+                <div className="flex items-center gap-1.5">
                   <button
                     onClick={() => resizeSelected(-8, 0)}
                     disabled={!canManage}
-                    className="flex h-[30px] w-[30px] items-center justify-center rounded-lg border border-border text-xs disabled:opacity-50"
+                    className="flex h-[30px] w-[26px] items-center justify-center rounded-lg border border-border text-xs disabled:opacity-50"
                   >
-                    幅−
+                    −
                   </button>
+                  <input
+                    type="number"
+                    value={selected.width}
+                    onChange={(e) => setSizeDirect('width', e.target.value)}
+                    disabled={!canManage}
+                    min={24}
+                    max={600}
+                    className="h-[30px] w-14 rounded-lg border border-border px-1.5 text-center text-[12.5px] disabled:opacity-60"
+                  />
                   <button
                     onClick={() => resizeSelected(8, 0)}
                     disabled={!canManage}
-                    className="flex h-[30px] w-[30px] items-center justify-center rounded-lg border border-border text-xs disabled:opacity-50"
+                    className="flex h-[30px] w-[26px] items-center justify-center rounded-lg border border-border text-xs disabled:opacity-50"
                   >
-                    幅＋
+                    ＋
                   </button>
-                  <div className="mx-1 w-14 text-center text-[12px] text-muted-foreground">
-                    {selected.width}×{selected.height}
-                  </div>
+                  <span className="px-0.5 text-muted-foreground">×</span>
                   <button
                     onClick={() => resizeSelected(0, -8)}
                     disabled={!canManage}
-                    className="flex h-[30px] w-[30px] items-center justify-center rounded-lg border border-border text-xs disabled:opacity-50"
+                    className="flex h-[30px] w-[26px] items-center justify-center rounded-lg border border-border text-xs disabled:opacity-50"
                   >
-                    高−
+                    −
                   </button>
+                  <input
+                    type="number"
+                    value={selected.height}
+                    onChange={(e) => setSizeDirect('height', e.target.value)}
+                    disabled={!canManage}
+                    min={24}
+                    max={600}
+                    className="h-[30px] w-14 rounded-lg border border-border px-1.5 text-center text-[12.5px] disabled:opacity-60"
+                  />
                   <button
                     onClick={() => resizeSelected(0, 8)}
                     disabled={!canManage}
-                    className="flex h-[30px] w-[30px] items-center justify-center rounded-lg border border-border text-xs disabled:opacity-50"
+                    className="flex h-[30px] w-[26px] items-center justify-center rounded-lg border border-border text-xs disabled:opacity-50"
                   >
-                    高＋
+                    ＋
                   </button>
                 </div>
               </div>
 
               {canManage && (
-                <button
-                  onClick={deleteSelected}
-                  className="h-[38px] rounded-lg border border-destructive text-[12.5px] font-semibold text-destructive"
-                >
-                  削除
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={copySelected}
+                    className="h-[38px] flex-1 rounded-lg border border-border text-[12.5px] font-semibold"
+                  >
+                    コピー
+                  </button>
+                  <button
+                    onClick={deleteSelected}
+                    className="h-[38px] flex-1 rounded-lg border border-destructive text-[12.5px] font-semibold text-destructive"
+                  >
+                    削除
+                  </button>
+                </div>
               )}
             </div>
           ) : (
             <div className="px-0.5 py-1.5 text-[12.5px] leading-relaxed text-muted-foreground">
-              見取り図の卓・柱・カウンターをタップすると、名前や席数・大きさを編集できます。ドラッグで自由に配置を変更できます。変更は自動的に保存されます。
+              見取り図の卓・柱・カウンターをタップすると、名前や席数・大きさを編集できます。ドラッグで自由に配置を変更できます。「コピー」→「貼り付け」(または ⌘/Ctrl+C・⌘/Ctrl+V) で複製できます。変更後は右上の「保存」を押してください。
             </div>
           )}
 
           <div className="mt-auto text-[11px] leading-relaxed text-muted-foreground">
-            配置はこの店舗のPOS専用データとして保存されます。
+            配置はこの店舗のPOS専用データとして保存されます。保存すると、レジ画面のテーブルマップにもこの配置がそのまま反映されます。
           </div>
         </div>
       </div>

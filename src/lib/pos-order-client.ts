@@ -6,6 +6,7 @@
  */
 
 import type { MenuItem, PosSettings } from '@/lib/pos-types';
+import type { TableLayoutItemRecord } from '@/lib/table-layout-client';
 
 export class PosOrderApiError extends Error {
   constructor(
@@ -52,4 +53,8 @@ export function getPosOrderMenu(): Promise<{ items: MenuItem[] }> {
 
 export function getPosOrderSettings(): Promise<PosSettings> {
   return request('/api/pos-order/settings');
+}
+
+export function getPosOrderTableLayout(): Promise<{ items: TableLayoutItemRecord[] }> {
+  return request('/api/pos-order/table-layout');
 }

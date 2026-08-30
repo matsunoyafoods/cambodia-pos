@@ -5,7 +5,14 @@ import { useRouter } from 'next/navigation';
 import type { CartLine, MenuItem, PaymentMethod, TableStatus } from '@/lib/pos-types';
 import { DEFAULT_SETTINGS } from '@/lib/pos-types';
 import { getPosMenus, getPosSettings, PosApiError } from '@/lib/api-client';
-import { getPosOrderMenu, getPosOrderMode, getPosOrderSettings, PosOrderApiError } from '@/lib/pos-order-client';
+import {
+  getPosOrderMenu,
+  getPosOrderMode,
+  getPosOrderSettings,
+  getPosOrderTableLayout,
+  PosOrderApiError,
+} from '@/lib/pos-order-client';
+import type { TableLayoutItemRecord } from '@/lib/table-layout-client';
 import { logoutPosStaff } from '@/lib/staff-client';
 import { useStaff } from './staff-context';
 import { TableMapScreen } from './table-map-screen';
@@ -25,6 +32,7 @@ export function PosApp() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [menu, setMenu] = useState<MenuItem[]>([]);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  const [layoutItems, setLayoutItems] = useState<TableLayoutItemRecord[]>([]);
   const [dataLoading, setDataLoading] = useState(true);
   const [dataError, setDataError] = useState<string | null>(null);
   const [loadToken, setLoadToken] = useState(0);
@@ -67,16 +75,31 @@ export function PosApp() {
     (async () => {
       try {
         const { menuSource } = await getPosOrderMode();
+        // テーブルレイアウトは連携モードに関係なく POS ネイティブの pos.table_layouts
+        // から読む (設定画面「テーブルレイアウト」で作った見取り図)。まだ何も配置して
+        // いない店舗向けに、失敗・0件時は空配列のまま (table-map-screen.tsx 側で
+        // 既存のサンプル配置にフォールバックする)。
+        const layoutPromise = getPosOrderTableLayout().catch(() => ({ items: [] as TableLayoutItemRecord[] }));
         if (menuSource === 'pos_native') {
-          const [menuData, settingsData] = await Promise.all([getPosOrderMenu(), getPosOrderSettings()]);
+          const [menuData, settingsData, layoutData] = await Promise.all([
+            getPosOrderMenu(),
+            getPosOrderSettings(),
+            layoutPromise,
+          ]);
           if (cancelled) return;
           setMenu(menuData.items);
           setSettings((prev) => ({ ...prev, ...settingsData }));
+          setLayoutItems(layoutData.items);
         } else {
-          const [menuData, settingsData] = await Promise.all([getPosMenus(), getPosSettings()]);
+          const [menuData, settingsData, layoutData] = await Promise.all([
+            getPosMenus(),
+            getPosSettings(),
+            layoutPromise,
+          ]);
           if (cancelled) return;
           setMenu(menuData.map((m) => ({ ...m, category: m.category ?? '未分類' })));
           setSettings((prev) => ({ ...prev, ...settingsData }));
+          setLayoutItems(layoutData.items);
         }
       } catch (err) {
         if (cancelled) return;
@@ -302,6 +325,7 @@ export function PosApp() {
           statusFilter={statusFilter}
           onStatusFilter={setStatusFilter}
           onSelectTable={selectTable}
+          layoutItems={layoutItems}
         />
       )}
 
