@@ -13,6 +13,14 @@ import {
   PosOrderApiError,
 } from '@/lib/pos-order-client';
 import type { TableLayoutItemRecord } from '@/lib/table-layout-client';
+import {
+  clearTableSession,
+  extendDrinkTimer,
+  getTableSessions,
+  startDrinkTimer,
+  startTableStay,
+  type TableSessionRecord,
+} from '@/lib/table-session-client';
 import { logoutPosStaff } from '@/lib/staff-client';
 import { useStaff } from './staff-context';
 import { TableMapScreen } from './table-map-screen';
@@ -33,12 +41,12 @@ export function PosApp() {
   const [menu, setMenu] = useState<MenuItem[]>([]);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [layoutItems, setLayoutItems] = useState<TableLayoutItemRecord[]>([]);
+  const [tableSessions, setTableSessions] = useState<TableSessionRecord[]>([]);
   const [dataLoading, setDataLoading] = useState(true);
   const [dataError, setDataError] = useState<string | null>(null);
   const [loadToken, setLoadToken] = useState(0);
 
   const [screen, setScreen] = useState<Screen>('tablemap');
-  const [tableStatus] = useState<Record<string, TableStatus>>({ BC3: 'occupied', C2: 'billing' });
   const [statusFilter, setStatusFilter] = useState<'all' | TableStatus>('all');
   const [selectedTable, setSelectedTable] = useState<string | null>(null);
   const [activeCategory, setActiveCategory] = useState('');
@@ -80,26 +88,32 @@ export function PosApp() {
         // いない店舗向けに、失敗・0件時は空配列のまま (table-map-screen.tsx 側で
         // 既存のサンプル配置にフォールバックする)。
         const layoutPromise = getPosOrderTableLayout().catch(() => ({ items: [] as TableLayoutItemRecord[] }));
+        // 滞在タイマー・飲み放題タイマーは連携モードに関係なく卓単位で動く (pos.table_sessions)。
+        const sessionsPromise = getTableSessions().catch(() => ({ items: [] as TableSessionRecord[] }));
         if (menuSource === 'pos_native') {
-          const [menuData, settingsData, layoutData] = await Promise.all([
+          const [menuData, settingsData, layoutData, sessionsData] = await Promise.all([
             getPosOrderMenu(),
             getPosOrderSettings(),
             layoutPromise,
+            sessionsPromise,
           ]);
           if (cancelled) return;
           setMenu(menuData.items);
           setSettings((prev) => ({ ...prev, ...settingsData }));
           setLayoutItems(layoutData.items);
+          setTableSessions(sessionsData.items);
         } else {
-          const [menuData, settingsData, layoutData] = await Promise.all([
+          const [menuData, settingsData, layoutData, sessionsData] = await Promise.all([
             getPosMenus(),
             getPosSettings(),
             layoutPromise,
+            sessionsPromise,
           ]);
           if (cancelled) return;
           setMenu(menuData.map((m) => ({ ...m, category: m.category ?? '未分類' })));
           setSettings((prev) => ({ ...prev, ...settingsData }));
           setLayoutItems(layoutData.items);
+          setTableSessions(sessionsData.items);
         }
       } catch (err) {
         if (cancelled) return;
@@ -123,6 +137,79 @@ export function PosApp() {
       setActiveCategory(categories[0]);
     }
   }, [categories, activeCategory]);
+
+  // 滞在タイマー・飲み放題タイマーは他の端末やスタッフの操作でも変わるため、
+  // 定期的に再取得してテーブルマップ・注文画面の表示を最新に保つ。
+  useEffect(() => {
+    if (dataLoading) return;
+    const id = setInterval(() => {
+      getTableSessions()
+        .then(({ items }) => setTableSessions(items))
+        .catch(() => {
+          /* ポーリング失敗時は次回まで前回値を表示し続ける */
+        });
+    }, 20000);
+    return () => clearInterval(id);
+  }, [dataLoading]);
+
+  // 卓の使用状況は「現在アクティブな来店セッションがあるか」から導出する
+  // (以前はデモ用に BC3/C2 を固定で使用中・会計待ち扱いにしていた)。
+  // 会計画面を開いている卓は、この端末上では「会計待ち」として上書き表示する。
+  const tableStatus: Record<string, TableStatus> = useMemo(() => {
+    const status: Record<string, TableStatus> = {};
+    for (const s of tableSessions) status[s.table_code] = 'occupied';
+    if (screen === 'checkout' && selectedTable) status[selectedTable] = 'billing';
+    return status;
+  }, [tableSessions, screen, selectedTable]);
+
+  function upsertLocalSession(tableCode: string, patch: Partial<TableSessionRecord>) {
+    setTableSessions((prev) => {
+      const idx = prev.findIndex((s) => s.table_code === tableCode);
+      if (idx === -1) {
+        return [
+          ...prev,
+          {
+            table_code: tableCode,
+            started_at: new Date().toISOString(),
+            drink_timer_started_at: null,
+            drink_timer_minutes: 0,
+            ...patch,
+          },
+        ];
+      }
+      const next = prev.slice();
+      next[idx] = { ...next[idx], ...patch };
+      return next;
+    });
+  }
+
+  // 注文品目がカートに追加される全ての箇所 (量目・オプション不要な商品の即時追加、
+  // オプションモーダル確定の両方) から呼ぶ。「注文商品を入力すると同時に滞在タイマーが
+  // 発動」「飲み放題メニューを注文すると飲み放題タイマーが発動」に対応する副作用。
+  function onOrderItemEntered(item: MenuItem) {
+    if (!selectedTable) return;
+    if (cart.length === 0 && !tableSessions.some((s) => s.table_code === selectedTable)) {
+      upsertLocalSession(selectedTable, {});
+      startTableStay(selectedTable).catch(() => {
+        /* 反映失敗時は次回ポーリングで補正される */
+      });
+    }
+    if (item.category === '飲み放題') {
+      const existing = tableSessions.find((s) => s.table_code === selectedTable);
+      if (item.name.includes('延長')) {
+        const addMinutes = 30;
+        upsertLocalSession(selectedTable, {
+          drink_timer_started_at: existing?.drink_timer_started_at ?? new Date().toISOString(),
+          drink_timer_minutes: (existing?.drink_timer_minutes ?? 0) + addMinutes,
+        });
+        extendDrinkTimer(selectedTable, addMinutes).catch(() => {});
+      } else if (!existing?.drink_timer_started_at) {
+        const minutes = 60;
+        upsertLocalSession(selectedTable, { drink_timer_started_at: new Date().toISOString(), drink_timer_minutes: minutes });
+        startDrinkTimer(selectedTable, minutes).catch(() => {});
+      }
+    }
+  }
 
   const totals = useMemo(() => {
     const subtotal = cart.reduce((s, l) => s + l.unitPrice * l.qty, 0);
@@ -155,6 +242,7 @@ export function PosApp() {
   }
 
   function addToCart(item: MenuItem) {
+    onOrderItemEntered(item);
     setCart((prev) => {
       const existing = prev.find((l) => l.id === item.id);
       if (existing) return prev.map((l) => (l.id === item.id ? { ...l, qty: l.qty + 1 } : l));
@@ -182,6 +270,7 @@ export function PosApp() {
     if (!optionModalItem) return;
     const groups = optionModalItem.optionGroups ?? [];
     if (!groups.every((g) => optionSelection[g.key])) return;
+    onOrderItemEntered(optionModalItem);
 
     const priceDeltaTotal = groups.reduce((sum, g) => {
       const choice = g.choices.find((c) => c.id === optionSelection[g.key]);
@@ -217,6 +306,13 @@ export function PosApp() {
   }
 
   function completeOrder() {
+    // 会計完了 = この卓の来店セッションが終わるので、滞在・飲み放題タイマーをリセットする。
+    if (selectedTable) {
+      setTableSessions((prev) => prev.filter((s) => s.table_code !== selectedTable));
+      clearTableSession(selectedTable).catch(() => {
+        /* 反映失敗時は次回ポーリングで補正される */
+      });
+    }
     setScreen('receipt');
   }
 
@@ -326,12 +422,14 @@ export function PosApp() {
           onStatusFilter={setStatusFilter}
           onSelectTable={selectTable}
           layoutItems={layoutItems}
+          tableSessions={tableSessions}
         />
       )}
 
       {screen === 'order' && (
         <OrderScreen
           selectedTable={selectedTable}
+          session={tableSessions.find((s) => s.table_code === selectedTable) ?? null}
           menu={menu}
           categories={categories}
           activeCategory={activeCategory}

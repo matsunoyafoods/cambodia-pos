@@ -1,10 +1,50 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import type { CartLine, MenuItem } from '@/lib/pos-types';
 import { money } from '@/lib/money';
+import type { TableSessionRecord } from '@/lib/table-session-client';
+import { drinkTimerState, elapsedMinutes, formatDuration } from '@/lib/table-timer';
+
+function OrderHeaderTimers({ session }: { session: TableSessionRecord | null }) {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (!session) return;
+    const id = setInterval(() => tick((t) => t + 1), 1000);
+    return () => clearInterval(id);
+  }, [session]);
+
+  if (!session) return null;
+
+  const stay = formatDuration(elapsedMinutes(session.started_at));
+  const drink = drinkTimerState(session.drink_timer_started_at, session.drink_timer_minutes);
+
+  return (
+    <div className="flex items-center gap-2">
+      <span className="rounded-full bg-secondary px-2.5 py-1 text-[11px] font-semibold text-muted-foreground">
+        滞在 {stay}
+      </span>
+      {drink && (
+        <span
+          className={
+            'rounded-full px-2.5 py-1 text-[11px] font-semibold ' +
+            (drink.isExpired
+              ? 'animate-pulse bg-destructive text-destructive-foreground'
+              : drink.isNearExpiry
+                ? 'bg-amber-200 text-amber-900'
+                : 'bg-emerald-100 text-emerald-800')
+          }
+        >
+          🍺 {drink.isExpired ? `延長してください (${formatDuration(-drink.remainingMinutes)}超過)` : `残り${formatDuration(drink.remainingMinutes)}`}
+        </span>
+      )}
+    </div>
+  );
+}
 
 export function OrderScreen({
   selectedTable,
+  session,
   menu,
   categories,
   activeCategory,
@@ -22,6 +62,7 @@ export function OrderScreen({
   onCheckout,
 }: {
   selectedTable: string | null;
+  session: TableSessionRecord | null;
   menu: MenuItem[];
   categories: string[];
   activeCategory: string;
@@ -44,17 +85,20 @@ export function OrderScreen({
   return (
     <div className="flex flex-1 overflow-hidden">
       <div className="flex flex-1 flex-col overflow-hidden">
-        <div className="flex items-center gap-2.5 border-b border-border px-5 py-3.5">
-          <button
-            onClick={onBackToTableMap}
-            className="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-card"
-          >
-            ←
-          </button>
-          <div>
-            <div className="text-base font-bold">テーブル {selectedTable}</div>
-            <div className="text-xs text-muted-foreground">注文入力</div>
+        <div className="flex items-center justify-between gap-2.5 border-b border-border px-5 py-3.5">
+          <div className="flex items-center gap-2.5">
+            <button
+              onClick={onBackToTableMap}
+              className="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-card"
+            >
+              ←
+            </button>
+            <div>
+              <div className="text-base font-bold">テーブル {selectedTable}</div>
+              <div className="text-xs text-muted-foreground">注文入力</div>
+            </div>
           </div>
+          <OrderHeaderTimers session={session} />
         </div>
 
         <div className="flex gap-1.5 px-5 pt-3.5">

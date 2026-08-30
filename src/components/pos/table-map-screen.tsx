@@ -1,9 +1,12 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import type { TableStatus } from '@/lib/pos-types';
 import { DEMO_TABLE_GROUPS } from '@/lib/demo-data';
 import type { TableLayoutItemRecord } from '@/lib/table-layout-client';
 import { TABLE_LAYOUT_CANVAS_HEIGHT, TABLE_LAYOUT_CANVAS_WIDTH } from '@/lib/table-layout-geometry';
+import type { TableSessionRecord } from '@/lib/table-session-client';
+import { drinkTimerState, elapsedMinutes, formatDuration } from '@/lib/table-timer';
 
 const STATUS_LABEL: Record<TableStatus, string> = {
   available: 'Available',
@@ -19,19 +22,55 @@ const STATUS_CLASS: Record<TableStatus, string> = {
 
 const OBSTACLE_LABEL: Record<string, string> = { pillar: '柱', counter: 'カウンター', wall: '壁' };
 
+// 卓の「滞在○分」「🍺残り○分」バッジ。1分ごとに再描画して経過時間を最新に保つ。
+function TableTimerBadges({ session }: { session: TableSessionRecord | undefined }) {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (!session) return;
+    const id = setInterval(() => tick((t) => t + 1), 30000);
+    return () => clearInterval(id);
+  }, [session]);
+
+  if (!session) return null;
+
+  const stay = formatDuration(elapsedMinutes(session.started_at));
+  const drink = drinkTimerState(session.drink_timer_started_at, session.drink_timer_minutes);
+
+  return (
+    <div className="mt-0.5 flex flex-wrap items-center gap-1">
+      <span className="rounded-full bg-black/10 px-1.5 py-0.5 text-[9px] font-semibold leading-none">
+        滞在{stay}
+      </span>
+      {drink && (
+        <span
+          className={
+            'rounded-full px-1.5 py-0.5 text-[9px] font-semibold leading-none ' +
+            (drink.isExpired ? 'animate-pulse bg-destructive text-destructive-foreground' : 'bg-black/10')
+          }
+        >
+          🍺{drink.isExpired ? '延長要' : formatDuration(drink.remainingMinutes)}
+        </span>
+      )}
+    </div>
+  );
+}
+
 export function TableMapScreen({
   tableStatus,
   statusFilter,
   onStatusFilter,
   onSelectTable,
   layoutItems,
+  tableSessions,
 }: {
   tableStatus: Record<string, TableStatus>;
   statusFilter: 'all' | TableStatus;
   onStatusFilter: (v: 'all' | TableStatus) => void;
   onSelectTable: (code: string) => void;
   layoutItems: TableLayoutItemRecord[];
+  tableSessions: TableSessionRecord[];
 }) {
+  const sessionByTable = new Map(tableSessions.map((s) => [s.table_code, s]));
   const filters: { key: 'all' | TableStatus; label: string }[] = [
     { key: 'all', label: 'すべて' },
     { key: 'available', label: 'Available' },
@@ -107,6 +146,7 @@ export function TableMapScreen({
                       {t.seats > 0 ? `0/${t.seats} ・ ` : ''}
                       {STATUS_LABEL[status]}
                     </div>
+                    <TableTimerBadges session={sessionByTable.get(t.table_code)} />
                   </button>
                 );
               })}
@@ -130,13 +170,14 @@ export function TableMapScreen({
                       key={t.code}
                       onClick={() => onSelectTable(t.code)}
                       className={
-                        'flex h-20 flex-col gap-1.5 rounded-xl border p-3 text-left ' + STATUS_CLASS[t.status]
+                        'flex min-h-20 flex-col gap-1.5 rounded-xl border p-3 text-left ' + STATUS_CLASS[t.status]
                       }
                     >
                       <div className="text-sm font-bold">{t.code}</div>
                       <div className="text-[11px] opacity-90">
                         0/{group.seats} ・ {STATUS_LABEL[t.status]}
                       </div>
+                      <TableTimerBadges session={sessionByTable.get(t.code)} />
                     </button>
                   ))}
                 </div>
