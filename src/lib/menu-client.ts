@@ -83,3 +83,68 @@ export function updateMenuItem(
 export function deleteMenuItem(id: string): Promise<{ ok: boolean }> {
   return request(`/api/menu/items/${id}`, { method: 'DELETE' });
 }
+
+export type PosMenuOptionChoice = {
+  id: string;
+  group_id: string;
+  choice_key: string;
+  label: string;
+  price_delta: number;
+  sort_order: number;
+};
+
+export type PosMenuOptionGroup = {
+  id: string;
+  key: string;
+  label: string;
+  required: boolean;
+  sort_order: number;
+  choices: PosMenuOptionChoice[];
+};
+
+export function listMenuOptionGroups(itemId: string): Promise<{ groups: PosMenuOptionGroup[] }> {
+  return request(`/api/menu/items/${itemId}/option-groups`);
+}
+
+export function createMenuOptionGroup(
+  itemId: string,
+  input: { key: string; label: string; required?: boolean },
+): Promise<{ group: PosMenuOptionGroup }> {
+  return request(`/api/menu/items/${itemId}/option-groups`, { method: 'POST', body: JSON.stringify(input) });
+}
+
+export function updateMenuOptionGroup(
+  itemId: string,
+  groupId: string,
+  patch: Partial<{ label: string; required: boolean; sortOrder: number }>,
+): Promise<{ group: Omit<PosMenuOptionGroup, 'choices'> }> {
+  return request(`/api/menu/items/${itemId}/option-groups/${groupId}`, { method: 'PATCH', body: JSON.stringify(patch) });
+}
+
+export function deleteMenuOptionGroup(itemId: string, groupId: string): Promise<{ ok: boolean }> {
+  return request(`/api/menu/items/${itemId}/option-groups/${groupId}`, { method: 'DELETE' });
+}
+
+export function createMenuOptionChoice(
+  itemId: string,
+  groupId: string,
+  input: { choiceKey: string; label: string; priceDelta?: number },
+): Promise<{ choice: PosMenuOptionChoice }> {
+  return request(`/api/menu/items/${itemId}/option-groups/${groupId}/choices`, { method: 'POST', body: JSON.stringify(input) });
+}
+
+export function updateMenuOptionChoice(
+  itemId: string,
+  groupId: string,
+  choiceId: string,
+  patch: Partial<{ label: string; priceDelta: number; sortOrder: number }>,
+): Promise<{ choice: PosMenuOptionChoice }> {
+  return request(`/api/menu/items/${itemId}/option-groups/${groupId}/choices/${choiceId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
+}
+
+export function deleteMenuOptionChoice(itemId: string, groupId: string, choiceId: string): Promise<{ ok: boolean }> {
+  return request(`/api/menu/items/${itemId}/option-groups/${groupId}/choices/${choiceId}`, { method: 'DELETE' });
+}

@@ -15,15 +15,24 @@ import {
 import {
   createMenuCategory,
   createMenuItem,
+  createMenuOptionChoice,
+  createMenuOptionGroup,
   deleteMenuCategory,
   deleteMenuItem,
+  deleteMenuOptionChoice,
+  deleteMenuOptionGroup,
   listMenuCategories,
   listMenuItems,
+  listMenuOptionGroups,
   renameMenuCategory,
   updateMenuItem,
+  updateMenuOptionChoice,
+  updateMenuOptionGroup,
   PosMenuApiError,
   type PosMenuCategory,
   type PosMenuItemRecord,
+  type PosMenuOptionChoice,
+  type PosMenuOptionGroup,
 } from '@/lib/menu-client';
 
 type Tab = 'general' | 'printer' | 'payment' | 'staff' | 'menu' | 'layout';
@@ -425,6 +434,7 @@ function MenuTab() {
   const [showAddCategory, setShowAddCategory] = useState(false);
   const [showAddItem, setShowAddItem] = useState(false);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [optionsItemId, setOptionsItemId] = useState<string | null>(null);
 
   const load = useCallback(() => {
     setLoadError(null);
@@ -598,6 +608,12 @@ function MenuTab() {
                   編集
                 </button>
                 <button
+                  onClick={() => setOptionsItemId((v) => (v === item.id ? null : item.id))}
+                  className="h-8 rounded-lg border border-border px-3 text-xs font-semibold"
+                >
+                  オプション
+                </button>
+                <button
                   onClick={() => handleDeleteItem(item.id)}
                   className="h-8 rounded-lg border border-border px-3 text-xs font-semibold text-destructive"
                 >
@@ -615,6 +631,7 @@ function MenuTab() {
                 }}
               />
             )}
+            {optionsItemId === item.id && <OptionGroupsPanel itemId={item.id} />}
           </div>
         ))}
       </div>
@@ -855,6 +872,433 @@ function EditItemForm({
           {submitting ? '保存中…' : '保存'}
         </button>
         <button type="button" onClick={onDone} className="h-9 rounded-lg border border-border px-3 text-xs font-semibold">
+          キャンセル
+        </button>
+      </div>
+    </form>
+  );
+}
+
+// 商品オプション (トッピング・量目選択など) のグループ + 選択肢 管理パネル。
+// 商品一覧の各行で「オプション」ボタンを押すと展開される。
+function OptionGroupsPanel({ itemId }: { itemId: string }) {
+  const [groups, setGroups] = useState<PosMenuOptionGroup[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [showAddGroup, setShowAddGroup] = useState(false);
+
+  const load = useCallback(() => {
+    setError(null);
+    listMenuOptionGroups(itemId)
+      .then((res) => setGroups(res.groups))
+      .catch((err) => setError(err instanceof PosMenuApiError ? err.message : 'オプションの取得に失敗しました'));
+  }, [itemId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function handleDeleteGroup(groupId: string) {
+    try {
+      await deleteMenuOptionGroup(itemId, groupId);
+      load();
+    } catch (err) {
+      setError(err instanceof PosMenuApiError ? err.message : 'オプショングループの削除に失敗しました');
+    }
+  }
+
+  return (
+    <div className="mt-3 flex flex-col gap-2.5 border-t border-border pt-3">
+      <div className="flex items-center justify-between">
+        <div className="text-[12.5px] font-bold text-muted-foreground">商品オプション (トッピング・量目選択など)</div>
+        <button
+          onClick={() => setShowAddGroup((v) => !v)}
+          className="h-7 rounded-lg border border-dashed border-brand px-2.5 text-[11.5px] font-semibold text-brand"
+        >
+          {showAddGroup ? 'キャンセル' : '＋ グループを追加'}
+        </button>
+      </div>
+
+      {error && <div className="text-xs text-destructive">{error}</div>}
+
+      {showAddGroup && (
+        <AddOptionGroupForm
+          itemId={itemId}
+          onCreated={() => {
+            setShowAddGroup(false);
+            load();
+          }}
+          onCancel={() => setShowAddGroup(false)}
+        />
+      )}
+
+      {groups === null && !error && <div className="text-xs text-muted-foreground">読み込み中…</div>}
+      {groups?.length === 0 && (
+        <div className="rounded-lg border border-dashed border-border p-3 text-[12px] text-muted-foreground">
+          オプショングループが未登録です。トッピングや量目選択などが必要な場合は「＋ グループを追加」から登録してください。
+        </div>
+      )}
+
+      {groups?.map((g) => (
+        <OptionGroupCard key={g.id} itemId={itemId} group={g} onChanged={load} onDeleteGroup={() => handleDeleteGroup(g.id)} />
+      ))}
+    </div>
+  );
+}
+
+function AddOptionGroupForm({
+  itemId,
+  onCreated,
+  onCancel,
+}: {
+  itemId: string;
+  onCreated: () => void;
+  onCancel: () => void;
+}) {
+  const [key, setKey] = useState('');
+  const [label, setLabel] = useState('');
+  const [required, setRequired] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!key.trim() || !label.trim()) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      await createMenuOptionGroup(itemId, { key: key.trim(), label: label.trim(), required });
+      onCreated();
+    } catch (err) {
+      setError(err instanceof PosMenuApiError ? err.message : '登録に失敗しました');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="flex flex-col gap-2 rounded-lg border border-border bg-secondary/40 p-3">
+      <div className="flex gap-2">
+        <input
+          value={key}
+          onChange={(e) => setKey(e.target.value)}
+          placeholder="キー (例: weight)"
+          className="h-8 w-32 rounded-lg border border-border px-2.5 text-[12.5px]"
+        />
+        <input
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          placeholder="表示名 (例: 量目を選択)"
+          className="h-8 flex-1 rounded-lg border border-border px-2.5 text-[12.5px]"
+        />
+        <label className="flex items-center gap-1.5 whitespace-nowrap text-[11.5px] text-muted-foreground">
+          <input type="checkbox" checked={required} onChange={(e) => setRequired(e.target.checked)} />
+          必須
+        </label>
+      </div>
+      {error && <div className="text-xs text-destructive">{error}</div>}
+      <div className="flex gap-2">
+        <button
+          type="submit"
+          disabled={submitting || !key.trim() || !label.trim()}
+          className="h-8 w-fit rounded-lg bg-primary px-3 text-[12px] font-semibold text-primary-foreground disabled:opacity-60"
+        >
+          {submitting ? '登録中…' : '登録する'}
+        </button>
+        <button type="button" onClick={onCancel} className="h-8 rounded-lg border border-border px-3 text-[12px] font-semibold">
+          キャンセル
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function OptionGroupCard({
+  itemId,
+  group,
+  onChanged,
+  onDeleteGroup,
+}: {
+  itemId: string;
+  group: PosMenuOptionGroup;
+  onChanged: () => void;
+  onDeleteGroup: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [label, setLabel] = useState(group.label);
+  const [required, setRequired] = useState(group.required);
+  const [submitting, setSubmitting] = useState(false);
+  const [showAddChoice, setShowAddChoice] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submitEdit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!label.trim()) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      await updateMenuOptionGroup(itemId, group.id, { label: label.trim(), required });
+      setEditing(false);
+      onChanged();
+    } catch (err) {
+      setError(err instanceof PosMenuApiError ? err.message : '更新に失敗しました');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleDeleteChoice(choiceId: string) {
+    try {
+      await deleteMenuOptionChoice(itemId, group.id, choiceId);
+      onChanged();
+    } catch (err) {
+      setError(err instanceof PosMenuApiError ? err.message : '選択肢の削除に失敗しました');
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-border p-3">
+      <div className="flex items-start justify-between gap-2">
+        {editing ? (
+          <form onSubmit={submitEdit} className="flex flex-1 items-center gap-2">
+            <input
+              autoFocus
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              className="h-8 flex-1 rounded-lg border border-border px-2.5 text-[12.5px]"
+            />
+            <label className="flex items-center gap-1.5 whitespace-nowrap text-[11.5px] text-muted-foreground">
+              <input type="checkbox" checked={required} onChange={(e) => setRequired(e.target.checked)} />
+              必須
+            </label>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="h-8 rounded-lg bg-primary px-2.5 text-[11.5px] font-semibold text-primary-foreground disabled:opacity-60"
+            >
+              保存
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setEditing(false);
+                setLabel(group.label);
+                setRequired(group.required);
+              }}
+              className="h-8 rounded-lg border border-border px-2.5 text-[11.5px] font-semibold"
+            >
+              キャンセル
+            </button>
+          </form>
+        ) : (
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5">
+              <button onClick={() => setEditing(true)} className="text-[13px] font-semibold">
+                {group.label}
+              </button>
+              {group.required && (
+                <span className="rounded bg-secondary px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">必須</span>
+              )}
+            </div>
+            <div className="mt-0.5 text-[11px] text-muted-foreground">key: {group.key}</div>
+          </div>
+        )}
+        {!editing && (
+          <button onClick={onDeleteGroup} className="flex-shrink-0 text-[11.5px] font-semibold text-destructive">
+            グループを削除
+          </button>
+        )}
+      </div>
+
+      {error && <div className="mt-2 text-xs text-destructive">{error}</div>}
+
+      <div className="mt-2.5 flex flex-col gap-1.5">
+        {group.choices.length === 0 && !showAddChoice && (
+          <div className="text-[11.5px] text-muted-foreground">選択肢が未登録です。</div>
+        )}
+        {group.choices.map((c) => (
+          <OptionChoiceRow
+            key={c.id}
+            itemId={itemId}
+            groupId={group.id}
+            choice={c}
+            onChanged={onChanged}
+            onDelete={() => handleDeleteChoice(c.id)}
+          />
+        ))}
+      </div>
+
+      {showAddChoice ? (
+        <AddOptionChoiceForm
+          itemId={itemId}
+          groupId={group.id}
+          onCreated={() => {
+            setShowAddChoice(false);
+            onChanged();
+          }}
+          onCancel={() => setShowAddChoice(false)}
+        />
+      ) : (
+        <button
+          onClick={() => setShowAddChoice(true)}
+          className="mt-2 h-7 w-fit rounded-lg border border-dashed border-brand px-2.5 text-[11px] font-semibold text-brand"
+        >
+          ＋ 選択肢を追加
+        </button>
+      )}
+    </div>
+  );
+}
+
+function OptionChoiceRow({
+  itemId,
+  groupId,
+  choice,
+  onChanged,
+  onDelete,
+}: {
+  itemId: string;
+  groupId: string;
+  choice: PosMenuOptionChoice;
+  onChanged: () => void;
+  onDelete: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [label, setLabel] = useState(choice.label);
+  const [priceDelta, setPriceDelta] = useState(String(choice.price_delta));
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const value = parseFloat(priceDelta);
+    if (!label.trim() || !Number.isFinite(value)) return;
+    setSubmitting(true);
+    try {
+      await updateMenuOptionChoice(itemId, groupId, choice.id, { label: label.trim(), priceDelta: value });
+      setEditing(false);
+      onChanged();
+    } catch {
+      setLabel(choice.label);
+      setPriceDelta(String(choice.price_delta));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (editing) {
+    return (
+      <form onSubmit={submit} className="flex items-center gap-2 rounded-lg bg-secondary/40 px-2.5 py-1.5">
+        <input
+          autoFocus
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          className="h-7 flex-1 rounded border border-border px-2 text-[12px]"
+        />
+        <input
+          value={priceDelta}
+          onChange={(e) => setPriceDelta(e.target.value)}
+          inputMode="decimal"
+          className="h-7 w-20 rounded border border-border px-2 text-[12px]"
+        />
+        <button
+          type="submit"
+          disabled={submitting}
+          className="h-7 rounded bg-primary px-2 text-[11px] font-semibold text-primary-foreground disabled:opacity-60"
+        >
+          保存
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setEditing(false);
+            setLabel(choice.label);
+            setPriceDelta(String(choice.price_delta));
+          }}
+          className="h-7 rounded border border-border px-2 text-[11px] font-semibold"
+        >
+          キャンセル
+        </button>
+      </form>
+    );
+  }
+
+  return (
+    <div className="flex items-center justify-between rounded-lg px-2.5 py-1.5 hover:bg-secondary/40">
+      <button onClick={() => setEditing(true)} className="text-left text-[12.5px]">
+        {choice.label} <span className="text-muted-foreground">({choice.price_delta >= 0 ? '+' : ''}${choice.price_delta.toFixed(2)})</span>
+      </button>
+      <button onClick={onDelete} className="text-[11px] font-semibold text-destructive">
+        削除
+      </button>
+    </div>
+  );
+}
+
+function AddOptionChoiceForm({
+  itemId,
+  groupId,
+  onCreated,
+  onCancel,
+}: {
+  itemId: string;
+  groupId: string;
+  onCreated: () => void;
+  onCancel: () => void;
+}) {
+  const [choiceKey, setChoiceKey] = useState('');
+  const [label, setLabel] = useState('');
+  const [priceDelta, setPriceDelta] = useState('0');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const value = parseFloat(priceDelta || '0');
+    if (!choiceKey.trim() || !label.trim() || !Number.isFinite(value)) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      await createMenuOptionChoice(itemId, groupId, { choiceKey: choiceKey.trim(), label: label.trim(), priceDelta: value });
+      onCreated();
+    } catch (err) {
+      setError(err instanceof PosMenuApiError ? err.message : '登録に失敗しました');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="mt-2 flex flex-col gap-2 rounded-lg border border-border bg-secondary/40 p-2.5">
+      <div className="flex gap-2">
+        <input
+          value={choiceKey}
+          onChange={(e) => setChoiceKey(e.target.value)}
+          placeholder="キー (例: 100g)"
+          className="h-7 w-24 rounded border border-border px-2 text-[12px]"
+        />
+        <input
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          placeholder="表示名 (例: 100g)"
+          className="h-7 flex-1 rounded border border-border px-2 text-[12px]"
+        />
+        <input
+          value={priceDelta}
+          onChange={(e) => setPriceDelta(e.target.value)}
+          inputMode="decimal"
+          placeholder="追加料金 ($)"
+          className="h-7 w-24 rounded border border-border px-2 text-[12px]"
+        />
+      </div>
+      {error && <div className="text-xs text-destructive">{error}</div>}
+      <div className="flex gap-2">
+        <button
+          type="submit"
+          disabled={submitting || !choiceKey.trim() || !label.trim()}
+          className="h-7 w-fit rounded bg-primary px-2.5 text-[11.5px] font-semibold text-primary-foreground disabled:opacity-60"
+        >
+          {submitting ? '登録中…' : '登録する'}
+        </button>
+        <button type="button" onClick={onCancel} className="h-7 rounded border border-border px-2.5 text-[11.5px] font-semibold">
           キャンセル
         </button>
       </div>
