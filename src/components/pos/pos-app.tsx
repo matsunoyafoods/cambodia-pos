@@ -956,6 +956,12 @@ export function PosApp() {
                     予約受付
                   </button>
                   <button
+                    onClick={() => router.push('/pos/handy')}
+                    className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary"
+                  >
+                    ハンディ注文
+                  </button>
+                  <button
                     onClick={() => router.push('/pos/register-closing')}
                     className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary"
                   >

@@ -29,7 +29,7 @@ export function GuestDemographicsModal({
 
   return (
     <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/45">
-      <div className="flex max-h-[680px] w-[440px] flex-col gap-4 rounded-2xl bg-card p-5 shadow-2xl">
+      <div className="flex max-h-[90vh] w-[440px] max-w-[92vw] flex-col gap-4 rounded-2xl bg-card p-5 shadow-2xl">
         <div>
           <div className="text-base font-bold">来店客の客層を記録してください</div>
           <div className="mt-1 text-[11.5px] text-muted-foreground">

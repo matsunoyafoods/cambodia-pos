@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useCallback, useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 import { checkStaffSession } from '@/lib/api-client';
 import { checkPosStaffSession, getStaffRoster, loginWithPin, type PosStaffRosterEntry } from '@/lib/staff-client';
@@ -9,8 +9,27 @@ import { checkPosStaffSession, getStaffRoster, loginWithPin, type PosStaffRoster
 const ADMIN_LOGIN_URL =
   process.env.NEXT_PUBLIC_MATSUNOYA_DINE_ADMIN_LOGIN_URL ?? 'https://app.matsunoyafoods.com/admin-login';
 
+// ログイン後の遷移先。'/pos' 以外の場所 (例: ハンディ注文 /pos/handy) を開いていた端末が
+// ログイン画面に飛ばされた場合、ログイン後にレジ画面ではなく元の画面に戻れるようにする
+// (2026-08-31 追加。「ハンディ注文機能」でハンディ端末からの直接ログインに対応するため)。
+// '/'始まりの相対パス以外 (外部URL等) は無視して常に '/pos' にフォールバックする。
+function safeNextPath(raw: string | null): string {
+  if (raw && raw.startsWith('/') && !raw.startsWith('//')) return raw;
+  return '/pos';
+}
+
 export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginPageInner />
+    </Suspense>
+  );
+}
+
+function LoginPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const nextPath = safeNextPath(searchParams.get('next'));
   const [checking, setChecking] = useState(false);
   const [checked, setChecked] = useState(false);
   const [staffName, setStaffName] = useState<string | null>(null);
@@ -30,19 +49,19 @@ export default function LoginPage() {
       if (posStaff) {
         setChecked(true);
         setStaffName(posStaff.display_name);
-        router.replace('/pos');
+        router.replace(nextPath);
         return;
       }
       const staff = await checkStaffSession();
       setChecked(true);
       if (staff) {
         setStaffName(staff.display_name);
-        router.replace('/pos');
+        router.replace(nextPath);
       }
     } finally {
       setChecking(false);
     }
-  }, [router]);
+  }, [router, nextPath]);
 
   // 初回マウント時は POS ネイティブ (PIN) セッションのみ自動チェックする。
   // dine (Telegram) セッションまで自動チェックしてしまうと、PIN ログインに
@@ -51,7 +70,7 @@ export default function LoginPage() {
   // dine 側のチェックは「ログイン状態を確認」ボタンを押した時のみ行う。
   useEffect(() => {
     checkPosStaffSession().then((posStaff) => {
-      if (posStaff) router.replace('/pos');
+      if (posStaff) router.replace(nextPath);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -70,7 +89,7 @@ export default function LoginPage() {
     setPinError(null);
     try {
       await loginWithPin(selectedStaffId, pin);
-      router.replace('/pos');
+      router.replace(nextPath);
     } catch {
       setPinError('スタッフ名またはPINが正しくありません');
       setPin('');

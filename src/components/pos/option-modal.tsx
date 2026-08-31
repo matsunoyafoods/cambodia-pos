@@ -31,7 +31,7 @@ export function OptionModal({
       onClick={onClose}
     >
       <div
-        className="flex max-h-[640px] w-[420px] flex-col gap-4 rounded-2xl bg-card p-5 shadow-2xl"
+        className="flex max-h-[90vh] w-[420px] max-w-[92vw] flex-col gap-4 rounded-2xl bg-card p-5 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between">
