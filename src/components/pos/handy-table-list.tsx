@@ -78,12 +78,24 @@ export function HandyTableList({
 }) {
   const sessionByTable = new Map(tableSessions.map((s) => [s.table_code, s]));
 
-  // 実データがあればそれを sort_order 順で、無ければ (レイアウト未作成の店舗向け)
-  // 従来のデモ卓グループ一覧にフォールバックする (table-map-screen.tsx と同じ方針)。
+  // 実データの並び順: sort_order (テーブルレイアウト編集画面での作成・貼り付け順) を
+  // そのまま使うと、卓番号ともレジ画面の見取り図上の配置とも無関係なバラバラの順序に
+  // なってしまう (2026-08-31 修正。「席番号がバラバラになっているので席を間違う可能性がある」)。
+  // ここでは代わりに、見取り図の座標 (x, y) から「上の行→下の行、各行は左→右」という
+  // 読み順を復元して並べる。レジ画面の見取り図を見慣れているスタッフの感覚と揃うのが狙い。
+  // 行のまとめ方: y座標をそのまま比較すると数ピクセルのズレで同じ行の卓の順序が入れ替わって
+  // しまうため、卓の高さ (デフォルト64px、table-layout-screen.tsx 参照) の半分程度の幅で
+  // バケット化してから比較する。
+  const ROW_BUCKET_PX = 40;
   const realTables = layoutItems
     .filter((t) => t.kind === 'table')
     .slice()
-    .sort((a, b) => a.sort_order - b.sort_order)
+    .sort((a, b) => {
+      const rowA = Math.round(a.y / ROW_BUCKET_PX);
+      const rowB = Math.round(b.y / ROW_BUCKET_PX);
+      if (rowA !== rowB) return rowA - rowB;
+      return a.x - b.x;
+    })
     .map((t) => ({ code: t.table_code, seats: t.seats }));
 
   const groups: { label: string | null; tables: { code: string; seats: number }[] }[] =
