@@ -20,7 +20,8 @@ import type { ReceiptFormatSettings } from '@/lib/pos-types';
 
 const receiptItemSchema = z.object({ name: z.string(), qty: z.number(), lineTotal: z.number() });
 const kitchenItemSchema = z.object({ name: z.string(), qty: z.number(), optionsLabel: z.string().optional() });
-const paymentSchema = z.object({ method: z.enum(['cash', 'qr', 'card']), amount: z.number() });
+// method は決済方法の表示名の自由文字列 (2026-08-31 変更。receipt-format.ts 参照)。
+const paymentSchema = z.object({ method: z.string().trim().min(1), amount: z.number() });
 
 const postSchema = z.discriminatedUnion('kind', [
   z.object({

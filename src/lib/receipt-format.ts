@@ -35,9 +35,9 @@ function centerText(s: string, width: number): string {
 }
 
 export type ReceiptItemLine = { name: string; qty: number; lineTotal: number };
-export type ReceiptPaymentLine = { method: 'cash' | 'qr' | 'card'; amount: number };
-
-const METHOD_LABEL: Record<ReceiptPaymentLine['method'], string> = { cash: '現金', qr: 'QR', card: 'カード' };
+// method は決済方法の表示名そのもの (例: '現金', 'ABA Pay')。以前は 'cash'|'qr'|'card' 固定
+// だったが、店舗が自由に決済方法を追加できるようになったため自由文字列になった (2026-08-31 変更)。
+export type ReceiptPaymentLine = { method: string; amount: number };
 
 // 自由記述の複数行文言 (ヘッダー・フッター) を、改行で分割してそれぞれ中央寄せで積む。
 // 空文字なら何も足さない (2026-08-31 追加)。
@@ -99,7 +99,7 @@ export function formatReceiptText(params: {
   rows.push(labelValueLine('合計', `$${money(params.total)}`, w));
   rows.push(line('=', w));
   for (const p of params.payments) {
-    rows.push(labelValueLine(METHOD_LABEL[p.method], `$${money(p.amount)}`, w));
+    rows.push(labelValueLine(p.method, `$${money(p.amount)}`, w));
   }
   rows.push('');
   rows.push(centerText('ありがとうございました', w));

@@ -9,6 +9,7 @@ import type {
   MenuItem,
   PaymentLineInput,
   PaymentMethod,
+  PaymentMethodConfig,
   TableStatus,
 } from '@/lib/pos-types';
 import { DEFAULT_SETTINGS } from '@/lib/pos-types';
@@ -16,6 +17,7 @@ import { getPosMenus, getPosSettings, PosApiError } from '@/lib/api-client';
 import {
   getPosOrderMenu,
   getPosOrderMode,
+  getPosOrderPaymentMethods,
   getPosOrderSettings,
   getPosOrderTableLayout,
   PosOrderApiError,
@@ -118,6 +120,8 @@ export function PosApp() {
   // stateで、確定して追加されたラインだけここに積み上がる。画面遷移をまたいでも保持したいので
   // (会計画面↔注文画面を行き来しても入力済みの支払いが消えないように) pos-app 側に置く。
   const [paymentLines, setPaymentLines] = useState<PaymentLineInput[]>([]);
+  // 有効な決済方法一覧 (店舗が設定画面で自由に追加できる。2026-08-31 追加)。
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethodConfig[]>([]);
   const [optionModalItem, setOptionModalItem] = useState<MenuItem | null>(null);
   const [optionSelection, setOptionSelection] = useState<ModalSelection>({});
 
@@ -183,12 +187,16 @@ export function PosApp() {
         const layoutPromise = getPosOrderTableLayout().catch(() => ({ items: [] as TableLayoutItemRecord[] }));
         // 滞在タイマー・飲み放題タイマーは連携モードに関係なく卓単位で動く (pos.table_sessions)。
         const sessionsPromise = getTableSessions().catch(() => ({ items: [] as TableSessionRecord[] }));
+        // 決済方法は連携モードに関係なく pos.payment_methods (店舗単位) から読む
+        // (2026-08-31 追加。未設定でも会計自体は止めたくないので失敗時は空配列)。
+        const paymentMethodsPromise = getPosOrderPaymentMethods().catch(() => ({ paymentMethods: [] as PaymentMethodConfig[] }));
         if (menuSource === 'pos_native') {
-          const [menuData, settingsData, layoutData, sessionsData] = await Promise.all([
+          const [menuData, settingsData, layoutData, sessionsData, paymentMethodsData] = await Promise.all([
             getPosOrderMenu(),
             getPosOrderSettings(),
             layoutPromise,
             sessionsPromise,
+            paymentMethodsPromise,
           ]);
           if (cancelled) return;
           setMenu(menuData.items);
@@ -196,12 +204,14 @@ export function PosApp() {
           setSettings((prev) => ({ ...prev, ...settingsData }));
           setLayoutItems(layoutData.items);
           setTableSessions(sessionsData.items);
+          setPaymentMethods(paymentMethodsData.paymentMethods);
         } else {
-          const [menuData, settingsData, layoutData, sessionsData] = await Promise.all([
+          const [menuData, settingsData, layoutData, sessionsData, paymentMethodsData] = await Promise.all([
             getPosMenus(),
             getPosSettings(),
             layoutPromise,
             sessionsPromise,
+            paymentMethodsPromise,
           ]);
           if (cancelled) return;
           setMenu(
@@ -214,6 +224,7 @@ export function PosApp() {
           setSettings((prev) => ({ ...prev, ...settingsData }));
           setLayoutItems(layoutData.items);
           setTableSessions(sessionsData.items);
+          setPaymentMethods(paymentMethodsData.paymentMethods);
         }
       } catch (err) {
         if (cancelled) return;
@@ -1042,6 +1053,7 @@ export function PosApp() {
           paymentLines={paymentLines}
           onAddPaymentLine={addPaymentLine}
           onRemovePaymentLine={removePaymentLine}
+          paymentMethods={paymentMethods}
           khrRate={settings.khrRate}
           onBackToOrder={() => setScreen('order')}
           onComplete={completeOrder}

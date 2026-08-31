@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { DiscountType, PaymentLineInput, PaymentMethod } from '@/lib/pos-types';
+import type { DiscountType, PaymentLineInput, PaymentMethodConfig } from '@/lib/pos-types';
 import type { OrderItemRecord } from '@/lib/pos-order-orders-client';
 import { computeChange, money } from '@/lib/money';
 
@@ -12,12 +12,6 @@ type Totals = {
   couponDiscount: number;
   orderDiscount: number;
   total: number;
-};
-
-const PAYMENT_LABELS: Record<PaymentMethod, string> = {
-  cash: '現金',
-  qr: 'QR (ABA/KHQR)',
-  card: 'カード',
 };
 
 // 会計画面の「合計」から直接かける急遽の値引き (%引き・$引き) の編集UI。CartLineRow の
@@ -135,6 +129,7 @@ export function CheckoutScreen({
   paymentLines,
   onAddPaymentLine,
   onRemovePaymentLine,
+  paymentMethods,
   khrRate,
   onBackToOrder,
   onComplete,
@@ -156,6 +151,8 @@ export function CheckoutScreen({
   paymentLines: PaymentLineInput[];
   onAddPaymentLine: (line: Omit<PaymentLineInput, 'id'>) => void;
   onRemovePaymentLine: (id: string) => void;
+  /** 有効な決済方法一覧 (店舗が設定画面で自由に追加できる。2026-08-31 追加) */
+  paymentMethods: PaymentMethodConfig[];
   khrRate: number;
   onBackToOrder: () => void;
   onComplete: () => void;
@@ -168,7 +165,20 @@ export function CheckoutScreen({
   const remaining = Math.max(0, totals.total - paidSoFar);
   const remainingSettled = remaining <= 0.005;
 
-  const [method, setMethod] = useState<PaymentMethod>('cash');
+  // 決済方法は店舗が自由に追加できるため (2026-08-31 変更)、固定の 'cash'|'qr'|'card' ではなく
+  // 選択中の決済方法IDを持つ。paymentMethods が非同期で届く/変わった時に選択が消えていたら
+  // 先頭 (通常は現金) を選び直す。
+  const [selectedMethodId, setSelectedMethodId] = useState<string>('');
+  useEffect(() => {
+    if (paymentMethods.length === 0) return;
+    if (!paymentMethods.some((m) => m.id === selectedMethodId)) {
+      setSelectedMethodId(paymentMethods[0].id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paymentMethods]);
+  const selectedMethod = paymentMethods.find((m) => m.id === selectedMethodId) ?? null;
+  const isCashMethod = selectedMethod?.isCash ?? false;
+
   const [amountStr, setAmountStr] = useState(remaining.toFixed(2));
   const [amountTouched, setAmountTouched] = useState(false);
   const [cashUsdReceivedStr, setCashUsdReceivedStr] = useState('');
@@ -210,10 +220,10 @@ export function CheckoutScreen({
   }
 
   function addLine() {
-    if (lineAmount <= 0) return;
-    if (method === 'cash') {
+    if (lineAmount <= 0 || !selectedMethod) return;
+    if (isCashMethod) {
       onAddPaymentLine({
-        method: 'cash',
+        method: selectedMethod.name,
         amount: lineAmount,
         cashReceivedUsd: usdReceived,
         cashReceivedKhr: khrReceived,
@@ -221,19 +231,13 @@ export function CheckoutScreen({
         changeKhr: change.changeKhr,
       });
     } else {
-      onAddPaymentLine({ method, amount: lineAmount });
+      onAddPaymentLine({ method: selectedMethod.name, amount: lineAmount });
     }
     resetLineForm();
   }
 
   const canAddCashLine = lineAmount > 0 && change.totalReceivedUsdEquiv >= lineAmount - 0.005;
-  const canAddLine = method === 'cash' ? canAddCashLine : lineAmount > 0;
-
-  const methodTabs: { key: PaymentMethod; label: string }[] = [
-    { key: 'cash', label: '現金' },
-    { key: 'qr', label: 'QR (ABA/KHQR)' },
-    { key: 'card', label: 'カード' },
-  ];
+  const canAddLine = Boolean(selectedMethod) && (isCashMethod ? canAddCashLine : lineAmount > 0);
 
   const splitPresets = [2, 3, 4, 5, 6];
 
@@ -342,9 +346,9 @@ export function CheckoutScreen({
               {paymentLines.map((l) => (
                 <div key={l.id} className="flex items-center justify-between rounded-lg bg-secondary px-3 py-2 text-[12.5px]">
                   <div className="flex items-center gap-2">
-                    <span className="font-semibold">{PAYMENT_LABELS[l.method]}</span>
+                    <span className="font-semibold">{l.method}</span>
                     <span>${money(l.amount)}</span>
-                    {l.method === 'cash' && l.cashReceivedUsd != null && (
+                    {l.cashReceivedUsd != null && (
                       <span className="text-[11px] text-muted-foreground">
                         (預り ${money(l.cashReceivedUsd)}
                         {l.cashReceivedKhr ? ` + ${l.cashReceivedKhr.toLocaleString()}៛` : ''} / お釣り ${(l.changeUsd ?? 0).toFixed(0)}+{(l.changeKhr ?? 0).toLocaleString()}៛)
@@ -363,20 +367,26 @@ export function CheckoutScreen({
           )}
         </div>
 
-        {!remainingSettled && (
+        {!remainingSettled && paymentMethods.length === 0 && (
+          <div className="rounded-xl border border-dashed border-border p-4.5 text-[12.5px] text-muted-foreground">
+            決済方法が1つも設定されていません。設定画面の「決済設定」タブから追加してください。
+          </div>
+        )}
+
+        {!remainingSettled && paymentMethods.length > 0 && (
           <div className="flex flex-col gap-3.5 rounded-xl border border-border p-4.5">
             <div className="flex items-center justify-between">
-              <div className="flex w-fit gap-1.5 rounded-lg bg-secondary p-1">
-                {methodTabs.map((t) => (
+              <div className="flex w-fit flex-wrap gap-1.5 rounded-lg bg-secondary p-1">
+                {paymentMethods.map((m) => (
                   <button
-                    key={t.key}
-                    onClick={() => setMethod(t.key)}
+                    key={m.id}
+                    onClick={() => setSelectedMethodId(m.id)}
                     className={
                       'h-8 rounded-md px-4.5 text-[12.5px] font-semibold ' +
-                      (method === t.key ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground')
+                      (selectedMethodId === m.id ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground')
                     }
                   >
-                    {t.label}
+                    {m.name}
                   </button>
                 ))}
               </div>
@@ -411,7 +421,7 @@ export function CheckoutScreen({
               />
             </div>
 
-            {method === 'cash' && (
+            {isCashMethod && (
               <>
                 <div>
                   <div className="mb-2 text-xs font-semibold text-muted-foreground">
@@ -494,23 +504,9 @@ export function CheckoutScreen({
               </>
             )}
 
-            {method === 'qr' && (
-              <div className="flex flex-col items-center gap-4 rounded-xl p-2">
-                <div className="grid h-32 w-32 grid-cols-6 grid-rows-6 gap-0.5 bg-card p-2">
-                  {Array.from({ length: 36 }).map((_, i) => (
-                    <div
-                      key={i}
-                      className={(i * 7 + Math.floor(i / 6) * 3) % 5 === 0 ? 'bg-primary' : 'bg-transparent'}
-                    />
-                  ))}
-                </div>
-                <div className="text-[12px] text-muted-foreground">${money(lineAmount)} の支払いをQRで受け取ってください</div>
-              </div>
-            )}
-
-            {method === 'card' && (
+            {!isCashMethod && selectedMethod && (
               <div className="text-[13px] text-muted-foreground">
-                外部の専用カードリーダーで ${money(lineAmount)} を決済後、下のボタンで記録してください
+                「{selectedMethod.name}」で ${money(lineAmount)} を受け取り・決済後、下のボタンで記録してください
               </div>
             )}
 

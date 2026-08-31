@@ -5,7 +5,7 @@
  * 詳細は src/app/api/pos-order/mode/route.ts のコメント参照。
  */
 
-import type { MenuItem, PosSettings } from '@/lib/pos-types';
+import type { MenuItem, PaymentMethodConfig, PosSettings } from '@/lib/pos-types';
 import type { TableLayoutItemRecord } from '@/lib/table-layout-client';
 
 export class PosOrderApiError extends Error {
@@ -60,4 +60,10 @@ export function getPosOrderSettings(): Promise<PosSettings> {
 
 export function getPosOrderTableLayout(): Promise<{ items: TableLayoutItemRecord[] }> {
   return request('/api/pos-order/table-layout');
+}
+
+// 会計画面向け、有効な決済方法一覧 (2026-08-31 追加。決済方法を店舗側で自由に追加できる
+// ようにしたため、以前のように 現金/QR/カード を画面に決め打ちせず、ここから取得して使う)。
+export function getPosOrderPaymentMethods(): Promise<{ paymentMethods: PaymentMethodConfig[] }> {
+  return request('/api/pos-order/payment-methods');
 }

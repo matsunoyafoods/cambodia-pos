@@ -83,7 +83,20 @@ export type TableInfo = {
   status: TableStatus;
 };
 
-export type PaymentMethod = 'cash' | 'qr' | 'card';
+// 決済方法の「値」。以前は 'cash'|'qr'|'card' の固定3種類だったが、店舗が自由に決済方法を
+// 追加・改名できるようにしたため (2026-08-31 変更。pos.payment_methods 参照)、その時点の
+// 表示名をそのまま指す自由文字列になった (例: '現金', 'ABA Pay', 'Wing')。
+export type PaymentMethod = string;
+
+// 決済方法マスタ (店舗ごとに自由に追加・並び替え・無効化できる) (2026-08-31 追加)。
+export type PaymentMethodConfig = {
+  id: string;
+  name: string;
+  /** 現金として扱うか (預り金額入力・お釣り自動計算UIを出すかどうかの分岐に使う) */
+  isCash: boolean;
+  enabled: boolean;
+  sortOrder: number;
+};
 
 // 会計の1つの支払いライン。1つの伝票を複数の支払い方法・複数人に分けて会計できるようにする
 // ため (2026-08-31 追加。「ABAで$10現金で$10」の分割払い、「割り勘」の両方をこの1つの仕組みで

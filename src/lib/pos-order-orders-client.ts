@@ -111,7 +111,8 @@ export function completeOrderPayment(
     orderDiscount: number;
     total: number;
     payments: {
-      method: 'cash' | 'qr' | 'card';
+      // 決済方法の表示名 (自由文字列。2026-08-31 変更。receipt-format.ts 参照)
+      method: string;
       amount: number;
       cashReceivedUsd?: number;
       cashReceivedKhr?: number;
@@ -210,7 +211,7 @@ export function enqueueReceiptPrintJob(input: {
   couponDiscount: number;
   orderDiscount: number;
   total: number;
-  payments: { method: 'cash' | 'qr' | 'card'; amount: number }[];
+  payments: { method: string; amount: number }[];
 }): Promise<PrintJobResult> {
   return request('/api/pos-order/print-jobs', { method: 'POST', body: JSON.stringify({ kind: 'receipt', ...input }) });
 }

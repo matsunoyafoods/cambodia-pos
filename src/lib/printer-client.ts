@@ -3,7 +3,7 @@
  * settings-client.ts と同じ方針 (同一オリジン、Cookie セッション)。
  */
 
-import type { PrinterConfig } from '@/lib/pos-types';
+import type { PaymentMethodConfig, PrinterConfig } from '@/lib/pos-types';
 
 export class PosPrinterApiError extends Error {
   constructor(
@@ -105,4 +105,34 @@ export async function uploadReceiptLogo(pngBase64: string): Promise<void> {
 
 export async function deleteReceiptLogo(): Promise<void> {
   await request('/api/settings/receipt-logo', { method: 'DELETE' });
+}
+
+// 決済方法の管理 (設定画面「決済設定」タブ用) (2026-08-31 追加)。
+
+export async function listPaymentMethods(): Promise<PaymentMethodConfig[]> {
+  const { paymentMethods } = await request<{ paymentMethods: PaymentMethodConfig[] }>('/api/settings/payment-methods');
+  return paymentMethods;
+}
+
+export async function createPaymentMethod(input: { name: string; isCash: boolean }): Promise<PaymentMethodConfig> {
+  const { paymentMethod } = await request<{ paymentMethod: PaymentMethodConfig }>('/api/settings/payment-methods', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+  return paymentMethod;
+}
+
+export async function updatePaymentMethod(
+  id: string,
+  patch: Partial<{ name: string; isCash: boolean; enabled: boolean; sortOrder: number }>,
+): Promise<PaymentMethodConfig> {
+  const { paymentMethod } = await request<{ paymentMethod: PaymentMethodConfig }>(`/api/settings/payment-methods/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
+  return paymentMethod;
+}
+
+export async function deletePaymentMethod(id: string): Promise<void> {
+  await request(`/api/settings/payment-methods/${id}`, { method: 'DELETE' });
 }

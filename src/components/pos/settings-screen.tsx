@@ -58,22 +58,26 @@ import {
 } from '@/lib/menu-client';
 import { indexCategories, resolveCategoryChain, type CategoryNode } from '@/lib/category-tree';
 import {
+  createPaymentMethod,
   createPrinter,
+  deletePaymentMethod,
   deletePrinter,
   deleteReceiptLogo,
   getPrintAgentToken,
   getReceiptFormat,
   getReceiptLogo,
+  listPaymentMethods,
   listPrinters,
   regeneratePrintAgentToken,
   testPrint,
+  updatePaymentMethod,
   updatePrinter,
   updateReceiptFormat,
   uploadReceiptLogo,
   PosPrinterApiError,
   type CreatePrinterInput,
 } from '@/lib/printer-client';
-import type { PrinterConfig } from '@/lib/pos-types';
+import type { PaymentMethodConfig, PrinterConfig } from '@/lib/pos-types';
 
 type Tab = 'general' | 'printer' | 'payment' | 'staff' | 'menu' | 'layout' | 'integration';
 
@@ -437,6 +441,209 @@ function ReceiptFormatSection({ canManageSettings }: { canManageSettings: boolea
   );
 }
 
+// 決済方法の管理 (「決済設定」タブ) (2026-08-31 追加。「決済設定で決済方法を追加できるように
+// してください」)。以前は現金/QR/カードの固定3種類のON/OFFトグルだったが (実際にはレジ画面に
+// 未接続で使われていなかった)、店舗が自由に名前を付けて決済方法を追加・並び替え・無効化できる
+// ようにした。会計画面 (checkout-screen.tsx) はここで有効化した決済方法だけを表示する。
+function PaymentMethodsSection({ canManageSettings }: { canManageSettings: boolean }) {
+  const [methods, setMethods] = useState<PaymentMethodConfig[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [newName, setNewName] = useState('');
+  const [newIsCash, setNewIsCash] = useState(false);
+  const [adding, setAdding] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await listPaymentMethods();
+        if (!cancelled) {
+          setMethods(list.slice().sort((a, b) => a.sortOrder - b.sortOrder));
+          setLoaded(true);
+        }
+      } catch (err) {
+        if (!cancelled) setError(err instanceof PosPrinterApiError ? err.message : '決済方法の取得に失敗しました');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function handleAdd() {
+    const name = newName.trim();
+    if (!name) return;
+    setAdding(true);
+    setError(null);
+    try {
+      const created = await createPaymentMethod({ name, isCash: newIsCash });
+      setMethods((prev) => [...prev, created].sort((a, b) => a.sortOrder - b.sortOrder));
+      setNewName('');
+      setNewIsCash(false);
+    } catch (err) {
+      setError(err instanceof PosPrinterApiError ? err.message : '追加に失敗しました');
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  async function handleToggleEnabled(m: PaymentMethodConfig) {
+    setBusyId(m.id);
+    setError(null);
+    try {
+      const updated = await updatePaymentMethod(m.id, { enabled: !m.enabled });
+      setMethods((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
+    } catch (err) {
+      setError(err instanceof PosPrinterApiError ? err.message : '更新に失敗しました');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function handleDelete(id: string) {
+    setBusyId(id);
+    setError(null);
+    try {
+      await deletePaymentMethod(id);
+      setMethods((prev) => prev.filter((x) => x.id !== id));
+    } catch (err) {
+      setError(err instanceof PosPrinterApiError ? err.message : '削除に失敗しました');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  // 表示順の入れ替え。隣同士の sort_order を入れ替えるだけの簡易実装。
+  async function handleMove(index: number, direction: -1 | 1) {
+    const otherIndex = index + direction;
+    if (otherIndex < 0 || otherIndex >= methods.length) return;
+    const a = methods[index];
+    const b = methods[otherIndex];
+    setBusyId(a.id);
+    setError(null);
+    try {
+      const [updatedA, updatedB] = await Promise.all([
+        updatePaymentMethod(a.id, { sortOrder: b.sortOrder }),
+        updatePaymentMethod(b.id, { sortOrder: a.sortOrder }),
+      ]);
+      setMethods((prev) =>
+        prev
+          .map((x) => (x.id === updatedA.id ? updatedA : x.id === updatedB.id ? updatedB : x))
+          .sort((x, y) => x.sortOrder - y.sortOrder),
+      );
+    } catch (err) {
+      setError(err instanceof PosPrinterApiError ? err.message : '並び替えに失敗しました');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  if (!loaded) {
+    return (
+      <div className="rounded-xl border border-border p-3 text-[12.5px] text-muted-foreground">
+        {error ?? '決済方法を読み込み中…'}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-2.5">
+      {error && <div className="text-[12px] text-destructive">{error}</div>}
+      <div className="flex flex-col gap-2">
+        {methods.map((m, i) => (
+          <div key={m.id} className="flex items-center justify-between rounded-xl border border-border px-4 py-3">
+            <div className="flex items-center gap-2.5">
+              <div className="flex flex-col">
+                <button
+                  type="button"
+                  disabled={!canManageSettings || busyId === m.id || i === 0}
+                  onClick={() => handleMove(i, -1)}
+                  className="h-4 text-[10px] leading-none text-muted-foreground disabled:opacity-30"
+                >
+                  ▲
+                </button>
+                <button
+                  type="button"
+                  disabled={!canManageSettings || busyId === m.id || i === methods.length - 1}
+                  onClick={() => handleMove(i, 1)}
+                  className="h-4 text-[10px] leading-none text-muted-foreground disabled:opacity-30"
+                >
+                  ▼
+                </button>
+              </div>
+              <div>
+                <div className="text-[13.5px] font-semibold">
+                  {m.name}
+                  {m.isCash && (
+                    <span className="ml-2 rounded-full bg-secondary px-2 py-0.5 text-[10.5px] font-semibold text-muted-foreground">
+                      現金 (お釣り計算あり)
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2.5">
+              <button
+                type="button"
+                disabled={!canManageSettings || busyId === m.id}
+                onClick={() => handleToggleEnabled(m)}
+                className={
+                  'flex items-center gap-1.5 text-xs disabled:opacity-60 ' +
+                  (m.enabled ? 'text-emerald-600' : 'text-muted-foreground')
+                }
+              >
+                <span className={'inline-block h-2 w-2 rounded-full ' + (m.enabled ? 'bg-emerald-500' : 'bg-border')} />
+                {m.enabled ? '有効' : '無効'}
+              </button>
+              <button
+                type="button"
+                disabled={!canManageSettings || busyId === m.id}
+                onClick={() => handleDelete(m.id)}
+                className="h-[34px] rounded-lg border border-border px-3 text-[12.5px] font-semibold text-destructive disabled:opacity-60"
+              >
+                削除
+              </button>
+            </div>
+          </div>
+        ))}
+        {methods.length === 0 && <div className="text-[12.5px] text-muted-foreground">まだ決済方法が登録されていません。</div>}
+      </div>
+
+      <div className="rounded-xl border border-dashed border-border p-3.5">
+        <div className="mb-2 text-[12.5px] font-semibold">決済方法を追加</div>
+        <div className="flex flex-wrap items-center gap-2.5">
+          <input
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            placeholder="例: ABA Pay, Wing, カード"
+            disabled={!canManageSettings}
+            className="h-9 w-56 rounded-lg border border-border px-3 text-[13px] disabled:opacity-60"
+          />
+          <label className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={newIsCash}
+              onChange={(e) => setNewIsCash(e.target.checked)}
+              disabled={!canManageSettings}
+            />
+            現金として扱う (預り金額入力・お釣り自動計算を出す)
+          </label>
+          <button
+            type="button"
+            onClick={handleAdd}
+            disabled={!canManageSettings || adding || !newName.trim()}
+            className="h-9 rounded-lg bg-primary px-4 text-[12.5px] font-semibold text-primary-foreground disabled:opacity-60"
+          >
+            {adding ? '追加中…' : '追加する'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // GET/PUT /api/pos/settings (integration-spec.md 4.2) に対応する画面。
 // dine 連携店舗 (authMode 'dine') は matsunoya-dine 側の /api/pos/settings (api-client.ts) が
 // Source of Truth。POS ネイティブ店舗 (authMode 'pos_native') は /api/settings/general
@@ -625,7 +832,7 @@ export function SettingsScreen() {
         </div>
         <div className="flex items-center gap-2.5">
           {saveError && <div className="text-xs text-destructive">{saveError}</div>}
-          {(tab === 'general' || tab === 'payment') && (
+          {tab === 'general' && (
             <button
               onClick={handleSave}
               disabled={saving || !canManageSettings}
@@ -906,34 +1113,17 @@ export function SettingsScreen() {
           )}
 
           {tab === 'payment' && (
-            <div className="flex max-w-[560px] flex-col gap-2.5">
-              <div className="mb-1.5 text-[15px] font-bold">決済設定</div>
+            <div className="flex max-w-[640px] flex-col gap-3.5">
+              <div className="text-[15px] font-bold">決済設定</div>
+              <div className="rounded-xl border border-border p-3.5 text-[12px] text-muted-foreground">
+                店舗で実際に使っている決済方法を自由に登録してください。ここで「有効」にした決済方法だけがレジの会計画面に表示されます。「現金として扱う」を付けた決済方法は、預り金額の入力とお釣りの自動計算が出ます。
+              </div>
               {!canManageSettings && (
-                <div className="mb-1 rounded-xl border border-border p-3 text-[12.5px] text-muted-foreground">
-                  決済設定の変更には manager 以上の権限が必要です。
+                <div className="rounded-xl border border-border p-3 text-[12.5px] text-muted-foreground">
+                  決済方法の追加・変更には manager 以上の権限が必要です。
                 </div>
               )}
-              <ToggleRow
-                name="現金"
-                desc="USD / KHR 混在対応"
-                on={settings.cashEnabled}
-                disabled={!canManageSettings}
-                onToggle={() => update('cashEnabled', !settings.cashEnabled)}
-              />
-              <ToggleRow
-                name="QR (ABA/KHQR)"
-                desc="静的QR表示・手動確認"
-                on={settings.qrEnabled}
-                disabled={!canManageSettings}
-                onToggle={() => update('qrEnabled', !settings.qrEnabled)}
-              />
-              <ToggleRow
-                name="カード"
-                desc="外部端末決済・手動記録"
-                on={settings.cardEnabled}
-                disabled={!canManageSettings}
-                onToggle={() => update('cardEnabled', !settings.cardEnabled)}
-              />
+              <PaymentMethodsSection canManageSettings={canManageSettings} />
             </div>
           )}
 

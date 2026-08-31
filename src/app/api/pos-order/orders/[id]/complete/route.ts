@@ -8,8 +8,11 @@ type RouteContext = { params: Promise<{ id: string }> };
 // 対応するため、1回の会計完了で複数の支払いラインをまとめて受け取れるようにした
 // (2026-08-31 追加)。pos.payments は元々 order_id に対して複数行を許容する設計だったので、
 // テーブル自体のマイグレーションは不要 — ここでは insert を配列分ループするだけでよい。
+// method は以前は 'cash'|'qr'|'card' 固定だったが、店舗が自由に決済方法を追加できるように
+// なったため (2026-08-31 変更。pos.payment_methods 参照)、その時点の表示名の自由文字列を
+// そのまま受け取る (pos.payments.method に同じ文字列をスナップショットとして保存する)。
 const paymentLineSchema = z.object({
-  method: z.enum(['cash', 'qr', 'card']),
+  method: z.string().trim().min(1),
   amount: z.number().min(0),
   cashReceivedUsd: z.number().min(0).optional(),
   cashReceivedKhr: z.number().int().min(0).optional(),
