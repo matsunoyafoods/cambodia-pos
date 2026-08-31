@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import type { CartLine, GuestEthnicity, HandyTableGroup, MenuItem, TableStatus } from '@/lib/pos-types';
+import type { CartLine, HandyTableGroup, MenuItem, TableStatus } from '@/lib/pos-types';
 import { DEFAULT_SETTINGS } from '@/lib/pos-types';
 import { getPosMenus, getPosSettings, PosApiError } from '@/lib/api-client';
 import {
@@ -34,7 +34,6 @@ import { useStaff } from './staff-context';
 import { HandyTableList } from './handy-table-list';
 import { HandyOrderScreen } from './handy-order-screen';
 import { OptionModal, type ModalSelection } from './option-modal';
-import { GuestDemographicsModal } from './guest-demographics-modal';
 
 // ハンディ (タブレット・スマホ) 向けの注文専用アプリ (2026-08-31 追加。「ハンディ注文機能」)。
 // レジ画面本体 (pos-app.tsx) と同じ pos.orders/pos.table_sessions 等のAPIをそのまま共有する
@@ -71,10 +70,6 @@ export function HandyApp() {
 
   const [currentOrder, setCurrentOrder] = useState<OpenOrderRecord | null>(null);
   const [confirmedItems, setConfirmedItems] = useState<OrderItemRecord[]>([]);
-  const [guestModalOpen, setGuestModalOpen] = useState(false);
-  const [pendingTapItem, setPendingTapItem] = useState<MenuItem | null>(null);
-  const [guestSaving, setGuestSaving] = useState(false);
-  const [guestError, setGuestError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
 
@@ -238,9 +233,6 @@ export function HandyApp() {
   function resetOrderState() {
     setOptionModalItem(null);
     setOptionSelection({});
-    setGuestModalOpen(false);
-    setPendingTapItem(null);
-    setGuestError(null);
     setConfirmError(null);
   }
 
@@ -306,36 +298,22 @@ export function HandyApp() {
     }
   }
 
-  function onAddItem(item: MenuItem) {
+  // この卓でまだ open 注文が無ければ (=ファースト注文) 卓を開いてから商品を追加する。
+  // 客層記録はハンディでは行わない (2026-08-31 変更: 会計機能はレジ側のみにあり、客層記録は
+  // レジ画面が「会計へ進む」を押した時に別途行うようになったため。pos-app.tsx 参照)。
+  async function onAddItem(item: MenuItem) {
     if (!currentOrder) {
-      setPendingTapItem(item);
-      setGuestError(null);
-      setGuestModalOpen(true);
+      if (!selectedTable) return;
+      try {
+        const { order } = await createOpenOrder({ tableCode: selectedTable, staffId: me.id });
+        setCurrentOrder(order);
+        proceedAddItem(item);
+      } catch (err) {
+        window.alert(err instanceof PosOrderOrdersApiError ? err.message : '卓を開けませんでした');
+      }
       return;
     }
     proceedAddItem(item);
-  }
-
-  async function handleGuestConfirm(ethnicity: GuestEthnicity, kidsCount: number) {
-    if (!selectedTable) return;
-    setGuestSaving(true);
-    setGuestError(null);
-    try {
-      const { order } = await createOpenOrder({ tableCode: selectedTable, guestEthnicity: ethnicity, guestKidsCount: kidsCount, staffId: me.id });
-      setCurrentOrder(order);
-      setGuestModalOpen(false);
-      const item = pendingTapItem;
-      setPendingTapItem(null);
-      if (item) proceedAddItem(item);
-    } catch (err) {
-      setGuestError(err instanceof PosOrderOrdersApiError ? err.message : '客層の保存に失敗しました');
-    } finally {
-      setGuestSaving(false);
-    }
-  }
-  function handleGuestCancel() {
-    setGuestModalOpen(false);
-    setPendingTapItem(null);
   }
 
   async function confirmPendingCart(): Promise<boolean> {
@@ -521,8 +499,6 @@ export function HandyApp() {
           onResetTable={resetCurrentTable}
         />
       )}
-
-      {guestModalOpen && <GuestDemographicsModal onCancel={handleGuestCancel} onConfirm={handleGuestConfirm} submitting={guestSaving} error={guestError} />}
 
       {optionModalItem && (
         <OptionModal

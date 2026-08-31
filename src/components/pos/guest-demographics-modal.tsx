@@ -3,9 +3,11 @@
 import { useState } from 'react';
 import { ETHNICITY_KEYS, ETHNICITY_LABELS, type GuestEthnicity } from '@/lib/pos-types';
 
-// ファースト注文 (この卓に open 注文がまだ無い状態で最初に商品をタップした時) に必ず挟む
-// 客層記録モーダル。人種構成の合計が1人以上でないと保存できない (キャンセルすれば商品は
-// カートに追加されず、次にどれかタップすればまた同じモーダルが出る)。
+// レジ画面が「会計へ進む」を押した時 (まだ客層記録が済んでいない注文の場合) に必ず挟む
+// 客層記録モーダル (2026-08-31 変更: 以前はファースト注文時だったが、「あとで人数が増えた
+// 場合にも対応できる」「会計の時だと少し余裕がある」という理由でこのタイミングに移動した)。
+// 人種構成の合計が1人以上でないと保存できない (キャンセルすれば注文画面に留まる。次に
+// 「会計へ進む」を押せばまた同じモーダルが出る)。
 export function GuestDemographicsModal({
   onCancel,
   onConfirm,
@@ -33,7 +35,7 @@ export function GuestDemographicsModal({
         <div>
           <div className="text-base font-bold">来店客の客層を記録してください</div>
           <div className="mt-1 text-[11.5px] text-muted-foreground">
-            この卓のファースト注文には、人種構成・子供人数の入力が必須です。
+            会計へ進む前に、人種構成・子供人数の入力が必須です。最終的な来店人数で記録してください。
           </div>
         </div>
 
@@ -107,7 +109,7 @@ export function GuestDemographicsModal({
               (canSubmit ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground')
             }
           >
-            {submitting ? '保存中…' : '保存して注文へ進む'}
+            {submitting ? '保存中…' : '保存して会計へ進む'}
           </button>
         </div>
       </div>

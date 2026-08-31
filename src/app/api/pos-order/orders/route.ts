@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createPosAdminClient, getPosStoreId } from '@/lib/supabase/admin';
-import { ETHNICITY_KEYS } from '@/lib/pos-types';
 
 // レジ画面向け、卓の「開いている伝票 (pos.orders, status='open')」用の公開エンドポイント
 // (認証なし。理由は同ディレクトリの他ルートと同じ: dine連携ログインのCookieは別オリジンの
@@ -10,6 +9,12 @@ import { ETHNICITY_KEYS } from '@/lib/pos-types';
 // 1卓の来店 = 1つの open 注文。会計完了 (complete) で status が 'paid' になり、次の来店では
 // 新しい注文が作られる。「注文確定」ボタンを押すたびに /orders/[id]/items へ商品が追記され、
 // 画面をリロードしたり卓一覧に戻ってもこの GET で確定済み分を復元できる (カート消失バグの根本対応)。
+//
+// 客層記録 (guest_ethnicity/guest_kids_count) は 2026-08-31 より、この卓を開くタイミングでは
+// 求めない (以前はここが必須入力だった)。Tomさんの要望: 「あとで人数が増えた場合にも対応でき、
+// 会計の時だと少し余裕がある」ため、客層記録はレジ画面が「会計へ進む」を押した時に
+// POST /api/pos-order/orders/[id]/guest で別途記録するよう変更した。ハンディ (会計機能を
+// 持たない) はこの卓を開くだけで、客層記録を一切行わない。
 
 const orderItemSelect = 'id, menu_id, menu_name, qty, unit_price, selected_options, line_total, sent_to_kitchen_at';
 const orderSelect = 'id, table_code, status, guest_ethnicity, guest_kids_count, guest_recorded_at, created_at';
@@ -52,24 +57,21 @@ export async function GET(req: Request) {
 // z.record(z.enum(...), ...) requires EVERY enum key to be present (exhaustive) in this zod version —
 // the client only sends keys the staff actually tapped (a partial object), so that would reject every
 // real request. z.partialRecord allows a subset of keys while still rejecting unknown keys.
-const guestEthnicitySchema = z.partialRecord(z.enum(ETHNICITY_KEYS), z.number().int().min(0).max(999));
-
 const createSchema = z.object({
   tableCode: z.string().min(1),
-  guestEthnicity: guestEthnicitySchema,
-  guestKidsCount: z.number().int().min(0).max(999),
   staffId: z.string().uuid().optional(),
 });
 
-// POST /api/pos-order/orders : ファースト注文確定時に、客層情報とともに open 注文を新規作成する。
-// 既に open 注文がある卓に対して呼ばれた場合は (二重タップ等の保険として) 新規作成せず既存を返す。
+// POST /api/pos-order/orders : この卓の open 注文を新規作成する (客層記録は含まない。
+// 上のコメント参照)。既に open 注文がある卓に対して呼ばれた場合は (二重タップ等の保険として)
+// 新規作成せず既存を返す。
 export async function POST(req: Request) {
   const json = await req.json().catch(() => null);
   const parsed = createSchema.safeParse(json);
   if (!parsed.success) {
     return NextResponse.json({ error: 'invalid_request', details: parsed.error.flatten() }, { status: 400 });
   }
-  const { tableCode, guestEthnicity, guestKidsCount, staffId } = parsed.data;
+  const { tableCode, staffId } = parsed.data;
 
   const supabase = createPosAdminClient();
   const storeId = getPosStoreId();
@@ -88,7 +90,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ order: existing });
   }
 
-  const nowIso = new Date().toISOString();
   const { data, error } = await supabase
     .from('orders')
     .insert({
@@ -99,10 +100,7 @@ export async function POST(req: Request) {
       vat: 0,
       service: 0,
       total: 0,
-      guest_ethnicity: guestEthnicity,
-      guest_kids_count: guestKidsCount,
-      guest_recorded_by: staffId ?? null,
-      guest_recorded_at: nowIso,
+      created_by: staffId ?? null,
     })
     .select(orderSelect)
     .single();

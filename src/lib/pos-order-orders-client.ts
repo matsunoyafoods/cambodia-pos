@@ -64,13 +64,17 @@ export function getOpenOrder(tableCode: string): Promise<{ order: OpenOrderRecor
   return request(`/api/pos-order/orders?tableCode=${encodeURIComponent(tableCode)}`);
 }
 
-export function createOpenOrder(input: {
-  tableCode: string;
-  guestEthnicity: GuestEthnicity;
-  guestKidsCount: number;
-  staffId?: string;
-}): Promise<{ order: OpenOrderRecord }> {
+export function createOpenOrder(input: { tableCode: string; staffId?: string }): Promise<{ order: OpenOrderRecord }> {
   return request('/api/pos-order/orders', { method: 'POST', body: JSON.stringify(input) });
+}
+
+// 客層記録 (2026-08-31 変更: 卓を開く時ではなく「会計へ進む」時に呼ぶよう移動。
+// 詳細は src/app/api/pos-order/orders/[id]/guest/route.ts のコメント参照)。
+export function recordGuestDemographics(
+  orderId: string,
+  input: { guestEthnicity: GuestEthnicity; guestKidsCount: number; staffId?: string },
+): Promise<{ order: OpenOrderRecord }> {
+  return request(`/api/pos-order/orders/${orderId}/guest`, { method: 'POST', body: JSON.stringify(input) });
 }
 
 export function confirmOrderItems(

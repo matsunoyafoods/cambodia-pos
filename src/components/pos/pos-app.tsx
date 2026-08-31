@@ -33,6 +33,7 @@ import {
   getOpenOrder,
   mergeTables,
   moveTable,
+  recordGuestDemographics,
   resetTable,
   updateConfirmedItemDiscount,
   updateConfirmedItemQty,
@@ -143,7 +144,6 @@ export function PosApp() {
   const [invoiceIssued, setInvoiceIssued] = useState(false);
   const [reprintBusy, setReprintBusy] = useState(false);
   const [guestModalOpen, setGuestModalOpen] = useState(false);
-  const [pendingTapItem, setPendingTapItem] = useState<MenuItem | null>(null);
   const [guestSaving, setGuestSaving] = useState(false);
   const [guestError, setGuestError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -372,7 +372,6 @@ export function PosApp() {
     setOptionModalItem(null);
     setOptionSelection({});
     setGuestModalOpen(false);
-    setPendingTapItem(null);
     setGuestError(null);
     setConfirmError(null);
     setCompleteError(null);
@@ -574,34 +573,38 @@ export function PosApp() {
     }
   }
 
-  // この卓でまだ open 注文が無ければ (=ファースト注文) 客層記録モーダルを先に挟む。
-  // タップした商品は pendingTapItem に覚えておき、モーダル保存後に自動で追加する。
-  function onAddItem(item: MenuItem) {
+  // この卓でまだ open 注文が無ければ (=ファースト注文) 卓を開いてから商品を追加する。
+  // 客層記録は 2026-08-31 よりここでは行わない (「会計へ進む」時に移動。handleCheckout 参照)。
+  async function onAddItem(item: MenuItem) {
     if (!currentOrder) {
-      setPendingTapItem(item);
-      setGuestError(null);
-      setGuestModalOpen(true);
+      if (!selectedTable) return;
+      try {
+        const { order } = await createOpenOrder({ tableCode: selectedTable, staffId: me.id });
+        setCurrentOrder(order);
+        proceedAddItem(item);
+      } catch (err) {
+        window.alert(err instanceof PosOrderOrdersApiError ? err.message : '卓を開けませんでした');
+      }
       return;
     }
     proceedAddItem(item);
   }
 
+  // 客層記録 (2026-08-31 変更: 「会計へ進む」ボタンを押した時に挟むよう移動。理由は
+  // handleCheckout のコメント参照)。保存できたら会計画面へ進む。
   async function handleGuestConfirm(ethnicity: GuestEthnicity, kidsCount: number) {
-    if (!selectedTable) return;
+    if (!currentOrder) return;
     setGuestSaving(true);
     setGuestError(null);
     try {
-      const { order } = await createOpenOrder({
-        tableCode: selectedTable,
+      const { order } = await recordGuestDemographics(currentOrder.id, {
         guestEthnicity: ethnicity,
         guestKidsCount: kidsCount,
         staffId: me.id,
       });
       setCurrentOrder(order);
       setGuestModalOpen(false);
-      const item = pendingTapItem;
-      setPendingTapItem(null);
-      if (item) proceedAddItem(item);
+      setScreen('checkout');
     } catch (err) {
       setGuestError(err instanceof PosOrderOrdersApiError ? err.message : '客層の保存に失敗しました');
     } finally {
@@ -611,7 +614,6 @@ export function PosApp() {
 
   function handleGuestCancel() {
     setGuestModalOpen(false);
-    setPendingTapItem(null);
   }
 
   // 「注文確定」: このラウンドのカートを厨房送信済みとしてサーバーに保存し、確定済み一覧に
@@ -646,10 +648,19 @@ export function PosApp() {
 
   // 「会計へ進む」: 未確定のカートが残っていれば先に注文確定してから会計画面へ (確定漏れのまま
   // 会計に進んでカートの中身が消えることが無いようにする)。
+  // 2026-08-31 変更 (Tomさんの要望): 客層記録がまだの注文はここで先に記録してもらう
+  // (以前はファースト注文時に必須だったが、「あとで人数が増えた場合にも対応でき、会計の
+  // 時だと少し余裕がある」ため会計へ進むタイミングに移動した)。キャンセルすれば注文画面に
+  // 留まる (会計画面へは進まない)。
   async function handleCheckout() {
     if (cart.length === 0 && confirmedItems.length === 0) return;
     const ok = await confirmPendingCart();
     if (!ok) return;
+    if (currentOrder && !currentOrder.guest_recorded_at) {
+      setGuestError(null);
+      setGuestModalOpen(true);
+      return;
+    }
     setScreen('checkout');
   }
 
