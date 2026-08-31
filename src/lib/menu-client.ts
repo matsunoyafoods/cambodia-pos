@@ -185,3 +185,78 @@ export function updateMenuOptionChoice(
 export function deleteMenuOptionChoice(itemId: string, groupId: string, choiceId: string): Promise<{ ok: boolean }> {
   return request(`/api/menu/items/${itemId}/option-groups/${groupId}/choices/${choiceId}`, { method: 'DELETE' });
 }
+
+// ---------- オプションテンプレート (「ライスorパン」「ドリンク選択」など、複数商品で使い回す ひな形) ----------
+// 商品ごとの実データ (PosMenuOptionGroup/PosMenuOptionChoice) とは別物。テンプレートを商品に
+// 適用すると、内容をコピーした PosMenuOptionGroup が新規作成される (参照ではなくコピー)。
+
+export type PosMenuOptionChoiceTemplate = {
+  id: string;
+  template_id: string;
+  choice_key: string;
+  label: string;
+  price_delta: number;
+  sort_order: number;
+};
+
+export type PosMenuOptionGroupTemplate = {
+  id: string;
+  key: string;
+  label: string;
+  required: boolean;
+  sort_order: number;
+  choices: PosMenuOptionChoiceTemplate[];
+};
+
+export function listMenuOptionTemplates(): Promise<{ templates: PosMenuOptionGroupTemplate[] }> {
+  return request('/api/menu/option-templates');
+}
+
+export function createMenuOptionTemplate(input: {
+  key: string;
+  label: string;
+  required?: boolean;
+}): Promise<{ template: PosMenuOptionGroupTemplate }> {
+  return request('/api/menu/option-templates', { method: 'POST', body: JSON.stringify(input) });
+}
+
+export function updateMenuOptionTemplate(
+  templateId: string,
+  patch: Partial<{ label: string; required: boolean; sortOrder: number }>,
+): Promise<{ template: Omit<PosMenuOptionGroupTemplate, 'choices'> }> {
+  return request(`/api/menu/option-templates/${templateId}`, { method: 'PATCH', body: JSON.stringify(patch) });
+}
+
+export function deleteMenuOptionTemplate(templateId: string): Promise<{ ok: boolean }> {
+  return request(`/api/menu/option-templates/${templateId}`, { method: 'DELETE' });
+}
+
+export function createMenuOptionTemplateChoice(
+  templateId: string,
+  input: { choiceKey: string; label: string; priceDelta?: number },
+): Promise<{ choice: PosMenuOptionChoiceTemplate }> {
+  return request(`/api/menu/option-templates/${templateId}/choices`, { method: 'POST', body: JSON.stringify(input) });
+}
+
+export function updateMenuOptionTemplateChoice(
+  templateId: string,
+  choiceId: string,
+  patch: Partial<{ label: string; priceDelta: number; sortOrder: number }>,
+): Promise<{ choice: PosMenuOptionChoiceTemplate }> {
+  return request(`/api/menu/option-templates/${templateId}/choices/${choiceId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
+}
+
+export function deleteMenuOptionTemplateChoice(templateId: string, choiceId: string): Promise<{ ok: boolean }> {
+  return request(`/api/menu/option-templates/${templateId}/choices/${choiceId}`, { method: 'DELETE' });
+}
+
+// 保存済みテンプレートを商品に適用する (内容をコピーして新規オプショングループを作成)。
+export function applyMenuOptionTemplate(itemId: string, templateId: string): Promise<{ group: PosMenuOptionGroup }> {
+  return request(`/api/menu/items/${itemId}/option-groups/apply-template`, {
+    method: 'POST',
+    body: JSON.stringify({ templateId }),
+  });
+}

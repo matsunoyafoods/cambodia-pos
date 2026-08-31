@@ -40,11 +40,21 @@ import {
   updateMenuOptionGroup,
   uploadMenuItemImage,
   deleteMenuItemImage,
+  applyMenuOptionTemplate,
+  createMenuOptionTemplate,
+  createMenuOptionTemplateChoice,
+  deleteMenuOptionTemplate,
+  deleteMenuOptionTemplateChoice,
+  listMenuOptionTemplates,
+  updateMenuOptionTemplate,
+  updateMenuOptionTemplateChoice,
   PosMenuApiError,
   type PosMenuCategory,
   type PosMenuItemRecord,
   type PosMenuOptionChoice,
   type PosMenuOptionGroup,
+  type PosMenuOptionGroupTemplate,
+  type PosMenuOptionChoiceTemplate,
 } from '@/lib/menu-client';
 import { indexCategories, resolveCategoryChain, type CategoryNode } from '@/lib/category-tree';
 
@@ -757,6 +767,12 @@ function MenuTab() {
           <CategoryTree categories={categories} onDelete={handleDeleteCategory} onChanged={load} onReorder={handleReorderCategory} />
         )}
       </div>
+
+      {/* オプションテンプレート (「ライスorパン」「ドリンク選択」など、複数商品で使い回すひな形)。
+          2026-08-31: Tomさんの要望で追加。ここで登録したテンプレートは、各商品の「オプション」欄の
+          「テンプレートから追加」から適用できる (適用時に内容がコピーされるので、後からテンプレートを
+          編集しても既に適用済みの商品には影響しない)。 */}
+      <OptionTemplatesSection />
 
       {/* 商品 */}
       <div className="flex flex-col gap-2.5">
@@ -1522,12 +1538,432 @@ function EditItemForm({
   );
 }
 
+// オプションテンプレート (「ライスorパン」「ドリンク選択」など、複数商品で使い回すひな形) の
+// 管理セクション。設定画面「メニュー・商品オプション」タブの、カテゴリと商品一覧の間に表示される。
+// ここで登録したテンプレートは、各商品の「オプション」欄の「テンプレートから追加」で適用できる
+// (適用時に内容をコピーするので、テンプレートを後から編集しても既に適用済みの商品には影響しない)。
+// 2026-08-31: Tomさんの要望で追加。
+function OptionTemplatesSection() {
+  const [templates, setTemplates] = useState<PosMenuOptionGroupTemplate[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [showAddTemplate, setShowAddTemplate] = useState(false);
+
+  const load = useCallback(() => {
+    setError(null);
+    listMenuOptionTemplates()
+      .then((res) => setTemplates(res.templates))
+      .catch((err) => setError(err instanceof PosMenuApiError ? err.message : 'テンプレートの取得に失敗しました'));
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function handleDeleteTemplate(templateId: string) {
+    try {
+      await deleteMenuOptionTemplate(templateId);
+      load();
+    } catch (err) {
+      setError(err instanceof PosMenuApiError ? err.message : 'テンプレートの削除に失敗しました');
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-2.5">
+      <div className="mb-0.5 flex items-center justify-between">
+        <div>
+          <div className="text-[13.5px] font-bold">オプションテンプレート</div>
+          <div className="mt-0.5 text-[11px] text-muted-foreground">
+            「ライスorパン」「ドリンク選択」のように複数の商品で使い回すオプションのひな形です。ここで登録しておくと、
+            各商品の「オプション」欄で同じ内容を毎回作り直さずに「テンプレートから追加」で呼び出せます。
+          </div>
+        </div>
+        <button
+          onClick={() => setShowAddTemplate((v) => !v)}
+          className="h-8 flex-shrink-0 rounded-lg border border-dashed border-brand px-3 text-[12px] font-semibold text-brand"
+        >
+          {showAddTemplate ? 'キャンセル' : '＋ テンプレートを追加'}
+        </button>
+      </div>
+
+      {error && <div className="text-xs text-destructive">{error}</div>}
+
+      {showAddTemplate && (
+        <AddOptionTemplateForm
+          onCreated={() => {
+            setShowAddTemplate(false);
+            load();
+          }}
+          onCancel={() => setShowAddTemplate(false)}
+        />
+      )}
+
+      {templates === null && !error && <div className="text-xs text-muted-foreground">読み込み中…</div>}
+      {templates?.length === 0 && (
+        <div className="rounded-xl border border-dashed border-border p-4 text-[13px] text-muted-foreground">
+          テンプレートが未登録です。「＋ テンプレートを追加」から登録してください。
+        </div>
+      )}
+
+      {templates?.map((t) => (
+        <OptionTemplateCard key={t.id} template={t} onChanged={load} onDeleteTemplate={() => handleDeleteTemplate(t.id)} />
+      ))}
+    </div>
+  );
+}
+
+function AddOptionTemplateForm({ onCreated, onCancel }: { onCreated: () => void; onCancel: () => void }) {
+  const [key, setKey] = useState('');
+  const [label, setLabel] = useState('');
+  const [required, setRequired] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!key.trim() || !label.trim()) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      await createMenuOptionTemplate({ key: key.trim(), label: label.trim(), required });
+      onCreated();
+    } catch (err) {
+      setError(err instanceof PosMenuApiError ? err.message : '登録に失敗しました');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="flex flex-col gap-2 rounded-lg border border-border bg-secondary/40 p-3">
+      <div className="flex gap-2">
+        <input
+          value={key}
+          onChange={(e) => setKey(e.target.value)}
+          placeholder="キー (例: rice_or_bread)"
+          className="h-8 w-32 rounded-lg border border-border px-2.5 text-[12.5px]"
+        />
+        <input
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          placeholder="表示名 (例: ライスorパン)"
+          className="h-8 flex-1 rounded-lg border border-border px-2.5 text-[12.5px]"
+        />
+        <label className="flex items-center gap-1.5 whitespace-nowrap text-[11.5px] text-muted-foreground">
+          <input type="checkbox" checked={required} onChange={(e) => setRequired(e.target.checked)} />
+          必須
+        </label>
+      </div>
+      {error && <div className="text-xs text-destructive">{error}</div>}
+      <div className="flex gap-2">
+        <button
+          type="submit"
+          disabled={submitting || !key.trim() || !label.trim()}
+          className="h-8 w-fit rounded-lg bg-primary px-3 text-[12px] font-semibold text-primary-foreground disabled:opacity-60"
+        >
+          {submitting ? '登録中…' : '登録する'}
+        </button>
+        <button type="button" onClick={onCancel} className="h-8 rounded-lg border border-border px-3 text-[12px] font-semibold">
+          キャンセル
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function OptionTemplateCard({
+  template,
+  onChanged,
+  onDeleteTemplate,
+}: {
+  template: PosMenuOptionGroupTemplate;
+  onChanged: () => void;
+  onDeleteTemplate: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [label, setLabel] = useState(template.label);
+  const [required, setRequired] = useState(template.required);
+  const [submitting, setSubmitting] = useState(false);
+  const [showAddChoice, setShowAddChoice] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submitEdit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!label.trim()) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      await updateMenuOptionTemplate(template.id, { label: label.trim(), required });
+      setEditing(false);
+      onChanged();
+    } catch (err) {
+      setError(err instanceof PosMenuApiError ? err.message : '更新に失敗しました');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleDeleteChoice(choiceId: string) {
+    try {
+      await deleteMenuOptionTemplateChoice(template.id, choiceId);
+      onChanged();
+    } catch (err) {
+      setError(err instanceof PosMenuApiError ? err.message : '選択肢の削除に失敗しました');
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-border p-3">
+      <div className="flex items-start justify-between gap-2">
+        {editing ? (
+          <form onSubmit={submitEdit} className="flex flex-1 items-center gap-2">
+            <input
+              autoFocus
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              className="h-8 flex-1 rounded-lg border border-border px-2.5 text-[12.5px]"
+            />
+            <label className="flex items-center gap-1.5 whitespace-nowrap text-[11.5px] text-muted-foreground">
+              <input type="checkbox" checked={required} onChange={(e) => setRequired(e.target.checked)} />
+              必須
+            </label>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="h-8 rounded-lg bg-primary px-2.5 text-[11.5px] font-semibold text-primary-foreground disabled:opacity-60"
+            >
+              保存
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setEditing(false);
+                setLabel(template.label);
+                setRequired(template.required);
+              }}
+              className="h-8 rounded-lg border border-border px-2.5 text-[11.5px] font-semibold"
+            >
+              キャンセル
+            </button>
+          </form>
+        ) : (
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5">
+              <button onClick={() => setEditing(true)} className="text-[13px] font-semibold">
+                {template.label}
+              </button>
+              {template.required && (
+                <span className="rounded bg-secondary px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">必須</span>
+              )}
+            </div>
+            <div className="mt-0.5 text-[11px] text-muted-foreground">key: {template.key}</div>
+          </div>
+        )}
+        {!editing && (
+          <button onClick={onDeleteTemplate} className="flex-shrink-0 text-[11.5px] font-semibold text-destructive">
+            テンプレートを削除
+          </button>
+        )}
+      </div>
+
+      {error && <div className="mt-2 text-xs text-destructive">{error}</div>}
+
+      <div className="mt-2.5 flex flex-col gap-1.5">
+        {template.choices.length === 0 && !showAddChoice && (
+          <div className="text-[11.5px] text-muted-foreground">選択肢が未登録です。</div>
+        )}
+        {template.choices.map((c) => (
+          <OptionTemplateChoiceRow
+            key={c.id}
+            templateId={template.id}
+            choice={c}
+            onChanged={onChanged}
+            onDelete={() => handleDeleteChoice(c.id)}
+          />
+        ))}
+      </div>
+
+      {showAddChoice ? (
+        <AddOptionTemplateChoiceForm
+          templateId={template.id}
+          onCreated={() => {
+            setShowAddChoice(false);
+            onChanged();
+          }}
+          onCancel={() => setShowAddChoice(false)}
+        />
+      ) : (
+        <button
+          onClick={() => setShowAddChoice(true)}
+          className="mt-2 h-7 w-fit rounded-lg border border-dashed border-brand px-2.5 text-[11px] font-semibold text-brand"
+        >
+          ＋ 選択肢を追加
+        </button>
+      )}
+    </div>
+  );
+}
+
+function OptionTemplateChoiceRow({
+  templateId,
+  choice,
+  onChanged,
+  onDelete,
+}: {
+  templateId: string;
+  choice: PosMenuOptionChoiceTemplate;
+  onChanged: () => void;
+  onDelete: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [label, setLabel] = useState(choice.label);
+  const [priceDelta, setPriceDelta] = useState(String(choice.price_delta));
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const value = parseFloat(priceDelta);
+    if (!label.trim() || !Number.isFinite(value)) return;
+    setSubmitting(true);
+    try {
+      await updateMenuOptionTemplateChoice(templateId, choice.id, { label: label.trim(), priceDelta: value });
+      setEditing(false);
+      onChanged();
+    } catch {
+      setLabel(choice.label);
+      setPriceDelta(String(choice.price_delta));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (editing) {
+    return (
+      <form onSubmit={submit} className="flex items-center gap-2 rounded-lg bg-secondary/40 px-2.5 py-1.5">
+        <input
+          autoFocus
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          className="h-7 flex-1 rounded border border-border px-2 text-[12px]"
+        />
+        <input
+          value={priceDelta}
+          onChange={(e) => setPriceDelta(e.target.value)}
+          inputMode="decimal"
+          className="h-7 w-20 rounded border border-border px-2 text-[12px]"
+        />
+        <button
+          type="submit"
+          disabled={submitting}
+          className="h-7 rounded bg-primary px-2 text-[11px] font-semibold text-primary-foreground disabled:opacity-60"
+        >
+          保存
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setEditing(false);
+            setLabel(choice.label);
+            setPriceDelta(String(choice.price_delta));
+          }}
+          className="h-7 rounded border border-border px-2 text-[11px] font-semibold"
+        >
+          キャンセル
+        </button>
+      </form>
+    );
+  }
+
+  return (
+    <div className="flex items-center justify-between rounded-lg px-2.5 py-1.5 hover:bg-secondary/40">
+      <button onClick={() => setEditing(true)} className="text-left text-[12.5px]">
+        {choice.label} <span className="text-muted-foreground">({choice.price_delta >= 0 ? '+' : ''}${choice.price_delta.toFixed(2)})</span>
+      </button>
+      <button onClick={onDelete} className="text-[11px] font-semibold text-destructive">
+        削除
+      </button>
+    </div>
+  );
+}
+
+function AddOptionTemplateChoiceForm({
+  templateId,
+  onCreated,
+  onCancel,
+}: {
+  templateId: string;
+  onCreated: () => void;
+  onCancel: () => void;
+}) {
+  const [choiceKey, setChoiceKey] = useState('');
+  const [label, setLabel] = useState('');
+  const [priceDelta, setPriceDelta] = useState('0');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const value = parseFloat(priceDelta || '0');
+    if (!choiceKey.trim() || !label.trim() || !Number.isFinite(value)) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      await createMenuOptionTemplateChoice(templateId, { choiceKey: choiceKey.trim(), label: label.trim(), priceDelta: value });
+      onCreated();
+    } catch (err) {
+      setError(err instanceof PosMenuApiError ? err.message : '登録に失敗しました');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="mt-2 flex flex-col gap-2 rounded-lg border border-border bg-secondary/40 p-2.5">
+      <div className="flex gap-2">
+        <input
+          value={choiceKey}
+          onChange={(e) => setChoiceKey(e.target.value)}
+          placeholder="キー (例: rice)"
+          className="h-7 w-24 rounded border border-border px-2 text-[12px]"
+        />
+        <input
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          placeholder="表示名 (例: ライス)"
+          className="h-7 flex-1 rounded border border-border px-2 text-[12px]"
+        />
+        <input
+          value={priceDelta}
+          onChange={(e) => setPriceDelta(e.target.value)}
+          inputMode="decimal"
+          placeholder="追加料金 ($)"
+          className="h-7 w-24 rounded border border-border px-2 text-[12px]"
+        />
+      </div>
+      {error && <div className="text-xs text-destructive">{error}</div>}
+      <div className="flex gap-2">
+        <button
+          type="submit"
+          disabled={submitting || !choiceKey.trim() || !label.trim()}
+          className="h-7 w-fit rounded-lg bg-primary px-2.5 text-[11.5px] font-semibold text-primary-foreground disabled:opacity-60"
+        >
+          {submitting ? '登録中…' : '追加する'}
+        </button>
+        <button type="button" onClick={onCancel} className="h-7 rounded-lg border border-border px-2.5 text-[11.5px] font-semibold">
+          キャンセル
+        </button>
+      </div>
+    </form>
+  );
+}
+
 // 商品オプション (トッピング・量目選択など) のグループ + 選択肢 管理パネル。
 // 商品一覧の各行で「オプション」ボタンを押すと展開される。
 function OptionGroupsPanel({ itemId }: { itemId: string }) {
   const [groups, setGroups] = useState<PosMenuOptionGroup[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showAddGroup, setShowAddGroup] = useState(false);
+  const [showApplyTemplate, setShowApplyTemplate] = useState(false);
 
   const load = useCallback(() => {
     setError(null);
@@ -1553,15 +1989,34 @@ function OptionGroupsPanel({ itemId }: { itemId: string }) {
     <div className="mt-3 flex flex-col gap-2.5 border-t border-border pt-3">
       <div className="flex items-center justify-between">
         <div className="text-[12.5px] font-bold text-muted-foreground">商品オプション (トッピング・量目選択など)</div>
-        <button
-          onClick={() => setShowAddGroup((v) => !v)}
-          className="h-7 rounded-lg border border-dashed border-brand px-2.5 text-[11.5px] font-semibold text-brand"
-        >
-          {showAddGroup ? 'キャンセル' : '＋ グループを追加'}
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setShowApplyTemplate((v) => !v)}
+            className="h-7 rounded-lg border border-dashed border-border px-2.5 text-[11.5px] font-semibold text-foreground"
+          >
+            {showApplyTemplate ? 'キャンセル' : 'テンプレートから追加'}
+          </button>
+          <button
+            onClick={() => setShowAddGroup((v) => !v)}
+            className="h-7 rounded-lg border border-dashed border-brand px-2.5 text-[11.5px] font-semibold text-brand"
+          >
+            {showAddGroup ? 'キャンセル' : '＋ グループを追加'}
+          </button>
+        </div>
       </div>
 
       {error && <div className="text-xs text-destructive">{error}</div>}
+
+      {showApplyTemplate && (
+        <ApplyTemplatePicker
+          itemId={itemId}
+          onApplied={() => {
+            setShowApplyTemplate(false);
+            load();
+          }}
+          onCancel={() => setShowApplyTemplate(false)}
+        />
+      )}
 
       {showAddGroup && (
         <AddOptionGroupForm
@@ -1577,13 +2032,80 @@ function OptionGroupsPanel({ itemId }: { itemId: string }) {
       {groups === null && !error && <div className="text-xs text-muted-foreground">読み込み中…</div>}
       {groups?.length === 0 && (
         <div className="rounded-lg border border-dashed border-border p-3 text-[12px] text-muted-foreground">
-          オプショングループが未登録です。トッピングや量目選択などが必要な場合は「＋ グループを追加」から登録してください。
+          オプショングループが未登録です。トッピングや量目選択などが必要な場合は「テンプレートから追加」か「＋ グループを追加」から登録してください。
         </div>
       )}
 
       {groups?.map((g) => (
         <OptionGroupCard key={g.id} itemId={itemId} group={g} onChanged={load} onDeleteGroup={() => handleDeleteGroup(g.id)} />
       ))}
+    </div>
+  );
+}
+
+// 保存済みのオプションテンプレート (設定画面の「オプションテンプレート」セクションで登録) を一覧表示し、
+// 選んだものをこの商品にコピーして適用する。2026-08-31: Tomさんの要望で追加。
+function ApplyTemplatePicker({
+  itemId,
+  onApplied,
+  onCancel,
+}: {
+  itemId: string;
+  onApplied: () => void;
+  onCancel: () => void;
+}) {
+  const [templates, setTemplates] = useState<PosMenuOptionGroupTemplate[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [applyingId, setApplyingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    listMenuOptionTemplates()
+      .then((res) => setTemplates(res.templates))
+      .catch((err) => setError(err instanceof PosMenuApiError ? err.message : 'テンプレートの取得に失敗しました'));
+  }, []);
+
+  async function handleApply(templateId: string) {
+    setApplyingId(templateId);
+    setError(null);
+    try {
+      await applyMenuOptionTemplate(itemId, templateId);
+      onApplied();
+    } catch (err) {
+      setError(err instanceof PosMenuApiError ? err.message : '適用に失敗しました');
+    } finally {
+      setApplyingId(null);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-border bg-secondary/40 p-3">
+      {error && <div className="text-xs text-destructive">{error}</div>}
+      {templates === null && !error && <div className="text-xs text-muted-foreground">読み込み中…</div>}
+      {templates?.length === 0 && (
+        <div className="text-[12px] text-muted-foreground">
+          テンプレートが未登録です。設定画面上部の「オプションテンプレート」から先に登録してください。
+        </div>
+      )}
+      {templates?.map((t) => (
+        <div key={t.id} className="flex items-center justify-between gap-2 rounded-lg border border-border bg-card px-2.5 py-1.5">
+          <div className="min-w-0">
+            <div className="truncate text-[12.5px] font-semibold">{t.label}</div>
+            <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
+              {t.choices.length > 0 ? t.choices.map((c) => c.label).join(' / ') : '選択肢なし'}
+            </div>
+          </div>
+          <button
+            onClick={() => handleApply(t.id)}
+            disabled={applyingId !== null}
+            className="h-7 flex-shrink-0 rounded-lg bg-primary px-2.5 text-[11.5px] font-semibold text-primary-foreground disabled:opacity-60"
+          >
+            {applyingId === t.id ? '適用中…' : 'この商品に適用'}
+          </button>
+        </div>
+      ))}
+      <button type="button" onClick={onCancel} className="h-7 w-fit rounded-lg border border-border px-2.5 text-[11.5px] font-semibold">
+        閉じる
+      </button>
     </div>
   );
 }
