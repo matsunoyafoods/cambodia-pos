@@ -6,12 +6,15 @@ import { DEFAULT_SETTINGS, type PosSettings } from '@/lib/pos-types';
 import { getPosSettings, updatePosSettings, PosApiError } from '@/lib/api-client';
 import {
   getGeneralSettings,
+  getHandyTableGroups,
   getIntegrationSettings,
+  saveHandyTableGroups,
   updateGeneralSettings,
   updateIntegrationSettings,
   PosSettingsApiError,
   type IntegrationMode,
 } from '@/lib/settings-client';
+import { listTableLayout, type TableLayoutItemRecord } from '@/lib/table-layout-client';
 import { useStaff } from './staff-context';
 import {
   createStaff,
@@ -77,9 +80,9 @@ import {
   PosPrinterApiError,
   type CreatePrinterInput,
 } from '@/lib/printer-client';
-import type { PaymentMethodConfig, PrinterConfig } from '@/lib/pos-types';
+import type { HandyTableGroup, PaymentMethodConfig, PrinterConfig } from '@/lib/pos-types';
 
-type Tab = 'general' | 'printer' | 'payment' | 'staff' | 'menu' | 'layout' | 'integration';
+type Tab = 'general' | 'printer' | 'payment' | 'staff' | 'menu' | 'layout' | 'handy' | 'integration';
 
 const NAV: { key: Tab; label: string }[] = [
   { key: 'general', label: '一般設定' },
@@ -88,6 +91,7 @@ const NAV: { key: Tab; label: string }[] = [
   { key: 'staff', label: 'スタッフ管理' },
   { key: 'menu', label: 'メニュー・商品オプション' },
   { key: 'layout', label: 'テーブルレイアウト' },
+  { key: 'handy', label: 'ハンディ表示' },
   { key: 'integration', label: '連携設定' },
 ];
 
@@ -644,6 +648,310 @@ function PaymentMethodsSection({ canManageSettings }: { canManageSettings: boole
   );
 }
 
+// ハンディ注文画面の卓グループ設定 (2026-08-31 追加。「席番号がバラバラになっているので
+// 席を間違う可能性がある」「ハンディで席をグループ分けできるといいね」)。テーブルレイアウト
+// 編集画面と同じ「ローカルで自由に編集 → 明示的な保存ボタンでまとめて保存」方式にしている
+// (グループ追加・卓の出し入れ・並び替えをその都度サーバーに送ると操作のたびに待たされるため)。
+function HandyGroupCard({
+  group,
+  index,
+  total,
+  availableCodes,
+  seatsByCode,
+  canManageSettings,
+  onRename,
+  onDelete,
+  onMoveGroup,
+  onAddTable,
+  onRemoveTable,
+  onMoveTable,
+}: {
+  group: HandyTableGroup;
+  index: number;
+  total: number;
+  availableCodes: string[];
+  seatsByCode: Map<string, number>;
+  canManageSettings: boolean;
+  onRename: (name: string) => void;
+  onDelete: () => void;
+  onMoveGroup: (direction: -1 | 1) => void;
+  onAddTable: (code: string) => void;
+  onRemoveTable: (code: string) => void;
+  onMoveTable: (tableIndex: number, direction: -1 | 1) => void;
+}) {
+  const [pendingCode, setPendingCode] = useState('');
+
+  return (
+    <div className="rounded-xl border border-border p-3.5">
+      <div className="flex items-center gap-2.5">
+        <div className="flex flex-col">
+          <button
+            type="button"
+            disabled={!canManageSettings || index === 0}
+            onClick={() => onMoveGroup(-1)}
+            className="h-4 text-[10px] leading-none text-muted-foreground disabled:opacity-30"
+          >
+            ▲
+          </button>
+          <button
+            type="button"
+            disabled={!canManageSettings || index === total - 1}
+            onClick={() => onMoveGroup(1)}
+            className="h-4 text-[10px] leading-none text-muted-foreground disabled:opacity-30"
+          >
+            ▼
+          </button>
+        </div>
+        <input
+          value={group.name}
+          onChange={(e) => onRename(e.target.value)}
+          disabled={!canManageSettings}
+          maxLength={40}
+          className="h-9 flex-1 rounded-lg border border-border px-3 text-[13.5px] font-semibold disabled:opacity-60"
+        />
+        <button
+          type="button"
+          disabled={!canManageSettings}
+          onClick={onDelete}
+          className="h-9 flex-shrink-0 rounded-lg border border-border px-3 text-[12px] font-semibold text-destructive disabled:opacity-60"
+        >
+          グループ削除
+        </button>
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-1.5">
+        {group.tableCodes.map((code, i) => (
+          <div key={code} className="flex items-center gap-1 rounded-full border border-border bg-secondary/60 py-1 pl-3 pr-1.5 text-[12px]">
+            <span className="font-semibold">{code}</span>
+            <span className="text-muted-foreground">({seatsByCode.get(code) ?? '?'}席)</span>
+            <button
+              type="button"
+              disabled={!canManageSettings || i === 0}
+              onClick={() => onMoveTable(i, -1)}
+              title="前に移動"
+              className="px-0.5 text-[10px] text-muted-foreground disabled:opacity-30"
+            >
+              ◀
+            </button>
+            <button
+              type="button"
+              disabled={!canManageSettings || i === group.tableCodes.length - 1}
+              onClick={() => onMoveTable(i, 1)}
+              title="後ろに移動"
+              className="px-0.5 text-[10px] text-muted-foreground disabled:opacity-30"
+            >
+              ▶
+            </button>
+            <button
+              type="button"
+              disabled={!canManageSettings}
+              onClick={() => onRemoveTable(code)}
+              title="このグループから外す"
+              className="ml-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-secondary text-[11px] disabled:opacity-40"
+            >
+              ×
+            </button>
+          </div>
+        ))}
+        {group.tableCodes.length === 0 && <div className="text-[12px] text-muted-foreground">まだ卓が入っていません。</div>}
+      </div>
+
+      {canManageSettings && (
+        <div className="mt-3 flex items-center gap-2">
+          <select
+            value={pendingCode}
+            onChange={(e) => setPendingCode(e.target.value)}
+            className="h-9 rounded-lg border border-border px-2.5 text-[12.5px]"
+          >
+            <option value="">卓を選択…</option>
+            {availableCodes.map((code) => (
+              <option key={code} value={code}>
+                {code} ({seatsByCode.get(code) ?? '?'}席)
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            disabled={!pendingCode}
+            onClick={() => {
+              if (!pendingCode) return;
+              onAddTable(pendingCode);
+              setPendingCode('');
+            }}
+            className="h-9 rounded-lg border border-border px-3 text-[12.5px] font-semibold disabled:opacity-50"
+          >
+            このグループに追加
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HandyGroupsSection({ canManageSettings }: { canManageSettings: boolean }) {
+  const [allTables, setAllTables] = useState<{ code: string; seats: number }[]>([]);
+  const [groups, setGroups] = useState<HandyTableGroup[]>([]);
+  const [savedSnapshot, setSavedSnapshot] = useState('[]');
+  const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [savedJustNow, setSavedJustNow] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [layout, handyGroups] = await Promise.all([listTableLayout(), getHandyTableGroups()]);
+        if (cancelled) return;
+        const tables = (layout.items as TableLayoutItemRecord[])
+          .filter((t) => t.kind === 'table')
+          .map((t) => ({ code: t.table_code, seats: t.seats }));
+        setAllTables(tables);
+        setGroups(handyGroups.groups);
+        setSavedSnapshot(JSON.stringify(handyGroups.groups));
+        setLoaded(true);
+      } catch (err) {
+        if (!cancelled) setLoadError(err instanceof PosSettingsApiError ? err.message : '卓グループの取得に失敗しました');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const seatsByCode = new Map(allTables.map((t) => [t.code, t.seats]));
+  const assignedCodes = new Set(groups.flatMap((g) => g.tableCodes));
+  const unassignedTables = allTables.filter((t) => !assignedCodes.has(t.code));
+  const dirty = JSON.stringify(groups) !== savedSnapshot;
+
+  function updateGroup(id: string, patch: (g: HandyTableGroup) => HandyTableGroup) {
+    setGroups((prev) => prev.map((g) => (g.id === id ? patch(g) : g)));
+    setSavedJustNow(false);
+  }
+
+  function handleAddGroup() {
+    const id = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `g_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    setGroups((prev) => [...prev, { id, name: '新しいグループ', tableCodes: [] }]);
+    setSavedJustNow(false);
+  }
+
+  function handleMoveGroup(index: number, direction: -1 | 1) {
+    setGroups((prev) => {
+      const otherIndex = index + direction;
+      if (otherIndex < 0 || otherIndex >= prev.length) return prev;
+      const next = prev.slice();
+      [next[index], next[otherIndex]] = [next[otherIndex], next[index]];
+      return next;
+    });
+    setSavedJustNow(false);
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const { groups: saved } = await saveHandyTableGroups(groups);
+      setGroups(saved);
+      setSavedSnapshot(JSON.stringify(saved));
+      setSavedJustNow(true);
+    } catch (err) {
+      setSaveError(err instanceof PosSettingsApiError ? err.message : '保存に失敗しました');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!loaded) {
+    return (
+      <div className="rounded-xl border border-border p-3 text-[12.5px] text-muted-foreground">
+        {loadError ?? '読み込み中…'}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      {groups.map((g, i) => (
+        <HandyGroupCard
+          key={g.id}
+          group={g}
+          index={i}
+          total={groups.length}
+          availableCodes={allTables.filter((t) => !assignedCodes.has(t.code) || g.tableCodes.includes(t.code)).map((t) => t.code)}
+          seatsByCode={seatsByCode}
+          canManageSettings={canManageSettings}
+          onRename={(name) => updateGroup(g.id, (x) => ({ ...x, name }))}
+          onDelete={() => {
+            setGroups((prev) => prev.filter((x) => x.id !== g.id));
+            setSavedJustNow(false);
+          }}
+          onMoveGroup={(dir) => handleMoveGroup(i, dir)}
+          onAddTable={(code) => updateGroup(g.id, (x) => (x.tableCodes.includes(code) ? x : { ...x, tableCodes: [...x.tableCodes, code] }))}
+          onRemoveTable={(code) => updateGroup(g.id, (x) => ({ ...x, tableCodes: x.tableCodes.filter((c) => c !== code) }))}
+          onMoveTable={(tableIndex, dir) =>
+            updateGroup(g.id, (x) => {
+              const otherIndex = tableIndex + dir;
+              if (otherIndex < 0 || otherIndex >= x.tableCodes.length) return x;
+              const next = x.tableCodes.slice();
+              [next[tableIndex], next[otherIndex]] = [next[otherIndex], next[tableIndex]];
+              return { ...x, tableCodes: next };
+            })
+          }
+        />
+      ))}
+
+      {groups.length === 0 && (
+        <div className="rounded-xl border border-dashed border-border p-3.5 text-[12.5px] text-muted-foreground">
+          まだグループがありません。グループを作らない場合、ハンディ注文画面では卓番号順 (C1, C2, …, T1, T2, … のように英字→数字の順) に表示されます。
+        </div>
+      )}
+
+      {canManageSettings && (
+        <button
+          type="button"
+          onClick={handleAddGroup}
+          className="h-10 self-start rounded-lg border border-dashed border-border px-4 text-[12.5px] font-semibold"
+        >
+          + グループを追加
+        </button>
+      )}
+
+      <div className="rounded-xl border border-border p-3.5">
+        <div className="mb-1.5 text-[12.5px] font-semibold">未分類の卓 ({unassignedTables.length})</div>
+        <div className="text-[11.5px] text-muted-foreground">
+          {unassignedTables.length === 0
+            ? 'すべての卓がいずれかのグループに入っています。'
+            : 'ハンディ注文画面では、これらの卓が「未分類」として末尾にまとめて表示されます。'}
+        </div>
+        {unassignedTables.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {unassignedTables.map((t) => (
+              <span key={t.code} className="rounded-full bg-secondary px-2.5 py-1 text-[11.5px] font-semibold">
+                {t.code}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {saveError && <div className="text-[12px] text-destructive">{saveError}</div>}
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          disabled={!canManageSettings || saving || !dirty}
+          onClick={handleSave}
+          className="h-10 rounded-lg bg-primary px-5 text-[13px] font-bold text-primary-foreground disabled:opacity-50"
+        >
+          {saving ? '保存中…' : '保存'}
+        </button>
+        {dirty && !saving && <span className="text-[11.5px] text-amber-700">未保存の変更があります</span>}
+        {savedJustNow && !dirty && <span className="text-[11.5px] text-emerald-700">保存しました</span>}
+      </div>
+    </div>
+  );
+}
+
 // GET/PUT /api/pos/settings (integration-spec.md 4.2) に対応する画面。
 // dine 連携店舗 (authMode 'dine') は matsunoya-dine 側の /api/pos/settings (api-client.ts) が
 // Source of Truth。POS ネイティブ店舗 (authMode 'pos_native') は /api/settings/general
@@ -1138,6 +1446,21 @@ export function SettingsScreen() {
               cta="レイアウト編集を開く"
               onCta={() => router.push('/pos/table-layout')}
             />
+          )}
+
+          {tab === 'handy' && (
+            <div className="flex max-w-[720px] flex-col gap-3.5">
+              <div className="text-[15px] font-bold">ハンディ表示</div>
+              <div className="rounded-xl border border-border p-3.5 text-[12px] text-muted-foreground">
+                ハンディ注文画面 (/pos/handy) の卓カードの並び順・グループ分けを設定します。ここでの設定はレジ画面の見取り図には一切影響しません。グループを作らなければ卓番号順に表示され、どのグループにも入れていない卓は「未分類」として末尾にまとめて表示されます。
+              </div>
+              {!canManageSettings && (
+                <div className="rounded-xl border border-border p-3 text-[12.5px] text-muted-foreground">
+                  ハンディ表示の変更には manager 以上の権限が必要です。
+                </div>
+              )}
+              <HandyGroupsSection canManageSettings={canManageSettings} />
+            </div>
           )}
 
           {tab === 'integration' && <IntegrationTab />}

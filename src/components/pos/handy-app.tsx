@@ -2,10 +2,17 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import type { CartLine, GuestEthnicity, MenuItem, TableStatus } from '@/lib/pos-types';
+import type { CartLine, GuestEthnicity, HandyTableGroup, MenuItem, TableStatus } from '@/lib/pos-types';
 import { DEFAULT_SETTINGS } from '@/lib/pos-types';
 import { getPosMenus, getPosSettings, PosApiError } from '@/lib/api-client';
-import { getPosOrderMenu, getPosOrderMode, getPosOrderSettings, getPosOrderTableLayout, PosOrderApiError } from '@/lib/pos-order-client';
+import {
+  getPosOrderHandyTableGroups,
+  getPosOrderMenu,
+  getPosOrderMode,
+  getPosOrderSettings,
+  getPosOrderTableLayout,
+  PosOrderApiError,
+} from '@/lib/pos-order-client';
 import {
   confirmOrderItems,
   createOpenOrder,
@@ -47,6 +54,9 @@ export function HandyApp() {
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [layoutItems, setLayoutItems] = useState<TableLayoutItemRecord[]>([]);
   const [tableSessions, setTableSessions] = useState<TableSessionRecord[]>([]);
+  // 卓グループ・並び順 (設定画面「ハンディ表示」タブ、2026-08-31 追加)。未設定の店舗では
+  // 空配列のまま (handy-table-list.tsx 側で卓番号順にフォールバックする)。
+  const [handyGroups, setHandyGroups] = useState<HandyTableGroup[]>([]);
   const [dataLoading, setDataLoading] = useState(true);
   const [dataError, setDataError] = useState<string | null>(null);
   const [loadToken, setLoadToken] = useState(0);
@@ -90,12 +100,16 @@ export function HandyApp() {
         const { menuSource } = await getPosOrderMode();
         const layoutPromise = getPosOrderTableLayout().catch(() => ({ items: [] as TableLayoutItemRecord[] }));
         const sessionsPromise = getTableSessions().catch(() => ({ items: [] as TableSessionRecord[] }));
+        // 卓グループはレイアウト連携モードに関係なく卓番号ベースで動く。未設定・取得失敗時は
+        // 空配列 (=グループ分けなし、卓番号順) のまま会計・注文自体は止めない。
+        const handyGroupsPromise = getPosOrderHandyTableGroups().catch(() => ({ groups: [] as HandyTableGroup[] }));
         if (menuSource === 'pos_native') {
-          const [menuData, settingsData, layoutData, sessionsData] = await Promise.all([
+          const [menuData, settingsData, layoutData, sessionsData, handyGroupsData] = await Promise.all([
             getPosOrderMenu(),
             getPosOrderSettings(),
             layoutPromise,
             sessionsPromise,
+            handyGroupsPromise,
           ]);
           if (cancelled) return;
           setMenu(menuData.items);
@@ -103,12 +117,14 @@ export function HandyApp() {
           setSettings((prev) => ({ ...prev, ...settingsData }));
           setLayoutItems(layoutData.items);
           setTableSessions(sessionsData.items);
+          setHandyGroups(handyGroupsData.groups);
         } else {
-          const [menuData, settingsData, layoutData, sessionsData] = await Promise.all([
+          const [menuData, settingsData, layoutData, sessionsData, handyGroupsData] = await Promise.all([
             getPosMenus(),
             getPosSettings(),
             layoutPromise,
             sessionsPromise,
+            handyGroupsPromise,
           ]);
           if (cancelled) return;
           setMenu(
@@ -121,6 +137,7 @@ export function HandyApp() {
           setSettings((prev) => ({ ...prev, ...settingsData }));
           setLayoutItems(layoutData.items);
           setTableSessions(sessionsData.items);
+          setHandyGroups(handyGroupsData.groups);
         }
       } catch (err) {
         if (cancelled) return;
@@ -468,6 +485,7 @@ export function HandyApp() {
           onSelectTable={selectTable}
           layoutItems={layoutItems}
           tableSessions={tableSessions}
+          handyGroups={handyGroups}
         />
       )}
 

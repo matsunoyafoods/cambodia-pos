@@ -98,6 +98,18 @@ export type PaymentMethodConfig = {
   sortOrder: number;
 };
 
+// ハンディ注文画面の卓カード表示用グループ (2026-08-31 追加。「ハンディで席をグループ分け
+// できるといいね」)。レジ画面の見取り図 (座標配置) とは完全に独立した、ハンディ専用の
+// 表示順・グループ分け設定。pos.stores.settings.handyTableGroups (jsonb配列) に保存する。
+// id はクライアント側で生成するローカルID (crypto.randomUUID 等)。tableCodes は
+// このグループ内での表示順そのもの。どのグループにも属さない卓はハンディ画面側で
+// 自動的に「未分類」として末尾にまとめて表示される (設定を何もしなくても卓が消えることはない)。
+export type HandyTableGroup = {
+  id: string;
+  name: string;
+  tableCodes: string[];
+};
+
 // 会計の1つの支払いライン。1つの伝票を複数の支払い方法・複数人に分けて会計できるようにする
 // ため (2026-08-31 追加。「ABAで$10現金で$10」の分割払い、「割り勘」の両方をこの1つの仕組みで
 // 表現する — amount は会計全体のうち、このラインが受け持つ金額)。id はクライアント側で

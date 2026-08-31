@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { TableStatus } from '@/lib/pos-types';
+import type { HandyTableGroup, TableStatus } from '@/lib/pos-types';
 import { DEMO_TABLE_GROUPS } from '@/lib/demo-data';
 import type { TableLayoutItemRecord } from '@/lib/table-layout-client';
 import type { TableSessionRecord } from '@/lib/table-session-client';
@@ -12,6 +12,27 @@ import { drinkTimerState, elapsedMinutes, formatDuration } from '@/lib/table-tim
 // 卓を配置する見取り図表示で、スマホ・タブレットの狭い画面には向かない。ハンディでは
 // 同じ卓データ (layoutItems / tableSessions) を使い回しつつ、見取り図ではなく卓番号の
 // レスポンシブなグリッド一覧として表示する (机の物理配置は見えないが、タップ操作は速い)。
+//
+// 並び順・グループ分け (2026-08-31 追加。「席番号がバラバラになっているので席を間違う
+// 可能性がある」「ハンディで席をグループ分けできるといいね」への対応):
+// 見取り図の座標から読み順を復元する方式は、実際の店舗レイアウトでは卓の種類 (T/C/BC/V) が
+// 物理的に入り組んで配置されており、かえって分かりにくい結果になった。代わりに、設定画面
+// 「ハンディ表示」タブで owner/manager が作成する `groups` (卓番号ベースのグループ・並び順、
+// レジ画面の見取り図には一切影響しない) をここで使う。グループを1つも作っていない店舗では、
+// 卓番号順 (英字プレフィックス→数字の自然順、例: C1,C2,...,T1,T2,...) にフォールバックする。
+// どのグループにも入れていない卓は「未分類」として末尾にまとめて表示され、設定を何もしなくても
+// 卓が画面から消えることはない。
+
+function naturalTableCompare(a: string, b: string): number {
+  const parse = (s: string) => {
+    const m = s.match(/^(.*?)(\d+)$/);
+    return m ? { prefix: m[1], num: parseInt(m[2], 10) } : { prefix: s, num: -1 };
+  };
+  const pa = parse(a);
+  const pb = parse(b);
+  if (pa.prefix !== pb.prefix) return pa.prefix < pb.prefix ? -1 : pa.prefix > pb.prefix ? 1 : 0;
+  return pa.num - pb.num;
+}
 
 const STATUS_LABEL: Record<TableStatus, string> = {
   available: '空席',
@@ -68,6 +89,7 @@ export function HandyTableList({
   onSelectTable,
   layoutItems,
   tableSessions,
+  handyGroups,
 }: {
   tableStatus: Record<string, TableStatus>;
   statusFilter: 'all' | TableStatus;
@@ -75,36 +97,39 @@ export function HandyTableList({
   onSelectTable: (code: string) => void;
   layoutItems: TableLayoutItemRecord[];
   tableSessions: TableSessionRecord[];
+  /** 設定画面「ハンディ表示」タブで設定した卓グループ・並び順 (2026-08-31 追加) */
+  handyGroups: HandyTableGroup[];
 }) {
   const sessionByTable = new Map(tableSessions.map((s) => [s.table_code, s]));
 
-  // 実データの並び順: sort_order (テーブルレイアウト編集画面での作成・貼り付け順) を
-  // そのまま使うと、卓番号ともレジ画面の見取り図上の配置とも無関係なバラバラの順序に
-  // なってしまう (2026-08-31 修正。「席番号がバラバラになっているので席を間違う可能性がある」)。
-  // ここでは代わりに、見取り図の座標 (x, y) から「上の行→下の行、各行は左→右」という
-  // 読み順を復元して並べる。レジ画面の見取り図を見慣れているスタッフの感覚と揃うのが狙い。
-  // 行のまとめ方: y座標をそのまま比較すると数ピクセルのズレで同じ行の卓の順序が入れ替わって
-  // しまうため、卓の高さ (デフォルト64px、table-layout-screen.tsx 参照) の半分程度の幅で
-  // バケット化してから比較する。
-  const ROW_BUCKET_PX = 40;
-  const realTables = layoutItems
-    .filter((t) => t.kind === 'table')
-    .slice()
-    .sort((a, b) => {
-      const rowA = Math.round(a.y / ROW_BUCKET_PX);
-      const rowB = Math.round(b.y / ROW_BUCKET_PX);
-      if (rowA !== rowB) return rowA - rowB;
-      return a.x - b.x;
-    })
-    .map((t) => ({ code: t.table_code, seats: t.seats }));
+  const realTables = layoutItems.filter((t) => t.kind === 'table').map((t) => ({ code: t.table_code, seats: t.seats }));
 
-  const groups: { label: string | null; tables: { code: string; seats: number }[] }[] =
-    realTables.length > 0
-      ? [{ label: null, tables: realTables }]
-      : DEMO_TABLE_GROUPS.map((g) => ({
-          label: g.label,
-          tables: g.codes.map((code) => ({ code, seats: g.seats })),
-        }));
+  let groups: { label: string | null; tables: { code: string; seats: number }[] }[];
+  if (realTables.length > 0) {
+    const seatsByCode = new Map(realTables.map((t) => [t.code, t.seats]));
+    const usedCodes = new Set<string>();
+    const configured = handyGroups
+      .map((g) => ({
+        label: g.name,
+        tables: g.tableCodes
+          .filter((code) => seatsByCode.has(code) && !usedCodes.has(code))
+          .map((code) => {
+            usedCodes.add(code);
+            return { code, seats: seatsByCode.get(code)! };
+          }),
+      }))
+      .filter((g) => g.tables.length > 0);
+    const ungrouped = realTables.filter((t) => !usedCodes.has(t.code)).sort((a, b) => naturalTableCompare(a.code, b.code));
+
+    if (configured.length > 0) {
+      groups = ungrouped.length > 0 ? [...configured, { label: '未分類', tables: ungrouped }] : configured;
+    } else {
+      groups = [{ label: null, tables: realTables.slice().sort((a, b) => naturalTableCompare(a.code, b.code)) }];
+    }
+  } else {
+    // レイアウト未作成の店舗向けフォールバック (table-map-screen.tsx と同じデモ配置)。
+    groups = DEMO_TABLE_GROUPS.map((g) => ({ label: g.label, tables: g.codes.map((code) => ({ code, seats: g.seats })) }));
+  }
 
   const filters: { key: 'all' | TableStatus; label: string }[] = [
     { key: 'all', label: 'すべて' },

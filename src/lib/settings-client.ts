@@ -3,7 +3,7 @@
  * 同一オリジン API クライアント。table-layout-client.ts 等と同じ方針。
  */
 
-import type { PosSettings } from '@/lib/pos-types';
+import type { HandyTableGroup, PosSettings } from '@/lib/pos-types';
 
 export class PosSettingsApiError extends Error {
   constructor(
@@ -54,4 +54,14 @@ export function getIntegrationSettings(): Promise<{ menuSource: IntegrationMode 
 
 export function updateIntegrationSettings(menuSource: IntegrationMode): Promise<{ menuSource: IntegrationMode }> {
   return request('/api/settings/integration', { method: 'PATCH', body: JSON.stringify({ menuSource }) });
+}
+
+// ハンディ注文画面の卓グループ設定 (2026-08-31 追加)。テーブルレイアウト編集画面と同じ
+// 「ローカル編集 + 明示的な保存ボタン」方式のため、丸ごと取得・丸ごと置き換えの2本のみ。
+export function getHandyTableGroups(): Promise<{ groups: HandyTableGroup[] }> {
+  return request('/api/settings/handy-table-groups');
+}
+
+export function saveHandyTableGroups(groups: HandyTableGroup[]): Promise<{ ok: true; groups: HandyTableGroup[] }> {
+  return request('/api/settings/handy-table-groups', { method: 'POST', body: JSON.stringify({ groups }) });
 }
