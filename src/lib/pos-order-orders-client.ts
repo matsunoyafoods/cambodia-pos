@@ -158,6 +158,22 @@ export function deleteConfirmedItem(orderId: string, itemId: string): Promise<{ 
   return request(`/api/pos-order/orders/${orderId}/items/${itemId}`, { method: 'DELETE' });
 }
 
+// 席移動: 開いている伝票・滞在セッションを別のテーブルへ移す (2026-08-31 追加)。
+export function moveTable(fromTableCode: string, toTableCode: string): Promise<{ ok: true }> {
+  return request('/api/pos-order/table-move', { method: 'POST', body: JSON.stringify({ fromTableCode, toTableCode }) });
+}
+
+// 会計合算: 複数テーブルの開いている伝票を1つ (targetTableCode) に合算する (2026-08-31 追加)。
+export function mergeTables(
+  targetTableCode: string,
+  sourceTableCodes: string[],
+): Promise<{ ok: true; mergedCount: number; skipped: string[] }> {
+  return request('/api/pos-order/table-merge', {
+    method: 'POST',
+    body: JSON.stringify({ targetTableCode, sourceTableCodes }),
+  });
+}
+
 // 厨房伝票・レシートの印刷キューに積む (2026-08-31 プリンター実装で追加)。該当ロールの
 // プリンターが設定・有効化されていなくても静かに printersQueued:0 を返すだけなので、
 // レジ操作の失敗として扱わなくてよい (呼び出し側は catch で握りつぶして良い)。

@@ -19,6 +19,8 @@ import {
   deleteConfirmedItem,
   enqueuePrintJob,
   getOpenOrder,
+  mergeTables,
+  moveTable,
   updateConfirmedItemDiscount,
   updateConfirmedItemQty,
   PosOrderOrdersApiError,
@@ -66,6 +68,14 @@ export function PosApp() {
   const [screen, setScreen] = useState<Screen>('tablemap');
   const [statusFilter, setStatusFilter] = useState<'all' | TableStatus>('all');
   const [selectedTable, setSelectedTable] = useState<string | null>(null);
+
+  // 席移動・会計合算 (2026-08-31 追加)。テーブルマップ上でのモード切り替え式の2ステップ操作。
+  const [tableActionMode, setTableActionMode] = useState<'none' | 'move' | 'merge'>('none');
+  const [moveSourceTable, setMoveSourceTable] = useState<string | null>(null);
+  const [mergeTargetTable, setMergeTargetTable] = useState<string | null>(null);
+  const [mergeSourceTables, setMergeSourceTables] = useState<string[]>([]);
+  const [tableActionBusy, setTableActionBusy] = useState(false);
+  const [tableActionError, setTableActionError] = useState<string | null>(null);
   const [activeCategory, setActiveCategory] = useState('');
   const [cart, setCart] = useState<CartLine[]>([]);
   const [customerLinked, setCustomerLinked] = useState(false);
@@ -343,6 +353,103 @@ export function PosApp() {
       .catch(() => {
         /* 取得失敗時は「まだ開いている伝票が無い」扱いのまま (ファースト注文時に作り直せる) */
       });
+  }
+
+  // 席移動・会計合算 (2026-08-31 追加)。テーブルマップの「席移動」「会計合算」カードから開始する。
+  function startMoveMode() {
+    setTableActionMode('move');
+    setMoveSourceTable(null);
+    setTableActionError(null);
+  }
+  function startMergeMode() {
+    setTableActionMode('merge');
+    setMergeTargetTable(null);
+    setMergeSourceTables([]);
+    setTableActionError(null);
+  }
+  function cancelTableAction() {
+    setTableActionMode('none');
+    setMoveSourceTable(null);
+    setMergeTargetTable(null);
+    setMergeSourceTables([]);
+    setTableActionError(null);
+  }
+
+  function refreshTableSessions() {
+    getTableSessions()
+      .then(({ items }) => setTableSessions(items))
+      .catch(() => {});
+  }
+
+  async function handleTableTapForAction(code: string) {
+    setTableActionError(null);
+
+    if (tableActionMode === 'move') {
+      if (!moveSourceTable) {
+        if ((tableStatus[code] ?? 'available') === 'available') {
+          setTableActionError('移動元は使用中のテーブルを選んでください');
+          return;
+        }
+        setMoveSourceTable(code);
+        return;
+      }
+      if (code === moveSourceTable) {
+        setMoveSourceTable(null);
+        return;
+      }
+      if ((tableStatus[code] ?? 'available') !== 'available') {
+        setTableActionError('移動先は空いているテーブルを選んでください');
+        return;
+      }
+      setTableActionBusy(true);
+      try {
+        await moveTable(moveSourceTable, code);
+        refreshTableSessions();
+        if (selectedTable === moveSourceTable) setSelectedTable(code);
+        cancelTableAction();
+      } catch (err) {
+        setTableActionError(err instanceof PosOrderOrdersApiError ? err.message : '席移動に失敗しました');
+      } finally {
+        setTableActionBusy(false);
+      }
+      return;
+    }
+
+    if (tableActionMode === 'merge') {
+      if (!mergeTargetTable) {
+        if ((tableStatus[code] ?? 'available') === 'available') {
+          setTableActionError('残すテーブル (合算先) は使用中のテーブルを選んでください');
+          return;
+        }
+        setMergeTargetTable(code);
+        return;
+      }
+      if (code === mergeTargetTable) {
+        setMergeTargetTable(null);
+        setMergeSourceTables([]);
+        return;
+      }
+      if ((tableStatus[code] ?? 'available') === 'available') {
+        setTableActionError('合算するテーブルは使用中のテーブルを選んでください');
+        return;
+      }
+      setMergeSourceTables((prev) => (prev.includes(code) ? prev.filter((c) => c !== code) : [...prev, code]));
+    }
+  }
+
+  async function confirmMerge() {
+    if (!mergeTargetTable || mergeSourceTables.length === 0) return;
+    setTableActionBusy(true);
+    setTableActionError(null);
+    try {
+      await mergeTables(mergeTargetTable, mergeSourceTables);
+      refreshTableSessions();
+      cancelTableAction();
+    } catch (err) {
+      setTableActionError(err instanceof PosOrderOrdersApiError ? err.message : '会計合算に失敗しました');
+    } finally {
+      setTableActionBusy(false);
+    }
   }
 
   function addToCart(item: MenuItem) {
@@ -739,6 +846,17 @@ export function PosApp() {
           onSelectTable={selectTable}
           layoutItems={layoutItems}
           tableSessions={tableSessions}
+          tableActionMode={tableActionMode}
+          moveSourceTable={moveSourceTable}
+          mergeTargetTable={mergeTargetTable}
+          mergeSourceTables={mergeSourceTables}
+          tableActionBusy={tableActionBusy}
+          tableActionError={tableActionError}
+          onStartMove={startMoveMode}
+          onStartMerge={startMergeMode}
+          onCancelTableAction={cancelTableAction}
+          onTableTapForAction={handleTableTapForAction}
+          onConfirmMerge={confirmMerge}
         />
       )}
 

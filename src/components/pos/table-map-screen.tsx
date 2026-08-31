@@ -69,6 +69,17 @@ export function TableMapScreen({
   onSelectTable,
   layoutItems,
   tableSessions,
+  tableActionMode = 'none',
+  moveSourceTable = null,
+  mergeTargetTable = null,
+  mergeSourceTables = [],
+  tableActionBusy = false,
+  tableActionError = null,
+  onStartMove,
+  onStartMerge,
+  onCancelTableAction,
+  onTableTapForAction,
+  onConfirmMerge,
 }: {
   tableStatus: Record<string, TableStatus>;
   statusFilter: 'all' | TableStatus;
@@ -76,6 +87,18 @@ export function TableMapScreen({
   onSelectTable: (code: string) => void;
   layoutItems: TableLayoutItemRecord[];
   tableSessions: TableSessionRecord[];
+  /** 席移動・会計合算 (2026-08-31 追加)。省略時は従来通りの通常モードのみ。 */
+  tableActionMode?: 'none' | 'move' | 'merge';
+  moveSourceTable?: string | null;
+  mergeTargetTable?: string | null;
+  mergeSourceTables?: string[];
+  tableActionBusy?: boolean;
+  tableActionError?: string | null;
+  onStartMove?: () => void;
+  onStartMerge?: () => void;
+  onCancelTableAction?: () => void;
+  onTableTapForAction?: (code: string) => void;
+  onConfirmMerge?: () => void;
 }) {
   // 飲み放題の残り時間は Date.now() 基準で計算するため、セッション自体に変化が無くても
   // 定期的に再描画して「切れた瞬間」を卓の枠ハイライトに反映する。
@@ -99,24 +122,91 @@ export function TableMapScreen({
   // サンプル配置 (フロア/テラス/個室/カウンター) を表示する (既存店舗の挙動を壊さない)。
   const hasCustomLayout = tables.length > 0;
 
+  // 席移動・会計合算 (2026-08-31 追加)。モード中はテーブルをタップすると通常の注文画面遷移
+  // ではなく、移動元/移動先・合算先/合算元の選択として扱う。
+  const inActionMode = tableActionMode !== 'none';
+  function handleTableTap(code: string) {
+    if (inActionMode) onTableTapForAction?.(code);
+    else onSelectTable(code);
+  }
+  function selectionRing(code: string): string {
+    if (tableActionMode === 'move' && code === moveSourceTable) return ' ring-2 ring-primary ring-offset-1';
+    if (tableActionMode === 'merge' && code === mergeTargetTable) return ' ring-2 ring-primary ring-offset-1';
+    if (tableActionMode === 'merge' && mergeSourceTables.includes(code)) return ' ring-2 ring-amber-500 ring-offset-1';
+    return '';
+  }
+
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
-      <div className="flex gap-2 px-5 pt-4">
-        {filters.map((f) => (
-          <button
-            key={f.key}
-            onClick={() => onStatusFilter(f.key)}
-            className={
-              'h-[34px] rounded-lg border px-3.5 text-[12.5px] font-semibold ' +
-              (statusFilter === f.key
-                ? 'border-primary bg-primary text-primary-foreground'
-                : 'border-border bg-card text-foreground')
-            }
-          >
-            {f.label}
-          </button>
-        ))}
+      <div className="flex items-center justify-between gap-2 px-5 pt-4">
+        <div className="flex flex-wrap gap-2">
+          {filters.map((f) => (
+            <button
+              key={f.key}
+              onClick={() => onStatusFilter(f.key)}
+              disabled={inActionMode}
+              className={
+                'h-[34px] rounded-lg border px-3.5 text-[12.5px] font-semibold disabled:opacity-50 ' +
+                (statusFilter === f.key
+                  ? 'border-primary bg-primary text-primary-foreground'
+                  : 'border-border bg-card text-foreground')
+              }
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+        {!inActionMode && (
+          <div className="flex gap-2">
+            <button
+              onClick={onStartMove}
+              className="h-[34px] rounded-lg border border-dashed border-border bg-card px-3.5 text-[12.5px] font-semibold text-foreground"
+            >
+              ⇄ 席移動
+            </button>
+            <button
+              onClick={onStartMerge}
+              className="h-[34px] rounded-lg border border-dashed border-border bg-card px-3.5 text-[12.5px] font-semibold text-foreground"
+            >
+              ＋ 会計合算
+            </button>
+          </div>
+        )}
       </div>
+
+      {inActionMode && (
+        <div className="mx-5 mt-3 flex items-center justify-between gap-3 rounded-xl border border-primary/40 bg-primary/5 px-4 py-3">
+          <div className="text-[12.5px] font-semibold text-foreground">
+            {tableActionMode === 'move' &&
+              (!moveSourceTable
+                ? '席移動: 移動元の使用中テーブルをタップしてください'
+                : `席移動: 「${moveSourceTable}」を移動先の空いているテーブルへ → 移動先をタップしてください`)}
+            {tableActionMode === 'merge' &&
+              (!mergeTargetTable
+                ? '会計合算: 残す (合算先) テーブルをタップしてください'
+                : `会計合算: 「${mergeTargetTable}」に合算するテーブルをタップして選択 (${mergeSourceTables.length}件選択中)`)}
+            {tableActionError && <div className="mt-1 text-destructive">{tableActionError}</div>}
+          </div>
+          <div className="flex flex-shrink-0 gap-2">
+            {tableActionMode === 'merge' && mergeTargetTable && mergeSourceTables.length > 0 && (
+              <button
+                onClick={onConfirmMerge}
+                disabled={tableActionBusy}
+                className="h-9 rounded-lg bg-primary px-4 text-[12.5px] font-bold text-primary-foreground disabled:opacity-60"
+              >
+                {tableActionBusy ? '処理中…' : '合算を実行'}
+              </button>
+            )}
+            <button
+              onClick={onCancelTableAction}
+              disabled={tableActionBusy}
+              className="h-9 rounded-lg border border-border bg-card px-4 text-[12.5px] font-semibold text-muted-foreground disabled:opacity-60"
+            >
+              キャンセル
+            </button>
+          </div>
+        </div>
+      )}
 
       {hasCustomLayout ? (
         <div className="flex-1 overflow-auto px-5 py-4">
@@ -150,11 +240,12 @@ export function TableMapScreen({
                 return (
                   <button
                     key={t.id}
-                    onClick={() => onSelectTable(t.table_code)}
+                    onClick={() => handleTableTap(t.table_code)}
                     className={
                       'absolute flex flex-col items-center justify-center gap-0.5 rounded-lg border p-1 text-center ' +
                       STATUS_CLASS[status] +
-                      (drinkExpired ? ' animate-pulse ring-2 ring-destructive ring-offset-1' : '')
+                      (drinkExpired ? ' animate-pulse ring-2 ring-destructive ring-offset-1' : '') +
+                      selectionRing(t.table_code)
                     }
                     style={{ left: t.x, top: t.y, width: t.width, height: t.height }}
                   >
@@ -185,13 +276,14 @@ export function TableMapScreen({
                   {groupTables.map((t) => (
                     <button
                       key={t.code}
-                      onClick={() => onSelectTable(t.code)}
+                      onClick={() => handleTableTap(t.code)}
                       className={
                         'flex min-h-20 flex-col gap-1.5 rounded-xl border p-3 text-left ' +
                         STATUS_CLASS[t.status] +
                         (isDrinkTimerExpired(sessionByTable.get(t.code))
                           ? ' animate-pulse ring-2 ring-destructive ring-offset-1'
-                          : '')
+                          : '') +
+                        selectionRing(t.code)
                       }
                     >
                       <div className="text-sm font-bold">{t.code}</div>
