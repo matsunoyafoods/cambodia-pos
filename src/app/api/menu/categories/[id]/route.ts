@@ -52,15 +52,17 @@ export const PATCH = withPosStaff('manager', async (_session, req, ctx: RouteCon
         }
         cursor = byId.get(cursor)?.parent_id ?? null;
       }
+      // 2026-08-31: 小カテゴリーを廃止し、深さは大(0)→中(1) の最大2階層までに制限した。
       const parentDepth = categoryDepth(newParentId, byId);
-      if (parentDepth === null || parentDepth >= 2) {
-        return NextResponse.json({ error: 'これ以上深い階層のカテゴリーは作成できません (大→中→小の3階層まで)' }, { status: 400 });
+      if (parentDepth === null || parentDepth >= 1) {
+        return NextResponse.json({ error: 'これ以上深い階層のカテゴリーは作成できません (大→中の2階層まで)' }, { status: 400 });
       }
-      // 移動先の階層に、このカテゴリ自身の子がいると4階層になってしまうため禁止する。
+      // 子カテゴリー (中カテゴリー) を持つカテゴリーを別のカテゴリーの下に移動すると、
+      // その子が3階層目になってしまうため禁止する (大カテゴリーとして独立させることのみ許可)。
       const hasChildren = (all ?? []).some((c) => c.parent_id === id);
-      if (hasChildren && parentDepth >= 1) {
+      if (hasChildren) {
         return NextResponse.json(
-          { error: '子カテゴリーを持つカテゴリーは、大カテゴリー以外の下には移動できません (4階層になってしまうため)' },
+          { error: '中カテゴリーを持つカテゴリーは、他のカテゴリーの下には移動できません' },
           { status: 400 },
         );
       }

@@ -697,11 +697,11 @@ function MenuTab() {
 
       {loadError && <div className="text-xs text-destructive">{loadError}</div>}
 
-      {/* カテゴリ (大→中→小の3階層) */}
+      {/* カテゴリ (大→中の2階層。2026-08-31 に小カテゴリーを廃止) */}
       <div className="flex flex-col gap-2.5">
         <div className="mb-0.5 flex items-center justify-between">
           <div>
-            <div className="text-[13.5px] font-bold">カテゴリ (大 &gt; 中 &gt; 小)</div>
+            <div className="text-[13.5px] font-bold">カテゴリ (大 &gt; 中)</div>
             <div className="mt-0.5 text-[11px] text-muted-foreground">
               レジ画面には大カテゴリーがタブとして表示されます。中カテゴリーはタブの中の見出しになります (無くても登録可)。
             </div>
@@ -999,9 +999,12 @@ function AddCategoryForm({
   );
 }
 
-// 大カテゴリー → 中カテゴリー → 小カテゴリー の3階層ツリー表示。
-// 既存の店舗はカテゴリが全て大カテゴリー (parent_id が null) のままなので、その場合は
-// 各大カテゴリーの下に「＋中/小カテゴリーを追加」が出るだけの見た目になる (今まで通り)。
+// 大カテゴリー → 中カテゴリー の2階層ツリー表示。
+// 2026-08-31: 以前は大→中→小の3階層だったが、階層が複雑で分かりにくいという指摘 (Tom) を受けて
+// 小カテゴリーを廃止し、大→中の2階層に簡略化した。商品は大カテゴリーに直接ぶら下げても、
+// 中カテゴリーを作ってその下にぶら下げても良い (中カテゴリーがあればレジ画面でその名前が
+// タブ内の見出しになる)。既存店舗はカテゴリが全て大カテゴリー (parent_id が null) のままなので、
+// その場合は各大カテゴリーの下に「＋中カテゴリーを追加」が出るだけの見た目になる (今まで通り)。
 function CategoryTree({
   categories,
   onDelete,
@@ -1043,7 +1046,7 @@ function CategoryTree({
                 onClick={() => toggleAdding(major.id)}
                 className="h-7 flex-shrink-0 rounded-lg border border-dashed border-brand px-2.5 text-[11px] font-semibold text-brand"
               >
-                {addingUnder === major.id ? 'キャンセル' : '＋ 中/小カテゴリーを追加'}
+                {addingUnder === major.id ? 'キャンセル' : '＋ 中カテゴリーを追加'}
               </button>
             </div>
 
@@ -1051,7 +1054,7 @@ function CategoryTree({
               <div className="mt-2.5">
                 <AddCategoryForm
                   parentId={major.id}
-                  placeholder="中または小カテゴリー名 (例: 焼酎)"
+                  placeholder="中カテゴリー名 (例: 焼酎)"
                   onCreated={() => {
                     setAddingUnder(null);
                     onChanged();
@@ -1061,44 +1064,10 @@ function CategoryTree({
             )}
 
             {middles.length > 0 && (
-              <div className="mt-3 flex flex-col gap-2.5 border-l-2 border-border pl-3.5">
-                {middles.map((middle) => {
-                  const minors = childrenOf(middle.id);
-                  return (
-                    <div key={middle.id}>
-                      <div className="flex items-center justify-between gap-2">
-                        <CategoryChip category={middle} onRenamed={onChanged} onDelete={() => onDelete(middle.id)} />
-                        <button
-                          onClick={() => toggleAdding(middle.id)}
-                          className="h-6 flex-shrink-0 rounded-lg border border-dashed border-brand px-2 text-[10.5px] font-semibold text-brand"
-                        >
-                          {addingUnder === middle.id ? 'キャンセル' : '＋ 小カテゴリーを追加'}
-                        </button>
-                      </div>
-
-                      {addingUnder === middle.id && (
-                        <div className="mt-2">
-                          <AddCategoryForm
-                            parentId={middle.id}
-                            placeholder="小カテゴリー名 (例: iichiko)"
-                            onCreated={() => {
-                              setAddingUnder(null);
-                              onChanged();
-                            }}
-                          />
-                        </div>
-                      )}
-
-                      {minors.length > 0 && (
-                        <div className="mt-2 flex flex-wrap gap-1.5 border-l-2 border-border pl-3.5">
-                          {minors.map((minor) => (
-                            <CategoryChip key={minor.id} category={minor} onRenamed={onChanged} onDelete={() => onDelete(minor.id)} />
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+              <div className="mt-3 flex flex-wrap gap-1.5 border-l-2 border-border pl-3.5">
+                {middles.map((middle) => (
+                  <CategoryChip key={middle.id} category={middle} onRenamed={onChanged} onDelete={() => onDelete(middle.id)} />
+                ))}
               </div>
             )}
           </div>
@@ -1231,9 +1200,9 @@ function AddItemForm({
   );
 }
 
-// 大 → 中(任意) → 小(必須) のカスケード選択。中カテゴリーを選ばない場合、小カテゴリーの
-// 選択肢には大カテゴリー直下の全カテゴリー (中として作られたものも、中を介さない小として
-// 作られたものも両方) を並べる。選択肢が無い大カテゴリーではその場で小カテゴリーを新規作成できる。
+// 大 → 中(任意) のカスケード選択。2026-08-31: 小カテゴリー廃止に伴い3階層(大/中/小)から
+// 2階層に簡略化。中カテゴリーを選ばなければ商品は大カテゴリーに直接ぶら下がる (レジ画面では
+// タブ内に見出し無しで表示される)。中カテゴリーを選べばその名前がタブ内の見出しになる。
 function CategoryCascadeSelect({
   categories,
   value,
@@ -1242,7 +1211,7 @@ function CategoryCascadeSelect({
 }: {
   categories: PosMenuCategory[];
   value: string;
-  onChange: (leafId: string) => void;
+  onChange: (categoryId: string) => void;
   onCategoriesChanged: () => void;
 }) {
   const byId = new Map(categories.map((c) => [c.id, c]));
@@ -1253,32 +1222,34 @@ function CategoryCascadeSelect({
   function chainOf(id: string): { majorId: string; middleId: string } {
     const leaf = id ? byId.get(id) : undefined;
     if (!leaf) return { majorId: '', middleId: '' };
-    const parent = leaf.parent_id ? byId.get(leaf.parent_id) : undefined;
-    if (!parent) return { majorId: leaf.id, middleId: '' };
-    const grandparent = parent.parent_id ? byId.get(parent.parent_id) : undefined;
-    if (!grandparent) return { majorId: parent.id, middleId: '' };
-    return { majorId: grandparent.id, middleId: parent.id };
+    if (!leaf.parent_id) return { majorId: leaf.id, middleId: '' };
+    return { majorId: leaf.parent_id, middleId: leaf.id };
   }
 
   const initial = chainOf(value);
   const [majorId, setMajorId] = useState(initial.majorId || majors[0]?.id || '');
   const [middleId, setMiddleId] = useState(initial.middleId);
-  const [showAddMinor, setShowAddMinor] = useState(false);
+  const [showAddMiddle, setShowAddMiddle] = useState(false);
 
   const middleOptions = majorId ? childrenOf(majorId) : [];
-  const minorOptions = middleId ? childrenOf(middleId) : middleOptions.flatMap((m) => [m, ...childrenOf(m.id)]);
-  const minorValue = minorOptions.some((c) => c.id === value) ? value : '';
+
+  // 初期表示時、value が未設定 (新規商品追加フォーム) ならデフォルトの大カテゴリーを親に伝える。
+  // 中カテゴリーが無い大カテゴリーだけを選んでそのまま登録できるようにするため。
+  useEffect(() => {
+    if (!value && majorId) onChange(majorId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function handleMajorChange(id: string) {
     setMajorId(id);
     setMiddleId('');
-    setShowAddMinor(false);
-    onChange('');
+    setShowAddMiddle(false);
+    onChange(id);
   }
   function handleMiddleChange(id: string) {
     setMiddleId(id);
-    setShowAddMinor(false);
-    onChange('');
+    setShowAddMiddle(false);
+    onChange(id || majorId);
   }
 
   return (
@@ -1311,37 +1282,23 @@ function CategoryCascadeSelect({
             </option>
           ))}
         </select>
-        <select
-          value={minorValue}
-          onChange={(e) => onChange(e.target.value)}
-          disabled={!majorId}
-          className="h-9 flex-1 rounded-lg border border-border px-2 text-[12.5px] disabled:opacity-50"
-        >
-          <option value="" disabled>
-            小カテゴリー
-          </option>
-          {minorOptions.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
       </div>
-      {majorId && minorOptions.length === 0 && !showAddMinor && (
+      {majorId && !showAddMiddle && (
         <button
           type="button"
-          onClick={() => setShowAddMinor(true)}
+          onClick={() => setShowAddMiddle(true)}
           className="w-fit text-[11px] font-semibold text-brand"
         >
-          この大カテゴリーには小カテゴリーがまだありません。＋ 追加する
+          ＋ 中カテゴリーを追加
         </button>
       )}
-      {showAddMinor && majorId && (
+      {showAddMiddle && majorId && (
         <AddCategoryForm
-          parentId={middleId || majorId}
-          placeholder="小カテゴリー名"
+          parentId={majorId}
+          placeholder="中カテゴリー名"
           onCreated={(cat) => {
-            setShowAddMinor(false);
+            setShowAddMiddle(false);
+            setMiddleId(cat.id);
             onChange(cat.id);
             onCategoriesChanged();
           }}

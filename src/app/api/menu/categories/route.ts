@@ -4,7 +4,7 @@ import { createPosAdminClient, getPosStoreId } from '@/lib/supabase/admin';
 import { withPosStaff } from '@/lib/pos-auth';
 import { indexCategories, categoryDepth, type CategoryNode } from '@/lib/category-tree';
 
-// カテゴリ一覧 (大/中/小 階層をフラットな parent_id 付きレコードで返す)。manager 以上のみ。
+// カテゴリ一覧 (大/中 階層をフラットな parent_id 付きレコードで返す)。manager 以上のみ。
 export const GET = withPosStaff('manager', async () => {
   const supabase = createPosAdminClient();
   const storeId = getPosStoreId();
@@ -24,12 +24,13 @@ export const GET = withPosStaff('manager', async () => {
 
 const createSchema = z.object({
   name: z.string().trim().min(1).max(50),
-  // 省略/null = 大カテゴリーとして作成。指定時はその下に中or小カテゴリーとして作成 (深さは自動判定)。
+  // 省略/null = 大カテゴリーとして作成。指定時はその下に中カテゴリーとして作成。
   parentId: z.string().uuid().nullable().optional(),
 });
 
 // 新規カテゴリ作成。並び順は同じ親を持つカテゴリの中で末尾に自動追加。manager 以上のみ。
-// 深さは大(0)→中/小(1)→小(2) の最大3階層まで。それ以上深い parentId は拒否する。
+// 2026-08-31: 小カテゴリーを廃止し、深さは大(0)→中(1) の最大2階層までに制限した
+// (以前は大→中/小→小の3階層まで許可していた)。それ以上深い parentId は拒否する。
 export const POST = withPosStaff('manager', async (_session, req) => {
   const json = await req.json().catch(() => null);
   const parsed = createSchema.safeParse(json);
@@ -53,8 +54,8 @@ export const POST = withPosStaff('manager', async (_session, req) => {
       return NextResponse.json({ error: '親カテゴリーが見つかりません' }, { status: 400 });
     }
     const parentDepth = categoryDepth(parentId, byId);
-    if (parentDepth === null || parentDepth >= 2) {
-      return NextResponse.json({ error: 'これ以上深い階層のカテゴリーは作成できません (大→中→小の3階層まで)' }, { status: 400 });
+    if (parentDepth === null || parentDepth >= 1) {
+      return NextResponse.json({ error: 'これ以上深い階層のカテゴリーは作成できません (大→中の2階層まで)' }, { status: 400 });
     }
   }
 
