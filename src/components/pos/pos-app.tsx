@@ -21,6 +21,7 @@ import {
   getOpenOrder,
   mergeTables,
   moveTable,
+  resetTable,
   updateConfirmedItemDiscount,
   updateConfirmedItemQty,
   PosOrderOrdersApiError,
@@ -728,6 +729,33 @@ export function PosApp() {
     }
   }
 
+  // テーブルリセット: 会計せずに、間違えて選択・注文した卓を空席へ戻す (2026-08-31 追加)。
+  // 開いている伝票は void 扱いになり、この端末のカート・確定済み品目もすべて破棄される。
+  // 取り消せない操作なので window.confirm で必ず確認する (order-screen.tsx の削除確認と同じ方針)。
+  async function resetCurrentTable() {
+    if (!selectedTable) return;
+    if (
+      !window.confirm(
+        `テーブル ${selectedTable} をリセットしますか？\n入力した注文はすべて破棄され、会計は行われません。この操作は取り消せません。`,
+      )
+    ) {
+      return;
+    }
+    try {
+      await resetTable(selectedTable);
+    } catch (err) {
+      window.alert(err instanceof PosOrderOrdersApiError ? err.message : 'テーブルのリセットに失敗しました');
+      return;
+    }
+    setTableSessions((prev) => prev.filter((s) => s.table_code !== selectedTable));
+    setScreen('tablemap');
+    setSelectedTable(null);
+    setCart([]);
+    setConfirmedItems([]);
+    setCurrentOrder(null);
+    resetOrderState();
+  }
+
   function newOrder() {
     setScreen('tablemap');
     setSelectedTable(null);
@@ -892,6 +920,7 @@ export function PosApp() {
           menuImageStyle={settings.menuImageStyle}
           onBackToTableMap={() => setScreen('tablemap')}
           onCheckout={handleCheckout}
+          onResetTable={resetCurrentTable}
         />
       )}
 

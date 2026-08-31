@@ -459,6 +459,7 @@ export function OrderScreen({
   menuImageStyle,
   onBackToTableMap,
   onCheckout,
+  onResetTable,
 }: {
   selectedTable: string | null;
   session: TableSessionRecord | null;
@@ -494,6 +495,8 @@ export function OrderScreen({
   menuImageStyle?: MenuImageStyle;
   onBackToTableMap: () => void;
   onCheckout: () => void;
+  /** 会計せずに、間違えて選択・注文した卓を空席に戻す (2026-08-31 追加) */
+  onResetTable: () => void;
 }) {
   const items = menu.filter((m) => m.category === activeCategory);
   const groups = groupItemsByMiddle(items);
@@ -516,7 +519,16 @@ export function OrderScreen({
               <div className="text-xs text-muted-foreground">注文入力</div>
             </div>
           </div>
-          <OrderHeaderTimers session={session} />
+          <div className="flex items-center gap-2.5">
+            <OrderHeaderTimers session={session} />
+            <button
+              onClick={onResetTable}
+              title="会計せずにこの卓を空席へ戻す (間違えて選択・注文した場合)"
+              className="rounded-lg border border-destructive/40 px-2.5 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/10"
+            >
+              卓をリセット
+            </button>
+          </div>
         </div>
 
         {/* 大カテゴリーのタブ一覧。以前は overflow-x-auto の横スクロール1行だったが、

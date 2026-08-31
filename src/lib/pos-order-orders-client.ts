@@ -174,6 +174,14 @@ export function mergeTables(
   });
 }
 
+// テーブルリセット: 会計せずに、間違えて選択・注文した卓を空席に戻す (2026-08-31 追加。
+// 「間違えて選択しても赤マークを消すことができるようにしてください」)。開いている伝票が
+// あれば void 扱いにし、滞在セッションを削除する (呼び出し側は window.confirm 等で
+// 取り消し不能であることを必ず確認してから呼ぶこと)。
+export function resetTable(tableCode: string): Promise<{ ok: true; hadOpenOrder: boolean }> {
+  return request('/api/pos-order/table-reset', { method: 'POST', body: JSON.stringify({ tableCode }) });
+}
+
 // 厨房伝票・レシートの印刷キューに積む (2026-08-31 プリンター実装で追加)。該当ロールの
 // プリンターが設定・有効化されていなくても静かに printersQueued:0 を返すだけなので、
 // レジ操作の失敗として扱わなくてよい (呼び出し側は catch で握りつぶして良い)。
