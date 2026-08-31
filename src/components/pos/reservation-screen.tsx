@@ -337,6 +337,11 @@ export function ReservationScreen() {
                     <span className="rounded-full bg-secondary px-2 py-0.5 text-[10.5px] font-semibold">
                       {TYPE_LABEL[r.reservationType]}
                     </span>
+                    {r.source === 'app' && (
+                      <span className="rounded-full bg-brand/10 px-2 py-0.5 text-[10.5px] font-semibold text-brand">
+                        アプリ予約
+                      </span>
+                    )}
                     {r.status === 'cancelled' && (
                       <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-[10.5px] font-semibold text-destructive">
                         キャンセル済み
@@ -353,7 +358,7 @@ export function ReservationScreen() {
                     {r.notes ? ` ・ 備考: ${r.notes}` : ''}
                   </div>
                 </div>
-                {r.status === 'confirmed' && (
+                {r.status === 'confirmed' && r.source === 'pos' && (
                   <button
                     onClick={() => handleCancel(r.id)}
                     className="h-9 rounded-lg border border-destructive px-3.5 text-[12px] font-semibold text-destructive"

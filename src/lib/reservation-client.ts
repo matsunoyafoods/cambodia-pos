@@ -28,6 +28,8 @@ export type ReservationRecord = {
   status: ReservationStatus;
   createdByName: string | null;
   createdAt: string;
+  /** 'pos' = POSで直接受け付けた電話予約。'app' = matsunoya-dineアプリ予約 (読み取り専用でマージ表示、2026-08-31 追加) */
+  source: 'pos' | 'app';
 };
 
 export type CreateReservationInput = {

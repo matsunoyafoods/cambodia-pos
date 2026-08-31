@@ -34,6 +34,7 @@ function toApi(row: Row) {
     status: row.status,
     createdByName: row.created_by_name,
     createdAt: row.created_at,
+    source: 'pos' as const,
   };
 }
 
@@ -44,6 +45,11 @@ const updateSchema = z.object({
 // 現状はキャンセル(status切替)のみ対応。電話等でのキャンセル連絡を受けたときに使う。
 export const PATCH = withPosStaff('staff', async (_session, req, ctx: RouteContext) => {
   const { id } = await ctx.params;
+  // 'app:' プレフィックスは matsunoya-dine 側 (public.reservations) の予約を読み取り専用で
+  // マージ表示しているだけの仮想ID。ここでは書き込めない (2026-08-31 追加)。
+  if (id.startsWith('app:')) {
+    return NextResponse.json({ error: 'アプリ予約はPOSからは編集できません' }, { status: 400 });
+  }
   const json = await req.json().catch(() => null);
   const parsed = updateSchema.safeParse(json);
   if (!parsed.success) {

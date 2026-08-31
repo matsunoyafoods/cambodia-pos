@@ -157,3 +157,15 @@ export function updateConfirmedItemQty(
 export function deleteConfirmedItem(orderId: string, itemId: string): Promise<{ ok: true }> {
   return request(`/api/pos-order/orders/${orderId}/items/${itemId}`, { method: 'DELETE' });
 }
+
+// 厨房伝票・レシートの印刷キューに積む (2026-08-31 プリンター実装で追加)。該当ロールの
+// プリンターが設定・有効化されていなくても静かに printersQueued:0 を返すだけなので、
+// レジ操作の失敗として扱わなくてよい (呼び出し側は catch で握りつぶして良い)。
+export function enqueuePrintJob(input: {
+  role: 'receipt' | 'kitchen';
+  kind: 'receipt' | 'kitchen';
+  content: string;
+  orderId?: string;
+}): Promise<{ ok: true; printersQueued: number }> {
+  return request('/api/pos-order/print-jobs', { method: 'POST', body: JSON.stringify(input) });
+}

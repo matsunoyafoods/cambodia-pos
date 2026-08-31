@@ -1,12 +1,18 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { createPosAdminClient, getPosStoreId } from '@/lib/supabase/admin';
+import { createDineAdminClient, createPosAdminClient, getPosStoreId } from '@/lib/supabase/admin';
 import { withPosStaff } from '@/lib/pos-auth';
 
 // 予約受付機能。日々の電話予約はスタッフなら誰でも受け付けられる業務なので
 // (テーブルレイアウトのような構造変更とは違い) staff 以上で読み書きどちらも許可する。
+//
+// 2026-08-31: matsunoya-dine アプリ (Telegram) 経由の予約 (public.reservations) を、この一覧に
+// 読み取り専用でマージして表示するようにした (「アプリで予約した時にPOSレジに反映されるように
+// なっているのか？」「連携をご希望です」)。書き込みは行わない — Source of Truth は引き続き
+// matsunoya-dine 側。pos.integrations.dine_store_id が未設定の店舗 (dine連携していない店舗) は
+// 従来通り pos.reservations のみを表示する。
 
-type Row = {
+type PosRow = {
   id: string;
   reservation_type: string;
   customer_name: string;
@@ -21,7 +27,24 @@ type Row = {
   created_at: string;
 };
 
-function toApi(row: Row) {
+type ApiReservation = {
+  id: string;
+  reservationType: string;
+  customerName: string;
+  phone: string | null;
+  partySize: number | null;
+  reservationDate: string;
+  reservationTime: string | null;
+  details: Record<string, string>;
+  notes: string | null;
+  status: 'confirmed' | 'cancelled';
+  createdByName: string | null;
+  createdAt: string;
+  /** 'pos' = POSで直接受け付けた電話予約 (編集・キャンセル可能)。'app' = アプリ予約 (表示のみ、読み取り専用) */
+  source: 'pos' | 'app';
+};
+
+function toApiFromPos(row: PosRow): ApiReservation {
   return {
     id: row.id,
     reservationType: row.reservation_type,
@@ -32,10 +55,88 @@ function toApi(row: Row) {
     reservationTime: row.reservation_time,
     details: row.details ?? {},
     notes: row.notes,
-    status: row.status,
+    status: row.status as 'confirmed' | 'cancelled',
     createdByName: row.created_by_name,
     createdAt: row.created_at,
+    source: 'pos',
   };
+}
+
+const PHNOM_PENH_TZ = 'Asia/Phnom_Penh';
+
+function splitReservedAt(reservedAt: string): { date: string; time: string } {
+  const d = new Date(reservedAt);
+  const date = new Intl.DateTimeFormat('sv-SE', { timeZone: PHNOM_PENH_TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+  const time = new Intl.DateTimeFormat('sv-SE', { timeZone: PHNOM_PENH_TZ, hour: '2-digit', minute: '2-digit', hour12: false }).format(d);
+  return { date, time };
+}
+
+type DineReservationRow = {
+  id: string;
+  customer_user_id: string | null;
+  reservation_no: string;
+  status: string;
+  reserved_at: string;
+  party_size: number | null;
+  purpose: string | null;
+  customer_notes: string | null;
+  created_at: string;
+};
+
+async function fetchAppReservations(): Promise<ApiReservation[]> {
+  const posSupabase = createPosAdminClient();
+  const storeId = getPosStoreId();
+
+  const { data: integration } = await posSupabase
+    .from('integrations')
+    .select('dine_store_id')
+    .eq('store_id', storeId)
+    .maybeSingle();
+  const dineStoreId = integration?.dine_store_id;
+  if (!dineStoreId) return [];
+
+  const dineSupabase = createDineAdminClient();
+  // 過去の完了済み予約で一覧が埋まらないよう、直近 (昨日以降) のものだけ表示する。
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const { data, error } = await dineSupabase
+    .from('reservations')
+    .select('id, customer_user_id, reservation_no, status, reserved_at, party_size, purpose, customer_notes, created_at')
+    .eq('store_id', dineStoreId)
+    .is('deleted_at', null)
+    .gte('reserved_at', since)
+    .order('reserved_at', { ascending: true });
+  if (error || !data) return [];
+
+  const rows = data as DineReservationRow[];
+  const userIds = Array.from(new Set(rows.map((r) => r.customer_user_id).filter((id): id is string => !!id)));
+  const usersById = new Map<string, { display_name: string | null; phone: string | null }>();
+  if (userIds.length > 0) {
+    const { data: users } = await dineSupabase.from('users').select('id, display_name, phone').in('id', userIds);
+    for (const u of users ?? []) {
+      usersById.set(u.id as string, { display_name: u.display_name as string | null, phone: u.phone as string | null });
+    }
+  }
+
+  return rows.map((r) => {
+    const { date, time } = splitReservedAt(r.reserved_at);
+    const user = r.customer_user_id ? usersById.get(r.customer_user_id) : undefined;
+    const status: 'confirmed' | 'cancelled' = r.status === 'cancelled' || r.status === 'no_show' ? 'cancelled' : 'confirmed';
+    return {
+      id: `app:${r.id}`,
+      reservationType: 'normal',
+      customerName: user?.display_name || `アプリ予約 (${r.reservation_no})`,
+      phone: user?.phone ?? null,
+      partySize: r.party_size,
+      reservationDate: date,
+      reservationTime: time,
+      details: {},
+      notes: [r.purpose, r.customer_notes].filter(Boolean).join(' / ') || null,
+      status,
+      createdByName: null,
+      createdAt: r.created_at,
+      source: 'app',
+    };
+  });
 }
 
 export const GET = withPosStaff('staff', async () => {
@@ -52,7 +153,17 @@ export const GET = withPosStaff('staff', async () => {
     .order('reservation_time', { nullsFirst: true });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ items: (data ?? []).map((row) => toApi(row as Row)) });
+
+  const posItems = (data ?? []).map((row) => toApiFromPos(row as PosRow));
+  const appItems = await fetchAppReservations().catch(() => []);
+
+  const items = [...posItems, ...appItems].sort((a, b) => {
+    const ad = a.reservationDate + (a.reservationTime ?? '');
+    const bd = b.reservationDate + (b.reservationTime ?? '');
+    return ad < bd ? -1 : ad > bd ? 1 : 0;
+  });
+
+  return NextResponse.json({ items });
 });
 
 const createSchema = z.object({
@@ -98,5 +209,5 @@ export const POST = withPosStaff('staff', async (session, req) => {
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json(toApi(data as Row));
+  return NextResponse.json(toApiFromPos(data as PosRow));
 });

@@ -17,6 +17,7 @@ import {
   confirmOrderItems,
   createOpenOrder,
   deleteConfirmedItem,
+  enqueuePrintJob,
   getOpenOrder,
   updateConfirmedItemDiscount,
   updateConfirmedItemQty,
@@ -24,6 +25,7 @@ import {
   type OpenOrderRecord,
   type OrderItemRecord,
 } from '@/lib/pos-order-orders-client';
+import { formatKitchenTicketText, formatReceiptText } from '@/lib/receipt-format';
 import type { TableLayoutItemRecord } from '@/lib/table-layout-client';
 import {
   clearTableSession,
@@ -470,6 +472,21 @@ export function PosApp() {
       const { items } = await confirmOrderItems(currentOrder.id, cart);
       setConfirmedItems((prev) => [...prev, ...items]);
       setCart([]);
+      // 厨房伝票の印刷キューへ (プリンター未設定の店舗では静かに何もしない)。会計自体を
+      // 止めたくないので失敗しても無視する (2026-08-31 プリンター実装で追加)。
+      enqueuePrintJob({
+        role: 'kitchen',
+        kind: 'kitchen',
+        orderId: currentOrder.id,
+        content: formatKitchenTicketText({
+          tableCode: selectedTable,
+          items: items.map((it) => ({ name: it.menu_name, qty: it.qty })),
+          paperWidthMm: 58,
+          confirmedAt: new Date(),
+        }),
+      }).catch(() => {
+        /* プリンター未接続でも注文確定自体は成功させる */
+      });
       return true;
     } catch (err) {
       setConfirmError(err instanceof PosOrderOrdersApiError ? err.message : '注文の確定に失敗しました');
@@ -559,6 +576,32 @@ export function PosApp() {
           changeUsd: l.changeUsd,
           changeKhr: l.changeKhr,
         })),
+      });
+      // レシートの印刷キューへ (プリンター未設定の店舗では静かに何もしない)。会計完了自体は
+      // 既に成功しているので失敗しても無視する (2026-08-31 プリンター実装で追加)。
+      enqueuePrintJob({
+        role: 'receipt',
+        kind: 'receipt',
+        orderId: currentOrder.id,
+        content: formatReceiptText({
+          storeName: "I'mHungry",
+          tableCode: selectedTable,
+          items: confirmedItems.map((it) => ({ name: it.menu_name, qty: it.qty, lineTotal: it.line_total })),
+          subtotal: totals.subtotal,
+          vat: totals.vat,
+          vatRate: settings.vatRate,
+          vatInclusive: settings.vatInclusive,
+          service: totals.service,
+          serviceRate: settings.serviceRate,
+          couponDiscount: totals.couponDiscount,
+          orderDiscount: totals.orderDiscount,
+          total: totals.total,
+          payments: paymentLines.map((l) => ({ method: l.method, amount: l.amount })),
+          paperWidthMm: 58,
+          paidAt: new Date(),
+        }),
+      }).catch(() => {
+        /* プリンター未接続でも会計完了自体は成功させる */
       });
       // 会計完了 = この卓の来店セッションが終わるので、滞在・飲み放題タイマーをリセットする。
       if (selectedTable) {

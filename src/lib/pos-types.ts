@@ -118,6 +118,43 @@ export type PosSettings = {
   menuImageStyle: MenuImageStyle;
 };
 
+// プリンター実装 (2026-08-31 追加)。レジ画面 (Vercel/クラウド) から店舗LAN内のプリンターへ
+// 直接は繋げないため、店舗側で動くローカル印刷エージェント (print-agent、別配布のNode.jsスクリプト)
+// が pos.print_jobs をポーリングして実際の印刷を行う。ここではその設定・ジョブの型のみ定義する。
+export type PrinterRole = 'receipt' | 'kitchen';
+// usb_agent: エージェントが動くPCにUSB接続 (レシートプリンター等、OSのプリンターキュー経由で印刷)
+// lan: 店舗LAN上のIPアドレスへエージェントが直接TCP接続 (キッチンプリンター等)
+export type PrinterConnectionType = 'usb_agent' | 'lan';
+
+export type PrinterConfig = {
+  id: string;
+  name: string;
+  role: PrinterRole;
+  connectionType: PrinterConnectionType;
+  paperWidthMm: number;
+  /** usb_agent の場合: エージェント側のプリンターキュー名 (例: macOSの `lpstat -p` で確認できる名前) */
+  deviceName: string | null;
+  /** lan の場合の接続先 */
+  lanIp: string | null;
+  lanPort: number | null;
+  enabled: boolean;
+};
+
+export type PrintJobStatus = 'pending' | 'printed' | 'failed';
+export type PrintJobKind = 'receipt' | 'kitchen' | 'test';
+
+export type PrintJob = {
+  id: string;
+  printerId: string;
+  orderId: string | null;
+  kind: PrintJobKind;
+  content: string;
+  status: PrintJobStatus;
+  errorMessage: string | null;
+  createdAt: string;
+  printedAt: string | null;
+};
+
 export const DEFAULT_SETTINGS: PosSettings = {
   storeId: 'default',
   vatRate: 10,

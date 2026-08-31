@@ -16,6 +16,21 @@ export function createPosAdminClient() {
   });
 }
 
+// matsunoya-dine (public スキーマ) を読み取り専用で参照するためのクライアント。
+// 予約の相互参照 (POSの予約一覧にアプリ予約も表示する。2026-08-31 追加) のみに使う想定 —
+// public スキーマへの書き込みは行わない (Source of Truth は常に matsunoya-dine 側)。
+export function createDineAdminClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !serviceRoleKey) {
+    throw new Error('Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY');
+  }
+  return createClient(url, serviceRoleKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+    db: { schema: 'public' },
+  });
+}
+
 // Phase B 時点では 1 デプロイ = 1 店舗 (pos.stores の1行) という前提で、
 // どの店舗かを環境変数で固定する。複数テナントを1デプロイで捌くマルチテナント
 // ルーティングは Phase D (オンボーディングUI) で設計する

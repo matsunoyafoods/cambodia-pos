@@ -57,6 +57,18 @@ import {
   type PosMenuOptionChoiceTemplate,
 } from '@/lib/menu-client';
 import { indexCategories, resolveCategoryChain, type CategoryNode } from '@/lib/category-tree';
+import {
+  createPrinter,
+  deletePrinter,
+  getPrintAgentToken,
+  listPrinters,
+  regeneratePrintAgentToken,
+  testPrint,
+  updatePrinter,
+  PosPrinterApiError,
+  type CreatePrinterInput,
+} from '@/lib/printer-client';
+import type { PrinterConfig } from '@/lib/pos-types';
 
 type Tab = 'general' | 'printer' | 'payment' | 'staff' | 'menu' | 'layout' | 'integration';
 
@@ -70,12 +82,172 @@ const NAV: { key: Tab; label: string }[] = [
   { key: 'integration', label: '連携設定' },
 ];
 
-const PRINTERS = [
-  { name: 'レシートプリンター', desc: 'レジ横 ・ USB接続', ok: true },
-  { name: 'キッチンプリンター', desc: '厨房 ・ LAN接続', ok: true },
-];
-
 const ROLE_LABEL: Record<PosStaffRole, string> = { owner: 'オーナー', manager: 'マネージャー', staff: 'スタッフ' };
+
+// プリンター設定 (2026-08-31 プリンター実装で追加)。
+const PRINTER_ROLE_LABEL: Record<PrinterConfig['role'], string> = { receipt: 'レシート印刷', kitchen: 'キッチン印刷' };
+const PRINTER_CONNECTION_LABEL: Record<PrinterConfig['connectionType'], string> = {
+  usb_agent: 'USB接続 (ローカルエージェント経由)',
+  lan: 'LAN接続 (IPアドレス指定)',
+};
+
+// プリンター追加フォーム。接続方法によって必要な入力 (USBのキュー名 or LANのIP:ポート) が
+// 変わるので、選択に応じて表示を切り替える。
+function AddPrinterForm({ onAdd, disabled }: { onAdd: (input: CreatePrinterInput) => Promise<void>; disabled: boolean }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState('');
+  const [role, setRole] = useState<PrinterConfig['role']>('receipt');
+  const [connectionType, setConnectionType] = useState<PrinterConfig['connectionType']>('usb_agent');
+  const [paperWidthMm, setPaperWidthMm] = useState(58);
+  const [deviceName, setDeviceName] = useState('');
+  const [lanIp, setLanIp] = useState('');
+  const [lanPort, setLanPort] = useState('9100');
+  const [submitting, setSubmitting] = useState(false);
+
+  function reset() {
+    setName('');
+    setRole('receipt');
+    setConnectionType('usb_agent');
+    setPaperWidthMm(58);
+    setDeviceName('');
+    setLanIp('');
+    setLanPort('9100');
+    setOpen(false);
+  }
+
+  async function submit() {
+    if (!name.trim()) return;
+    setSubmitting(true);
+    try {
+      await onAdd({
+        name: name.trim(),
+        role,
+        connectionType,
+        paperWidthMm,
+        deviceName: connectionType === 'usb_agent' ? deviceName.trim() || undefined : undefined,
+        lanIp: connectionType === 'lan' ? lanIp.trim() || undefined : undefined,
+        lanPort: connectionType === 'lan' ? parseInt(lanPort, 10) || 9100 : undefined,
+      });
+      reset();
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setOpen(true)}
+        className="h-10 w-fit rounded-lg border border-dashed border-border px-4 text-[12.5px] font-semibold text-muted-foreground disabled:opacity-60"
+      >
+        ＋ プリンターを追加
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-3 rounded-xl border border-dashed border-border p-4">
+      <div className="flex gap-3">
+        <div className="flex-1">
+          <div className="mb-1 text-[11px] text-muted-foreground">名前</div>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="レジ横レシートプリンター"
+            className="h-9 w-full rounded-lg border border-border px-3 text-[13px]"
+          />
+        </div>
+        <div>
+          <div className="mb-1 text-[11px] text-muted-foreground">用途</div>
+          <select
+            value={role}
+            onChange={(e) => setRole(e.target.value as PrinterConfig['role'])}
+            className="h-9 rounded-lg border border-border px-2 text-[13px]"
+          >
+            <option value="receipt">レシート印刷</option>
+            <option value="kitchen">キッチン印刷</option>
+          </select>
+        </div>
+      </div>
+      <div className="flex gap-3">
+        <div>
+          <div className="mb-1 text-[11px] text-muted-foreground">接続方法</div>
+          <select
+            value={connectionType}
+            onChange={(e) => setConnectionType(e.target.value as PrinterConfig['connectionType'])}
+            className="h-9 rounded-lg border border-border px-2 text-[13px]"
+          >
+            <option value="usb_agent">USB接続 (ローカルエージェント経由)</option>
+            <option value="lan">LAN接続 (IPアドレス指定)</option>
+          </select>
+        </div>
+        <div>
+          <div className="mb-1 text-[11px] text-muted-foreground">用紙幅</div>
+          <select
+            value={paperWidthMm}
+            onChange={(e) => setPaperWidthMm(parseInt(e.target.value, 10))}
+            className="h-9 rounded-lg border border-border px-2 text-[13px]"
+          >
+            <option value={58}>58mm</option>
+            <option value={80}>80mm</option>
+          </select>
+        </div>
+      </div>
+      {connectionType === 'usb_agent' ? (
+        <div>
+          <div className="mb-1 text-[11px] text-muted-foreground">
+            エージェント側のプリンターキュー名 (例: macOSの `lpstat -p` で確認できる名前)
+          </div>
+          <input
+            value={deviceName}
+            onChange={(e) => setDeviceName(e.target.value)}
+            placeholder="M502_Thermal_Receipt_Printer"
+            className="h-9 w-full rounded-lg border border-border px-3 text-[13px]"
+          />
+        </div>
+      ) : (
+        <div className="flex gap-3">
+          <div className="flex-1">
+            <div className="mb-1 text-[11px] text-muted-foreground">IPアドレス</div>
+            <input
+              value={lanIp}
+              onChange={(e) => setLanIp(e.target.value)}
+              placeholder="192.168.1.50"
+              className="h-9 w-full rounded-lg border border-border px-3 text-[13px]"
+            />
+          </div>
+          <div>
+            <div className="mb-1 text-[11px] text-muted-foreground">ポート</div>
+            <input
+              value={lanPort}
+              onChange={(e) => setLanPort(e.target.value)}
+              className="h-9 w-24 rounded-lg border border-border px-3 text-[13px]"
+            />
+          </div>
+        </div>
+      )}
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={submit}
+          disabled={submitting || !name.trim()}
+          className="h-9 rounded-lg bg-primary px-4 text-[12.5px] font-semibold text-primary-foreground disabled:opacity-60"
+        >
+          {submitting ? '追加中…' : '追加する'}
+        </button>
+        <button
+          type="button"
+          onClick={reset}
+          className="h-9 rounded-lg border border-border px-4 text-[12.5px] font-semibold text-muted-foreground"
+        >
+          キャンセル
+        </button>
+      </div>
+    </div>
+  );
+}
 
 // GET/PUT /api/pos/settings (integration-spec.md 4.2) に対応する画面。
 // dine 連携店舗 (authMode 'dine') は matsunoya-dine 側の /api/pos/settings (api-client.ts) が
@@ -93,6 +265,15 @@ export function SettingsScreen() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
+  // プリンター設定 (2026-08-31 プリンター実装で追加)。POS ネイティブ店舗のみ。
+  const [printers, setPrinters] = useState<PrinterConfig[]>([]);
+  const [printersLoaded, setPrintersLoaded] = useState(false);
+  const [printerError, setPrinterError] = useState<string | null>(null);
+  const [agentToken, setAgentToken] = useState<string | null>(null);
+  const [tokenBusy, setTokenBusy] = useState(false);
+  const [testingId, setTestingId] = useState<string | null>(null);
+  const [testedId, setTestedId] = useState<string | null>(null);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -107,6 +288,84 @@ export function SettingsScreen() {
       cancelled = true;
     };
   }, [isPosNative]);
+
+  useEffect(() => {
+    if (!isPosNative || tab !== 'printer' || printersLoaded) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [p, t] = await Promise.all([listPrinters(), getPrintAgentToken()]);
+        if (!cancelled) {
+          setPrinters(p);
+          setAgentToken(t);
+          setPrintersLoaded(true);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setPrinterError(err instanceof PosPrinterApiError ? err.message : 'プリンター設定の取得に失敗しました');
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isPosNative, tab, printersLoaded]);
+
+  async function handleRegenerateToken() {
+    setTokenBusy(true);
+    try {
+      const t = await regeneratePrintAgentToken();
+      setAgentToken(t);
+    } catch (err) {
+      setPrinterError(err instanceof PosPrinterApiError ? err.message : 'トークンの再発行に失敗しました');
+    } finally {
+      setTokenBusy(false);
+    }
+  }
+
+  async function handleAddPrinter(input: CreatePrinterInput) {
+    setPrinterError(null);
+    try {
+      const p = await createPrinter(input);
+      setPrinters((prev) => [...prev, p]);
+    } catch (err) {
+      setPrinterError(err instanceof PosPrinterApiError ? err.message : 'プリンターの追加に失敗しました');
+    }
+  }
+
+  async function handleTogglePrinterEnabled(p: PrinterConfig) {
+    setPrinterError(null);
+    try {
+      const updated = await updatePrinter(p.id, { enabled: !p.enabled });
+      setPrinters((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
+    } catch (err) {
+      setPrinterError(err instanceof PosPrinterApiError ? err.message : '更新に失敗しました');
+    }
+  }
+
+  async function handleDeletePrinter(id: string) {
+    setPrinterError(null);
+    try {
+      await deletePrinter(id);
+      setPrinters((prev) => prev.filter((p) => p.id !== id));
+    } catch (err) {
+      setPrinterError(err instanceof PosPrinterApiError ? err.message : '削除に失敗しました');
+    }
+  }
+
+  async function handleTestPrint(id: string) {
+    setPrinterError(null);
+    setTestingId(id);
+    setTestedId(null);
+    try {
+      await testPrint(id);
+      setTestedId(id);
+    } catch (err) {
+      setPrinterError(err instanceof PosPrinterApiError ? err.message : 'テスト印刷の送信に失敗しました');
+    } finally {
+      setTestingId(null);
+    }
+  }
 
   function update<K extends keyof PosSettings>(key: K, value: PosSettings[K]) {
     setSettings((prev) => ({ ...prev, [key]: value }));
@@ -350,28 +609,109 @@ export function SettingsScreen() {
           )}
 
           {tab === 'printer' && (
-            <div className="flex max-w-[560px] flex-col gap-3.5">
+            <div className="flex max-w-[640px] flex-col gap-3.5">
               <div className="text-[15px] font-bold">プリンター設定</div>
-              {PRINTERS.map((p) => (
-                <div
-                  key={p.name}
-                  className="flex items-center justify-between rounded-xl border border-border px-4 py-3.5"
-                >
-                  <div>
-                    <div className="text-[13.5px] font-semibold">{p.name}</div>
-                    <div className="mt-0.5 text-[11.5px] text-muted-foreground">{p.desc}</div>
-                  </div>
-                  <div className="flex items-center gap-2.5">
-                    <div className={'flex items-center gap-1.5 text-xs ' + (p.ok ? 'text-emerald-600' : 'text-destructive')}>
-                      <span className={'inline-block h-2 w-2 rounded-full ' + (p.ok ? 'bg-emerald-500' : 'bg-destructive')} />
-                      {p.ok ? '接続中' : '未接続'}
-                    </div>
-                    <button className="h-[34px] rounded-lg border border-border px-3.5 text-[12.5px] font-semibold">
-                      テスト印刷
-                    </button>
-                  </div>
+
+              {!isPosNative ? (
+                <div className="rounded-xl border border-border p-3 text-[12.5px] text-muted-foreground">
+                  プリンター設定は POS ネイティブ運用店舗のみで利用できます。
                 </div>
-              ))}
+              ) : (
+                <>
+                  <div className="rounded-xl border border-border p-3.5 text-[12px] text-muted-foreground">
+                    レジ画面 (クラウド) から店舗内のプリンターへは直接印刷できないため、店舗のPCで動く
+                    「ローカル印刷エージェント」が下のトークンを使って印刷ジョブを取りに来る仕組みです。
+                    USB接続のプリンターはエージェントが動くPC経由、LAN接続のプリンターはエージェントから
+                    IPアドレスへ直接送信します。エージェントの導入方法は別途お渡しする手順書をご覧ください。
+                  </div>
+
+                  <div className="rounded-xl border border-border p-3.5">
+                    <div className="mb-1.5 text-[13px] font-semibold">印刷エージェント用トークン</div>
+                    {agentToken ? (
+                      <div className="flex items-center gap-2">
+                        <code className="flex-1 truncate rounded-md bg-secondary px-2.5 py-1.5 text-[11.5px]">{agentToken}</code>
+                        <button
+                          type="button"
+                          onClick={() => navigator.clipboard?.writeText(agentToken)}
+                          className="h-8 rounded-md border border-border px-3 text-[11.5px] font-semibold"
+                        >
+                          コピー
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="text-[12px] text-muted-foreground">まだ発行されていません。</div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleRegenerateToken}
+                      disabled={!canManageSettings || tokenBusy}
+                      className="mt-2 h-8 rounded-md border border-border px-3 text-[11.5px] font-semibold text-destructive disabled:opacity-60"
+                    >
+                      {tokenBusy ? '発行中…' : agentToken ? 'トークンを再発行' : 'トークンを発行'}
+                    </button>
+                    <div className="mt-1.5 text-[11px] text-muted-foreground">
+                      再発行すると古いトークンで動いているエージェントは使えなくなります。
+                    </div>
+                  </div>
+
+                  {printerError && <div className="text-[12px] text-destructive">{printerError}</div>}
+
+                  <div className="flex flex-col gap-2.5">
+                    {printers.map((p) => (
+                      <div key={p.id} className="flex items-center justify-between rounded-xl border border-border px-4 py-3.5">
+                        <div>
+                          <div className="text-[13.5px] font-semibold">
+                            {p.name}
+                            <span className="ml-2 rounded-full bg-secondary px-2 py-0.5 text-[10.5px] font-semibold text-muted-foreground">
+                              {PRINTER_ROLE_LABEL[p.role]}
+                            </span>
+                          </div>
+                          <div className="mt-0.5 text-[11.5px] text-muted-foreground">
+                            {PRINTER_CONNECTION_LABEL[p.connectionType]} ・ {p.paperWidthMm}mm
+                            {p.connectionType === 'usb_agent' && p.deviceName ? ` ・ ${p.deviceName}` : ''}
+                            {p.connectionType === 'lan' && p.lanIp ? ` ・ ${p.lanIp}:${p.lanPort ?? 9100}` : ''}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2.5">
+                          <button
+                            type="button"
+                            disabled={!canManageSettings}
+                            onClick={() => handleTogglePrinterEnabled(p)}
+                            className={
+                              'flex items-center gap-1.5 text-xs disabled:opacity-60 ' +
+                              (p.enabled ? 'text-emerald-600' : 'text-muted-foreground')
+                            }
+                          >
+                            <span className={'inline-block h-2 w-2 rounded-full ' + (p.enabled ? 'bg-emerald-500' : 'bg-border')} />
+                            {p.enabled ? '有効' : '無効'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleTestPrint(p.id)}
+                            disabled={testingId === p.id}
+                            className="h-[34px] rounded-lg border border-border px-3.5 text-[12.5px] font-semibold disabled:opacity-60"
+                          >
+                            {testingId === p.id ? '送信中…' : testedId === p.id ? 'キューに送信済み ✓' : 'テスト印刷'}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={!canManageSettings}
+                            onClick={() => handleDeletePrinter(p.id)}
+                            className="h-[34px] rounded-lg border border-border px-3 text-[12.5px] font-semibold text-destructive disabled:opacity-60"
+                          >
+                            削除
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                    {printersLoaded && printers.length === 0 && (
+                      <div className="text-[12.5px] text-muted-foreground">まだプリンターが登録されていません。</div>
+                    )}
+                  </div>
+
+                  <AddPrinterForm onAdd={handleAddPrinter} disabled={!canManageSettings} />
+                </>
+              )}
             </div>
           )}
 
