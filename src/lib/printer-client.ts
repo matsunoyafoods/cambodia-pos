@@ -81,3 +81,28 @@ export async function regeneratePrintAgentToken(): Promise<string> {
   const { token } = await request<{ token: string }>('/api/settings/print-agent-token', { method: 'POST' });
   return token;
 }
+
+// レシート・領収書の印字設定 (ヘッダー/フッター文言・ロゴ) (2026-08-31 追加)。
+
+export type ReceiptFormatInfo = { headerText: string; footerText: string; hasLogo: boolean };
+
+export async function getReceiptFormat(): Promise<ReceiptFormatInfo> {
+  return request<ReceiptFormatInfo>('/api/settings/receipt-format');
+}
+
+export async function updateReceiptFormat(input: { headerText: string; footerText: string }): Promise<void> {
+  await request('/api/settings/receipt-format', { method: 'POST', body: JSON.stringify(input) });
+}
+
+export async function getReceiptLogo(): Promise<string | null> {
+  const { logoPngBase64 } = await request<{ logoPngBase64: string | null }>('/api/settings/receipt-logo');
+  return logoPngBase64;
+}
+
+export async function uploadReceiptLogo(pngBase64: string): Promise<void> {
+  await request('/api/settings/receipt-logo', { method: 'POST', body: JSON.stringify({ pngBase64 }) });
+}
+
+export async function deleteReceiptLogo(): Promise<void> {
+  await request('/api/settings/receipt-logo', { method: 'DELETE' });
+}

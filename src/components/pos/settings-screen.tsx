@@ -60,11 +60,16 @@ import { indexCategories, resolveCategoryChain, type CategoryNode } from '@/lib/
 import {
   createPrinter,
   deletePrinter,
+  deleteReceiptLogo,
   getPrintAgentToken,
+  getReceiptFormat,
+  getReceiptLogo,
   listPrinters,
   regeneratePrintAgentToken,
   testPrint,
   updatePrinter,
+  updateReceiptFormat,
+  uploadReceiptLogo,
   PosPrinterApiError,
   type CreatePrinterInput,
 } from '@/lib/printer-client';
@@ -245,6 +250,189 @@ function AddPrinterForm({ onAdd, disabled }: { onAdd: (input: CreatePrinterInput
           キャンセル
         </button>
       </div>
+    </div>
+  );
+}
+
+// レシート・領収書の印字設定 (ヘッダー/フッター文言・ロゴ画像) (2026-08-31 追加。
+// 「印字設定とレシートの幅設定などできるようにしないといけないですね。ロゴを登録して
+// レシートや領収書にロゴ印刷できるようにしたい」)。用紙幅は各プリンターの登録内容
+// (paperWidthMm) がそのまま使われるので、ここでは店舗共通のロゴ・文言だけを扱う。
+function ReceiptFormatSection({ canManageSettings }: { canManageSettings: boolean }) {
+  const [headerText, setHeaderText] = useState('');
+  const [footerText, setFooterText] = useState('');
+  const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [logoPreview, setLogoPreview] = useState<string | null>(null);
+  const [logoBusy, setLogoBusy] = useState(false);
+  const [logoError, setLogoError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [fmt, logo] = await Promise.all([getReceiptFormat(), getReceiptLogo()]);
+        if (cancelled) return;
+        setHeaderText(fmt.headerText);
+        setFooterText(fmt.footerText);
+        setLogoPreview(logo);
+        setLoaded(true);
+      } catch (err) {
+        if (!cancelled) setError(err instanceof PosPrinterApiError ? err.message : '印字設定の取得に失敗しました');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function handleSaveText() {
+    setSaving(true);
+    setError(null);
+    setSaved(false);
+    try {
+      await updateReceiptFormat({ headerText, footerText });
+      setSaved(true);
+    } catch (err) {
+      setError(err instanceof PosPrinterApiError ? err.message : '保存に失敗しました');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function handleLogoFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (file.type !== 'image/png') {
+      setLogoError('PNG形式の画像を選んでください');
+      return;
+    }
+    setLogoBusy(true);
+    setLogoError(null);
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const dataUrl = String(reader.result ?? '');
+        const base64 = dataUrl.split(',')[1] ?? '';
+        await uploadReceiptLogo(base64);
+        setLogoPreview(base64);
+      } catch (err) {
+        setLogoError(err instanceof PosPrinterApiError ? err.message : 'アップロードに失敗しました');
+      } finally {
+        setLogoBusy(false);
+      }
+    };
+    reader.onerror = () => {
+      setLogoError('画像の読み込みに失敗しました');
+      setLogoBusy(false);
+    };
+    reader.readAsDataURL(file);
+  }
+
+  async function handleDeleteLogo() {
+    setLogoBusy(true);
+    setLogoError(null);
+    try {
+      await deleteReceiptLogo();
+      setLogoPreview(null);
+    } catch (err) {
+      setLogoError(err instanceof PosPrinterApiError ? err.message : '削除に失敗しました');
+    } finally {
+      setLogoBusy(false);
+    }
+  }
+
+  if (!loaded) {
+    return (
+      <div className="rounded-xl border border-border p-3.5 text-[12px] text-muted-foreground">
+        {error ?? '印字設定を読み込み中…'}
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-border p-3.5">
+      <div className="mb-2.5 text-[13px] font-semibold">レシート・領収書の印字設定</div>
+      <div className="mb-3 text-[11px] text-muted-foreground">
+        用紙幅は下の各プリンターの登録内容がそのまま使われます。ここではロゴ・ヘッダー/フッター文言など、
+        店舗共通の内容を設定します (厨房伝票にはロゴ・文言は印字されません)。
+      </div>
+
+      <div className="mb-3.5">
+        <div className="mb-1.5 text-[12px] font-semibold">ロゴ画像 (PNG)</div>
+        {logoPreview ? (
+          <div className="flex items-center gap-3">
+            <img
+              src={`data:image/png;base64,${logoPreview}`}
+              alt="レシートロゴ"
+              className="h-14 w-auto rounded border border-border bg-white p-1"
+            />
+            <button
+              type="button"
+              onClick={handleDeleteLogo}
+              disabled={!canManageSettings || logoBusy}
+              className="h-8 rounded-md border border-border px-3 text-[11.5px] font-semibold text-destructive disabled:opacity-60"
+            >
+              {logoBusy ? '処理中…' : 'ロゴを削除'}
+            </button>
+          </div>
+        ) : (
+          <label className="inline-flex h-9 cursor-pointer items-center rounded-md border border-border px-3 text-[12px] font-semibold">
+            {logoBusy ? 'アップロード中…' : 'PNG画像を選択してアップロード'}
+            <input
+              type="file"
+              accept="image/png"
+              className="hidden"
+              disabled={!canManageSettings || logoBusy}
+              onChange={handleLogoFile}
+            />
+          </label>
+        )}
+        {logoError && <div className="mt-1.5 text-[11px] text-destructive">{logoError}</div>}
+        <div className="mt-1.5 text-[11px] text-muted-foreground">
+          レシート・領収書の先頭に印刷されます。300KB以下のPNGを推奨します。
+        </div>
+      </div>
+
+      <Field label="ヘッダー文言 (店名の下に印字。住所・電話番号など、複数行可)">
+        <textarea
+          value={headerText}
+          disabled={!canManageSettings}
+          onChange={(e) => {
+            setHeaderText(e.target.value);
+            setSaved(false);
+          }}
+          rows={2}
+          className="w-full rounded-lg border border-border px-3 py-2 text-[12.5px] disabled:opacity-60"
+        />
+      </Field>
+      <Field label="フッター文言 (レシート下部に印字。複数行可)">
+        <textarea
+          value={footerText}
+          disabled={!canManageSettings}
+          onChange={(e) => {
+            setFooterText(e.target.value);
+            setSaved(false);
+          }}
+          rows={2}
+          className="w-full rounded-lg border border-border px-3 py-2 text-[12.5px] disabled:opacity-60"
+        />
+      </Field>
+      {error && <div className="mb-2 text-[11px] text-destructive">{error}</div>}
+      <button
+        type="button"
+        onClick={handleSaveText}
+        disabled={!canManageSettings || saving}
+        className={
+          'h-9 w-fit rounded-lg px-4 text-[12.5px] font-bold disabled:opacity-60 ' +
+          (saved ? 'bg-emerald-100 text-emerald-600' : 'bg-primary text-primary-foreground')
+        }
+      >
+        {saving ? '保存中…' : saved ? '保存しました ✓' : '文言を保存'}
+      </button>
     </div>
   );
 }
@@ -710,6 +898,8 @@ export function SettingsScreen() {
                   </div>
 
                   <AddPrinterForm onAdd={handleAddPrinter} disabled={!canManageSettings} />
+
+                  <ReceiptFormatSection canManageSettings={canManageSettings} />
                 </>
               )}
             </div>

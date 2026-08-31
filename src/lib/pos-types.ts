@@ -141,7 +141,9 @@ export type PrinterConfig = {
 };
 
 export type PrintJobStatus = 'pending' | 'printed' | 'failed';
-export type PrintJobKind = 'receipt' | 'kitchen' | 'test';
+// 'invoice' = 領収書 (宛名・但し書き入りの正式な領収書。レシートとは別に、会計後に
+// 客の求めに応じて発行する。2026-08-31 追加)。
+export type PrintJobKind = 'receipt' | 'kitchen' | 'invoice' | 'test';
 
 export type PrintJob = {
   id: string;
@@ -153,6 +155,33 @@ export type PrintJob = {
   errorMessage: string | null;
   createdAt: string;
   printedAt: string | null;
+};
+
+// レシート・領収書の印字設定 (2026-08-31 追加。「印字設定とレシートの幅設定などできる
+// ようにしないといけない」)。pos.stores.settings (jsonb) に保存する (printAgentToken と同じ場所)。
+// 用紙幅はプリンターごとの paperWidthMm (PrinterConfig) を印字時にそのまま使うので、
+// ここには含めない。
+export type ReceiptFormatSettings = {
+  /** 店名の下に印字する文言 (住所・電話番号など)。空行区切りで複数行可 */
+  headerText: string;
+  /** レシート下部に印字する一言 (「またのご来店をお待ちしております」等) */
+  footerText: string;
+  /** ロゴ画像 (PNG, base64。data:URLプレフィックス無し)。未設定 = ロゴ無し */
+  logoPngBase64: string | null;
+};
+
+export const DEFAULT_RECEIPT_FORMAT_SETTINGS: ReceiptFormatSettings = {
+  headerText: '',
+  footerText: '',
+  logoPngBase64: null,
+};
+
+// 領収書発行フォームの入力 (2026-08-31 追加)。
+export type InvoiceInput = {
+  /** 宛名 (空欄可 = 「上様」として印字) */
+  recipientName: string;
+  /** 但し書き (未入力時は「お食事代として」をデフォルトにする) */
+  description: string;
 };
 
 export const DEFAULT_SETTINGS: PosSettings = {

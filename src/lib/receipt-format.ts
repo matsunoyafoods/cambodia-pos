@@ -39,8 +39,22 @@ export type ReceiptPaymentLine = { method: 'cash' | 'qr' | 'card'; amount: numbe
 
 const METHOD_LABEL: Record<ReceiptPaymentLine['method'], string> = { cash: '現金', qr: 'QR', card: 'カード' };
 
+// 自由記述の複数行文言 (ヘッダー・フッター) を、改行で分割してそれぞれ中央寄せで積む。
+// 空文字なら何も足さない (2026-08-31 追加)。
+function pushFreeTextLines(rows: string[], text: string | undefined, width: number) {
+  if (!text) return;
+  for (const raw of text.split('\n')) {
+    const t = raw.trim();
+    if (t) rows.push(centerText(t, width));
+  }
+}
+
 export function formatReceiptText(params: {
   storeName: string;
+  /** 店名の下に印字する文言 (住所・電話番号など、複数行は \n 区切り)。未設定 = 印字しない (2026-08-31 追加) */
+  headerText?: string;
+  /** レシート下部の「ありがとうございました」の後に足す一言 (複数行は \n 区切り) (2026-08-31 追加) */
+  footerText?: string;
   tableCode: string | null;
   items: ReceiptItemLine[];
   subtotal: number;
@@ -59,6 +73,7 @@ export function formatReceiptText(params: {
   const w = columnsForPaperWidth(params.paperWidthMm);
   const rows: string[] = [];
   rows.push(centerText(params.storeName, w));
+  pushFreeTextLines(rows, params.headerText, w);
   rows.push(centerText('お会計レシート', w));
   rows.push(line('-', w));
   if (params.tableCode) rows.push(`テーブル: ${params.tableCode}`);
@@ -88,6 +103,51 @@ export function formatReceiptText(params: {
   }
   rows.push('');
   rows.push(centerText('ありがとうございました', w));
+  pushFreeTextLines(rows, params.footerText, w);
+  rows.push('');
+  rows.push('');
+  return rows.join('\n');
+}
+
+// 領収書 (宛名・但し書き入りの正式な領収書。レシートとは別に、会計後に客の求めに応じて
+// 発行する) (2026-08-31 追加)。
+export function formatInvoiceText(params: {
+  storeName: string;
+  headerText?: string;
+  footerText?: string;
+  /** 空欄なら「上様」として印字 */
+  recipientName: string;
+  /** 未入力なら「お食事代として」を使う */
+  description: string;
+  total: number;
+  invoiceNo: string;
+  paperWidthMm: number;
+  paidAt: Date;
+}): string {
+  const w = columnsForPaperWidth(params.paperWidthMm);
+  const rows: string[] = [];
+  rows.push(centerText(params.storeName, w));
+  pushFreeTextLines(rows, params.headerText, w);
+  rows.push(centerText('領収書', w));
+  rows.push(line('=', w));
+  rows.push(
+    params.paidAt.toLocaleString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }),
+  );
+  rows.push(`No. ${params.invoiceNo}`);
+  rows.push('');
+  const recipient = params.recipientName.trim() || '上様';
+  rows.push(`${recipient} 様`);
+  rows.push('');
+  rows.push(line('-', w));
+  rows.push(centerText(`金額　$${money(params.total)}`, w));
+  rows.push(line('-', w));
+  rows.push('');
+  rows.push(`但し　${params.description.trim() || 'お食事代として'}として`);
+  rows.push('上記正に領収いたしました');
+  rows.push('');
+  rows.push(line('-', w));
+  rows.push(centerText(params.storeName, w));
+  pushFreeTextLines(rows, params.footerText, w);
   rows.push('');
   rows.push('');
   return rows.join('\n');

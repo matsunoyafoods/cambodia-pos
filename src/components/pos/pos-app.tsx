@@ -2,7 +2,15 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import type { CartLine, DiscountType, GuestEthnicity, MenuItem, PaymentLineInput, TableStatus } from '@/lib/pos-types';
+import type {
+  CartLine,
+  DiscountType,
+  GuestEthnicity,
+  MenuItem,
+  PaymentLineInput,
+  PaymentMethod,
+  TableStatus,
+} from '@/lib/pos-types';
 import { DEFAULT_SETTINGS } from '@/lib/pos-types';
 import { getPosMenus, getPosSettings, PosApiError } from '@/lib/api-client';
 import {
@@ -17,7 +25,9 @@ import {
   confirmOrderItems,
   createOpenOrder,
   deleteConfirmedItem,
-  enqueuePrintJob,
+  enqueueInvoicePrintJob,
+  enqueueKitchenPrintJob,
+  enqueueReceiptPrintJob,
   getOpenOrder,
   mergeTables,
   moveTable,
@@ -28,7 +38,6 @@ import {
   type OpenOrderRecord,
   type OrderItemRecord,
 } from '@/lib/pos-order-orders-client';
-import { formatKitchenTicketText, formatReceiptText } from '@/lib/receipt-format';
 import type { TableLayoutItemRecord } from '@/lib/table-layout-client';
 import {
   clearTableSession,
@@ -50,6 +59,25 @@ import { OptionModal, type ModalSelection } from './option-modal';
 import { GuestDemographicsModal } from './guest-demographics-modal';
 
 type Screen = 'tablemap' | 'order' | 'checkout' | 'receipt';
+
+// 会計完了直後、レシート再印刷・領収書発行に使うためのスナップショット (2026-08-31 追加。
+// 「レシートや領収書にロゴ印刷できるようにしたい」の一環で、領収書は会計完了後の別発行に
+// したため、confirmedItems/currentOrder を空にした後もこの内容だけは残しておく)。
+type CompletedOrderSnapshot = {
+  orderId: string | null;
+  tableCode: string | null;
+  items: { name: string; qty: number; lineTotal: number }[];
+  subtotal: number;
+  vat: number;
+  vatRate: number;
+  vatInclusive: boolean;
+  service: number;
+  serviceRate: number;
+  couponDiscount: number;
+  orderDiscount: number;
+  total: number;
+  payments: { method: PaymentMethod; amount: number }[];
+};
 
 // PosApp は旧 UI プロトタイプ (design canvas の Main.dc.html) の状態遷移を
 // そのまま React に移植したもの。本番接続 (Supabase / matsunoya-dine API) は
@@ -104,6 +132,12 @@ export function PosApp() {
   // レシート画面にそのまま totals.total を渡すと $0.00 と表示されてしまう。そのためレシート
   // 表示用にこの値だけ別で保持する。
   const [receiptTotal, setReceiptTotal] = useState(0);
+  // 会計完了直後のスナップショット (レシート再印刷・領収書発行用。2026-08-31 追加)。
+  const [lastCompletedOrder, setLastCompletedOrder] = useState<CompletedOrderSnapshot | null>(null);
+  const [invoiceBusy, setInvoiceBusy] = useState(false);
+  const [invoiceError, setInvoiceError] = useState<string | null>(null);
+  const [invoiceIssued, setInvoiceIssued] = useState(false);
+  const [reprintBusy, setReprintBusy] = useState(false);
   const [guestModalOpen, setGuestModalOpen] = useState(false);
   const [pendingTapItem, setPendingTapItem] = useState<MenuItem | null>(null);
   const [guestSaving, setGuestSaving] = useState(false);
@@ -581,17 +615,12 @@ export function PosApp() {
       setConfirmedItems((prev) => [...prev, ...items]);
       setCart([]);
       // 厨房伝票の印刷キューへ (プリンター未設定の店舗では静かに何もしない)。会計自体を
-      // 止めたくないので失敗しても無視する (2026-08-31 プリンター実装で追加)。
-      enqueuePrintJob({
-        role: 'kitchen',
-        kind: 'kitchen',
+      // 止めたくないので失敗しても無視する (2026-08-31 プリンター実装で追加。同日、
+      // 用紙幅・整形はサーバー側でプリンターごとに行うよう変更したため、生データだけ渡す)。
+      enqueueKitchenPrintJob({
         orderId: currentOrder.id,
-        content: formatKitchenTicketText({
-          tableCode: selectedTable,
-          items: items.map((it) => ({ name: it.menu_name, qty: it.qty })),
-          paperWidthMm: 58,
-          confirmedAt: new Date(),
-        }),
+        tableCode: selectedTable,
+        items: items.map((it) => ({ name: it.menu_name, qty: it.qty })),
       }).catch(() => {
         /* プリンター未接続でも注文確定自体は成功させる */
       });
@@ -686,31 +715,47 @@ export function PosApp() {
         })),
       });
       // レシートの印刷キューへ (プリンター未設定の店舗では静かに何もしない)。会計完了自体は
-      // 既に成功しているので失敗しても無視する (2026-08-31 プリンター実装で追加)。
-      enqueuePrintJob({
-        role: 'receipt',
-        kind: 'receipt',
+      // 既に成功しているので失敗しても無視する (2026-08-31 プリンター実装で追加。同日、
+      // 用紙幅・ヘッダー/フッター文言・ロゴはサーバー側でプリンターごとに当てはめるよう
+      // 変更したため、生データだけ渡す)。
+      const snapshotItems = confirmedItems.map((it) => ({ name: it.menu_name, qty: it.qty, lineTotal: it.line_total }));
+      const snapshotPayments = paymentLines.map((l) => ({ method: l.method, amount: l.amount }));
+      enqueueReceiptPrintJob({
         orderId: currentOrder.id,
-        content: formatReceiptText({
-          storeName: "I'mHungry",
-          tableCode: selectedTable,
-          items: confirmedItems.map((it) => ({ name: it.menu_name, qty: it.qty, lineTotal: it.line_total })),
-          subtotal: totals.subtotal,
-          vat: totals.vat,
-          vatRate: settings.vatRate,
-          vatInclusive: settings.vatInclusive,
-          service: totals.service,
-          serviceRate: settings.serviceRate,
-          couponDiscount: totals.couponDiscount,
-          orderDiscount: totals.orderDiscount,
-          total: totals.total,
-          payments: paymentLines.map((l) => ({ method: l.method, amount: l.amount })),
-          paperWidthMm: 58,
-          paidAt: new Date(),
-        }),
+        tableCode: selectedTable,
+        items: snapshotItems,
+        subtotal: totals.subtotal,
+        vat: totals.vat,
+        vatRate: settings.vatRate,
+        vatInclusive: settings.vatInclusive,
+        service: totals.service,
+        serviceRate: settings.serviceRate,
+        couponDiscount: totals.couponDiscount,
+        orderDiscount: totals.orderDiscount,
+        total: totals.total,
+        payments: snapshotPayments,
       }).catch(() => {
         /* プリンター未接続でも会計完了自体は成功させる */
       });
+      // レシート画面での「再印刷」「領収書を発行」用に、確定済み品目・合計をクリアする前の
+      // 内容をスナップショットとして残しておく (2026-08-31 追加)。
+      setLastCompletedOrder({
+        orderId: currentOrder.id,
+        tableCode: selectedTable,
+        items: snapshotItems,
+        subtotal: totals.subtotal,
+        vat: totals.vat,
+        vatRate: settings.vatRate,
+        vatInclusive: settings.vatInclusive,
+        service: totals.service,
+        serviceRate: settings.serviceRate,
+        couponDiscount: totals.couponDiscount,
+        orderDiscount: totals.orderDiscount,
+        total: totals.total,
+        payments: snapshotPayments,
+      });
+      setInvoiceIssued(false);
+      setInvoiceError(null);
       // 会計完了 = この卓の来店セッションが終わるので、滞在・飲み放題タイマーをリセットする。
       if (selectedTable) {
         setTableSessions((prev) => prev.filter((s) => s.table_code !== selectedTable));
@@ -754,6 +799,62 @@ export function PosApp() {
     setConfirmedItems([]);
     setCurrentOrder(null);
     resetOrderState();
+  }
+
+  // 顧客控え(レシート)の再印刷 (2026-08-31 追加。以前から画面にボタンはあったが未接続だった)。
+  async function reprintReceipt() {
+    if (!lastCompletedOrder || reprintBusy) return;
+    setReprintBusy(true);
+    try {
+      await enqueueReceiptPrintJob({
+        orderId: lastCompletedOrder.orderId ?? undefined,
+        tableCode: lastCompletedOrder.tableCode,
+        items: lastCompletedOrder.items,
+        subtotal: lastCompletedOrder.subtotal,
+        vat: lastCompletedOrder.vat,
+        vatRate: lastCompletedOrder.vatRate,
+        vatInclusive: lastCompletedOrder.vatInclusive,
+        service: lastCompletedOrder.service,
+        serviceRate: lastCompletedOrder.serviceRate,
+        couponDiscount: lastCompletedOrder.couponDiscount,
+        orderDiscount: lastCompletedOrder.orderDiscount,
+        total: lastCompletedOrder.total,
+        payments: lastCompletedOrder.payments,
+      });
+    } catch {
+      /* レシート画面には出さず、印刷が来なければスタッフがテスト印刷等で気づく想定 */
+    } finally {
+      setReprintBusy(false);
+    }
+  }
+
+  // 領収書 (宛名・但し書き入りの正式な領収書) の発行 (2026-08-31 追加。「宛名・但し書き入りの
+  // 正式な領収書を別途発行する機能が必要」)。会計直後のレシート画面から、客の求めに応じて発行する。
+  function makeInvoiceNo(orderId: string | null, at: Date): string {
+    const ymd = at.toISOString().slice(0, 10).replace(/-/g, '');
+    const idPart = (orderId ?? '').replace(/-/g, '').slice(-4).toUpperCase();
+    const suffix = idPart || Math.random().toString(36).slice(2, 6).toUpperCase();
+    return `${ymd}-${suffix}`;
+  }
+
+  async function issueInvoice(recipientName: string, description: string) {
+    if (!lastCompletedOrder) return;
+    setInvoiceBusy(true);
+    setInvoiceError(null);
+    try {
+      await enqueueInvoicePrintJob({
+        orderId: lastCompletedOrder.orderId ?? undefined,
+        recipientName,
+        description,
+        total: lastCompletedOrder.total,
+        invoiceNo: makeInvoiceNo(lastCompletedOrder.orderId, new Date()),
+      });
+      setInvoiceIssued(true);
+    } catch (err) {
+      setInvoiceError(err instanceof PosOrderOrdersApiError ? err.message : '領収書の発行に失敗しました');
+    } finally {
+      setInvoiceBusy(false);
+    }
   }
 
   function newOrder() {
@@ -950,7 +1051,18 @@ export function PosApp() {
       )}
 
       {screen === 'receipt' && (
-        <ReceiptScreen selectedTable={selectedTable} total={receiptTotal} onNewOrder={newOrder} />
+        <ReceiptScreen
+          selectedTable={selectedTable}
+          total={receiptTotal}
+          onNewOrder={newOrder}
+          onReprintReceipt={reprintReceipt}
+          reprintBusy={reprintBusy}
+          canIssueInvoice={Boolean(lastCompletedOrder)}
+          onIssueInvoice={issueInvoice}
+          invoiceBusy={invoiceBusy}
+          invoiceError={invoiceError}
+          invoiceIssued={invoiceIssued}
+        />
       )}
 
       {guestModalOpen && (

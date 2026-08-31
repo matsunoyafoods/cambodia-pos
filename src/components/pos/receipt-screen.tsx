@@ -1,16 +1,41 @@
 'use client';
 
+import { useState } from 'react';
 import { money } from '@/lib/money';
 
 export function ReceiptScreen({
   selectedTable,
   total,
   onNewOrder,
+  onReprintReceipt,
+  reprintBusy,
+  canIssueInvoice,
+  onIssueInvoice,
+  invoiceBusy,
+  invoiceError,
+  invoiceIssued,
 }: {
   selectedTable: string | null;
   total: number;
   onNewOrder: () => void;
+  /** 顧客控え(レシート)の再印刷 (2026-08-31 追加) */
+  onReprintReceipt: () => void;
+  reprintBusy: boolean;
+  /** 直前の会計内容がまだ手元にあり、領収書を発行できるか (2026-08-31 追加) */
+  canIssueInvoice: boolean;
+  onIssueInvoice: (recipientName: string, description: string) => Promise<void>;
+  invoiceBusy: boolean;
+  invoiceError: string | null;
+  invoiceIssued: boolean;
 }) {
+  const [invoiceFormOpen, setInvoiceFormOpen] = useState(false);
+  const [recipientName, setRecipientName] = useState('');
+  const [description, setDescription] = useState('');
+
+  async function handleIssueInvoice() {
+    await onIssueInvoice(recipientName, description);
+  }
+
   return (
     <div className="flex flex-1 items-center justify-center">
       <div className="flex w-[360px] flex-col items-center gap-3.5 text-center">
@@ -29,9 +54,69 @@ export function ReceiptScreen({
         >
           テーブルマップへ戻る
         </button>
-        <button className="h-11 w-full rounded-lg border border-border bg-card text-[13.5px] font-semibold">
-          顧客控えを再印刷
+        <button
+          onClick={onReprintReceipt}
+          disabled={reprintBusy}
+          className="h-11 w-full rounded-lg border border-border bg-card text-[13.5px] font-semibold disabled:opacity-60"
+        >
+          {reprintBusy ? '送信中…' : '顧客控えを再印刷'}
         </button>
+
+        {canIssueInvoice && !invoiceFormOpen && !invoiceIssued && (
+          <button
+            onClick={() => setInvoiceFormOpen(true)}
+            className="h-11 w-full rounded-lg border border-border bg-card text-[13.5px] font-semibold"
+          >
+            領収書を発行
+          </button>
+        )}
+
+        {invoiceIssued && (
+          <div className="w-full rounded-lg bg-emerald-50 px-3 py-2.5 text-[12.5px] font-semibold text-emerald-700">
+            領収書を印刷キューに送信しました ✓
+          </div>
+        )}
+
+        {canIssueInvoice && invoiceFormOpen && !invoiceIssued && (
+          <div className="flex w-full flex-col gap-2 rounded-lg border border-border p-3 text-left">
+            <div className="text-[12.5px] font-semibold">領収書の発行</div>
+            <div>
+              <div className="mb-1 text-[11px] text-muted-foreground">宛名 (空欄なら「上様」)</div>
+              <input
+                value={recipientName}
+                onChange={(e) => setRecipientName(e.target.value)}
+                placeholder="上様"
+                className="h-9 w-full rounded-md border border-border px-2.5 text-[12.5px]"
+              />
+            </div>
+            <div>
+              <div className="mb-1 text-[11px] text-muted-foreground">但し書き (空欄なら「お食事代として」)</div>
+              <input
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="お食事代として"
+                className="h-9 w-full rounded-md border border-border px-2.5 text-[12.5px]"
+              />
+            </div>
+            {invoiceError && <div className="text-[11px] text-destructive">{invoiceError}</div>}
+            <div className="flex gap-2">
+              <button
+                onClick={handleIssueInvoice}
+                disabled={invoiceBusy}
+                className="h-9 flex-1 rounded-md bg-primary text-[12.5px] font-semibold text-primary-foreground disabled:opacity-60"
+              >
+                {invoiceBusy ? '発行中…' : '発行する'}
+              </button>
+              <button
+                onClick={() => setInvoiceFormOpen(false)}
+                disabled={invoiceBusy}
+                className="h-9 rounded-md border border-border px-3 text-[12.5px] font-semibold text-muted-foreground disabled:opacity-60"
+              >
+                キャンセル
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

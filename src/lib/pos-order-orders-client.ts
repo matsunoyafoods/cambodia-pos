@@ -182,14 +182,46 @@ export function resetTable(tableCode: string): Promise<{ ok: true; hadOpenOrder:
   return request('/api/pos-order/table-reset', { method: 'POST', body: JSON.stringify({ tableCode }) });
 }
 
-// 厨房伝票・レシートの印刷キューに積む (2026-08-31 プリンター実装で追加)。該当ロールの
-// プリンターが設定・有効化されていなくても静かに printersQueued:0 を返すだけなので、
-// レジ操作の失敗として扱わなくてよい (呼び出し側は catch で握りつぶして良い)。
-export function enqueuePrintJob(input: {
-  role: 'receipt' | 'kitchen';
-  kind: 'receipt' | 'kitchen';
-  content: string;
+// 厨房伝票・レシート・領収書の印刷キューに積む (2026-08-31 プリンター実装で追加。同日、
+// プリンターごとの用紙幅・店舗のヘッダー/フッター文言・ロゴをサーバー側で当てはめるように
+// 変更したため、整形済みテキストではなく元データを渡す形に変更)。該当ロールのプリンターが
+// 設定・有効化されていなくても静かに printersQueued:0 を返すだけなので、レジ操作の失敗として
+// 扱わなくてよい (呼び出し側は catch で握りつぶして良い)。
+type PrintJobResult = { ok: true; printersQueued: number };
+
+export function enqueueKitchenPrintJob(input: {
   orderId?: string;
-}): Promise<{ ok: true; printersQueued: number }> {
-  return request('/api/pos-order/print-jobs', { method: 'POST', body: JSON.stringify(input) });
+  tableCode: string | null;
+  items: { name: string; qty: number; optionsLabel?: string }[];
+}): Promise<PrintJobResult> {
+  return request('/api/pos-order/print-jobs', { method: 'POST', body: JSON.stringify({ kind: 'kitchen', ...input }) });
+}
+
+export function enqueueReceiptPrintJob(input: {
+  orderId?: string;
+  tableCode: string | null;
+  items: { name: string; qty: number; lineTotal: number }[];
+  subtotal: number;
+  vat: number;
+  vatRate: number;
+  vatInclusive: boolean;
+  service: number;
+  serviceRate: number;
+  couponDiscount: number;
+  orderDiscount: number;
+  total: number;
+  payments: { method: 'cash' | 'qr' | 'card'; amount: number }[];
+}): Promise<PrintJobResult> {
+  return request('/api/pos-order/print-jobs', { method: 'POST', body: JSON.stringify({ kind: 'receipt', ...input }) });
+}
+
+// 領収書 (宛名・但し書き入りの正式な領収書) の発行 (2026-08-31 追加)。
+export function enqueueInvoicePrintJob(input: {
+  orderId?: string;
+  recipientName: string;
+  description: string;
+  total: number;
+  invoiceNo: string;
+}): Promise<PrintJobResult> {
+  return request('/api/pos-order/print-jobs', { method: 'POST', body: JSON.stringify({ kind: 'invoice', ...input }) });
 }

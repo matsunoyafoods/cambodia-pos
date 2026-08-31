@@ -64,15 +64,21 @@ async function refreshPrinters() {
   }
 }
 
-// テキストを ESC/POS の初期化 + 用紙カットコマンドで包んで Buffer にする。
-// 日本語(漢字)はプリンターのフォント/コードページによって印字できない場合があります
-// (安価な感熱プリンターは ASCII のみ対応のことが多い) — その場合はテスト印刷で文字化けを
-// 確認の上、レシート文言を英数字中心に変更することを検討してください。
-function toEscPos(text) {
+// テキスト (+ 任意でロゴのラスタービットイメージ) を ESC/POS の初期化 + 用紙カットコマンドで
+// 包んで Buffer にする。日本語(漢字)はプリンターのフォント/コードページによって印字できない
+// 場合があります (安価な感熱プリンターは ASCII のみ対応のことが多い) — その場合はテスト印刷で
+// 文字化けを確認の上、レシート文言を英数字中心に変更することを検討してください。
+//
+// logoBase64 (2026-08-31 追加) は receipt-format.ts 側では組み立てられない生バイナリの
+// ラスターコマンドなので、テキスト本文 (UTF-8) とは別に base64 のまま受け取り、ここで
+// Buffer.from(..., 'base64') に戻してテキストの前に差し込む。UTF-8 経由で結合すると
+// 画像バイトが壊れるため、文字列連結ではなく Buffer.concat で扱う必要がある。
+function toEscPos(text, logoBase64) {
   const ESC_INIT = Buffer.from([0x1b, 0x40]); // ESC @
+  const logo = logoBase64 ? Buffer.from(logoBase64, 'base64') : Buffer.alloc(0);
   const body = Buffer.from(text + '\n\n\n', 'utf8');
   const CUT = Buffer.from([0x1d, 0x56, 0x00]); // GS V 0 (full cut)
-  return Buffer.concat([ESC_INIT, body, CUT]);
+  return Buffer.concat([ESC_INIT, logo, body, CUT]);
 }
 
 function printViaLan(ip, port, data) {
@@ -121,7 +127,7 @@ async function processJob(job) {
     console.warn(`[print-agent] ジョブ ${job.id}: 対応するプリンター設定が見つかりません (無効化されている可能性)。スキップします。`);
     return;
   }
-  const data = toEscPos(job.content);
+  const data = toEscPos(job.content, job.logoBase64);
   try {
     if (printer.connectionType === 'lan') {
       await printViaLan(printer.lanIp, printer.lanPort, data);

@@ -12,7 +12,7 @@ export async function GET(req: Request) {
   const storeId = getPosStoreId();
   const { data, error } = await supabase
     .from('print_jobs')
-    .select('id, printer_id, order_id, kind, content, created_at')
+    .select('id, printer_id, order_id, kind, content, logo_base64, created_at')
     .eq('store_id', storeId)
     .eq('status', 'pending')
     .order('created_at', { ascending: true })
@@ -26,6 +26,8 @@ export async function GET(req: Request) {
       orderId: j.order_id,
       kind: j.kind,
       content: j.content,
+      // ロゴのESC/POSラスターコマンド (base64、Buffer)。未設定ならnull (2026-08-31 追加)
+      logoBase64: j.logo_base64,
       createdAt: j.created_at,
     })),
   });
