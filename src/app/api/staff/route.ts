@@ -10,7 +10,7 @@ export const GET = withPosStaff('manager', async () => {
 
   const { data, error } = await supabase
     .from('staff')
-    .select('id, display_name, role, active, created_at')
+    .select('id, display_name, role, active, hourly_wage_usd, created_at')
     .eq('store_id', storeId)
     .order('created_at');
 
@@ -41,7 +41,7 @@ export const POST = withPosStaff('manager', async (_session, req) => {
   const { data, error } = await supabase
     .from('staff')
     .insert({ store_id: storeId, display_name: displayName, role, pin_hash: pinHash })
-    .select('id, display_name, role, active, created_at')
+    .select('id, display_name, role, active, hourly_wage_usd, created_at')
     .single();
 
   if (error) {

@@ -223,3 +223,51 @@ export const DEFAULT_SETTINGS: PosSettings = {
   happyHourEnd: '19:00',
   menuImageStyle: 'compact',
 };
+
+// ---------- 経費管理 (2026-08-31 追加。データ収集・AI分析機能 第一弾) ----------
+
+/** よく使う仕入れ先・買い物先の候補一覧 (owner/manager が登録)。 */
+export type ExpenseVendor = { id: string; name: string; sortOrder: number };
+
+/** 経費項目 (雑費・仕入れ等) の候補一覧 (owner/manager が登録)。 */
+export type ExpenseCategory = { id: string; name: string; sortOrder: number };
+
+export type ExpensePaymentStatus = 'paid' | 'unpaid';
+
+export type ExpenseRecord = {
+  id: string;
+  date: string; // 'YYYY-MM-DD'
+  amountUsd: number;
+  /** 経費項目 (雑費・仕入れ等)。自由文字列のスナップショット (ExpenseCategory は候補一覧に過ぎない) */
+  category: string;
+  /** 仕入れ先・買い物先。自由文字列のスナップショット (未入力可) */
+  vendor: string | null;
+  note: string | null;
+  /** 'unpaid' = 買掛 (まだ支払っていない)。paidAt を入れて 'paid' に精算できる。 */
+  paymentStatus: ExpensePaymentStatus;
+  paidAt: string | null;
+  receiptImageUrl: string | null;
+  createdBy: string | null;
+  createdAt: string;
+};
+
+// ---------- 勤怠・人件費 (2026-08-31 追加。データ収集・AI分析機能 第一弾) ----------
+// シフト作成機能は含めない (Tom確認済み)。出勤・休憩・退勤の記録のみ。
+
+/** 1回の休憩。endedAt が null = 休憩中。 */
+export type TimecardBreak = { startedAt: string; endedAt: string | null };
+
+export type TimecardRecord = {
+  id: string;
+  staffId: string;
+  staffName: string;
+  clockIn: string;
+  clockOut: string | null;
+  breaks: TimecardBreak[];
+  note: string | null;
+  editedBy: string | null;
+  editedAt: string | null;
+};
+
+/** 打刻の現在状態 (自分の勤怠画面のボタン出し分け用)。 */
+export type TimecardStatus = 'not_clocked_in' | 'working' | 'on_break' | 'clocked_out';

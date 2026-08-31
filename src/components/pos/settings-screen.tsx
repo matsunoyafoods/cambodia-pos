@@ -20,6 +20,7 @@ import {
   createStaff,
   listStaff,
   resetStaffPin,
+  updateStaffWage,
   PosStaffApiError,
   type PosStaffMember,
   type PosStaffRole,
@@ -1481,6 +1482,7 @@ function StaffTab() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [resetTargetId, setResetTargetId] = useState<string | null>(null);
+  const [wageTargetId, setWageTargetId] = useState<string | null>(null);
 
   const load = useCallback(() => {
     setLoadError(null);
@@ -1556,16 +1558,36 @@ function StaffTab() {
                 <div className="text-[11.5px] text-muted-foreground">
                   {ROLE_LABEL[s.role]}
                   {s.active === false && ' ・ 無効'}
+                  {s.hourly_wage_usd != null && ` ・ 時給 $${s.hourly_wage_usd.toFixed(2)}`}
                 </div>
               </div>
             </div>
-            <button
-              onClick={() => setResetTargetId((v) => (v === s.id ? null : s.id))}
-              className="h-8 rounded-lg border border-border px-3 text-xs font-semibold"
-            >
-              PINをリセット
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setWageTargetId((v) => (v === s.id ? null : s.id))}
+                className="h-8 rounded-lg border border-border px-3 text-xs font-semibold"
+              >
+                時給を設定
+              </button>
+              <button
+                onClick={() => setResetTargetId((v) => (v === s.id ? null : s.id))}
+                className="h-8 rounded-lg border border-border px-3 text-xs font-semibold"
+              >
+                PINをリセット
+              </button>
+            </div>
           </div>
+          {wageTargetId === s.id && (
+            <WageEditForm
+              staffId={s.id}
+              currentWage={s.hourly_wage_usd ?? null}
+              onDone={(updated) => {
+                setWageTargetId(null);
+                setStaffList((prev) => (prev ? prev.map((x) => (x.id === updated.id ? updated : x)) : prev));
+              }}
+              onCancel={() => setWageTargetId(null)}
+            />
+          )}
           {resetTargetId === s.id && (
             <ResetPinForm
               staffId={s.id}
@@ -1575,6 +1597,66 @@ function StaffTab() {
         </div>
       ))}
     </div>
+  );
+}
+
+// 時給の設定フォーム (2026-08-31 追加。人件費レポートで時給×勤務時間から人件費を概算するため)。
+function WageEditForm({
+  staffId,
+  currentWage,
+  onDone,
+  onCancel,
+}: {
+  staffId: string;
+  currentWage: number | null;
+  onDone: (updated: PosStaffMember) => void;
+  onCancel: () => void;
+}) {
+  const [wage, setWage] = useState(currentWage != null ? String(currentWage) : '');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const trimmed = wage.trim();
+    const value = trimmed === '' ? null : Number(trimmed);
+    if (value !== null && (!(value >= 0) || Number.isNaN(value))) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const { staff } = await updateStaffWage(staffId, value);
+      onDone(staff);
+    } catch (err) {
+      setError(err instanceof PosStaffApiError ? err.message : '時給の更新に失敗しました');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="mt-3 flex items-center gap-2 border-t border-border pt-3">
+      <span className="text-xs text-muted-foreground">$</span>
+      <input
+        type="number"
+        min="0"
+        step="0.01"
+        value={wage}
+        onChange={(e) => setWage(e.target.value)}
+        placeholder="例: 2.50 (空欄で未設定に戻す)"
+        className="h-9 w-52 rounded-lg border border-border px-3 text-[13px]"
+      />
+      <button
+        type="submit"
+        disabled={submitting}
+        className="h-9 rounded-lg bg-primary px-3 text-xs font-semibold text-primary-foreground disabled:opacity-60"
+      >
+        {submitting ? '更新中…' : '更新'}
+      </button>
+      <button type="button" onClick={onCancel} className="h-9 rounded-lg border border-border px-3 text-xs font-semibold">
+        キャンセル
+      </button>
+      {error && <div className="text-xs text-destructive">{error}</div>}
+    </form>
   );
 }
 

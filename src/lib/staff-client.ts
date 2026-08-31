@@ -49,6 +49,8 @@ export type PosStaffMember = {
   display_name: string;
   role: PosStaffRole;
   active?: boolean;
+  /** 時給 (USD)。未設定 = null (2026-08-31 追加。人件費レポート用) */
+  hourly_wage_usd?: number | null;
   created_at?: string;
 };
 
@@ -101,5 +103,13 @@ export function resetStaffPin(staffId: string, pin: string): Promise<{ staff: Po
   return request(`/api/staff/${staffId}/reset-pin`, {
     method: 'POST',
     body: JSON.stringify({ pin }),
+  });
+}
+
+// 時給の設定 (2026-08-31 追加。人件費レポート用)。
+export function updateStaffWage(staffId: string, hourlyWageUsd: number | null): Promise<{ staff: PosStaffMember }> {
+  return request(`/api/staff/${staffId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ hourlyWageUsd }),
   });
 }

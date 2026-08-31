@@ -979,6 +979,18 @@ export function PosApp() {
                     QRコード印刷
                   </button>
                   <button
+                    onClick={() => router.push('/pos/expenses')}
+                    className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary"
+                  >
+                    経費
+                  </button>
+                  <button
+                    onClick={() => router.push('/pos/timecard')}
+                    className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary"
+                  >
+                    勤怠
+                  </button>
+                  <button
                     onClick={() => router.push('/pos/register-closing')}
                     className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary"
                   >
