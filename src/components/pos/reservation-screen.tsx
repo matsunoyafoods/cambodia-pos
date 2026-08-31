@@ -32,144 +32,140 @@ type StepField =
   | { kind: 'date'; key: string; required?: boolean }
   | { kind: 'time'; key: string; required?: boolean }
   | { kind: 'select'; key: string; options: { value: string; label: string }[]; required?: boolean }
-  | { kind: 'textarea'; key: string; required?: boolean };
+  | { kind: 'textarea'; key: string; required?: boolean }
+  // 電話を受けた時点ではまだ「どの予約種類か」がわからないため、種類選択は通常の質問より後
+  // (基本情報を全て聞き終えた最後) に置く専用ステップ。声かけ文言は無く、スタッフがその場で
+  // 分類するだけの内部ステップ (2026-08-31 追加。Tomさんの要望「電話に出る時はまだどの
+  // カテゴリーかわからないので、選択は電話で聞くの最後に出して欲しい」)。
+  | { kind: 'type-select' };
 
 type Step = {
   id: string;
-  script: string; // お客様への声かけ文言 (このままお読みください)
+  script?: string; // お客様への声かけ文言 (このままお読みください)。type-select ステップには無い
   note?: string; // スタッフ向けの注意事項 (声かけ文言ではない)
   field: StepField;
 };
 
-function buildSteps(type: ReservationType): Step[] {
-  const common: Step[] = [
-    {
-      id: 'customerName',
-      script: 'お電話ありがとうございます。I\'mHungryでございます。ご予約のお名前を頂戴できますでしょうか？',
-      field: { kind: 'text', key: 'customerName', placeholder: '例: 田中様', required: true },
-    },
-    {
-      id: 'phone',
-      script: 'ありがとうございます。念のため、当日ご連絡が取れるお電話番号を教えていただけますか？',
-      field: { kind: 'tel', key: 'phone', placeholder: '例: 012-345-678' },
-    },
-    {
-      id: 'partySize',
-      script: 'ご来店の人数は何名様でしょうか？',
-      field: { kind: 'number', key: 'partySize', min: 1, max: 500, required: true },
-    },
-  ];
-
-  const dateStep: Step =
-    type === 'tenderloin_block'
-      ? {
-          id: 'reservationDate',
-          script:
-            'ご来店希望の日付を教えてください。なお、こちらの商品は前日までのご予約が必要となりますので、あらかじめご了承ください。',
-          note: '⚠ 前日までの予約制。当日希望の場合はお受けできない旨を必ず伝える。',
-          field: { kind: 'date', key: 'reservationDate', required: true },
-        }
-      : type === 'birthday_room'
-        ? {
-            id: 'reservationDate',
-            script:
-              'ご来店希望の日付を教えてください。こちらの個室特典は、1日前までのご予約制となっております。',
-            note: '⚠ 1日前までの予約制。',
-            field: { kind: 'date', key: 'reservationDate', required: true },
-          }
-        : type === 'group'
-          ? {
-              id: 'reservationDate',
-              script:
-                'ご来店希望の日付を教えてください。団体でのご予約は、当日のお申し込みはお受けできかねます。前日までにご連絡いただけますと幸いです。',
-              note: '⚠ 当日予約不可。事前予約のみ。',
-              field: { kind: 'date', key: 'reservationDate', required: true },
-            }
-          : {
-              id: 'reservationDate',
-              script: 'ご来店希望の日付を教えてください。',
-              field: { kind: 'date', key: 'reservationDate', required: true },
-            };
-
-  const timeStep: Step = {
+// 共通の基本情報。電話を取った直後、まだ予約の種類がわからない段階で聞ける質問だけをここに
+// 置く (お名前・電話番号・人数・来店日・時間・備考)。種類ごとに文言を出し分けていた来店日の
+// 「前日までの予約制です」等の案内は、種類がわかった後 (typeSpecificSteps) に移動した。
+const COMMON_STEPS: Step[] = [
+  {
+    id: 'customerName',
+    script: 'お電話ありがとうございます。I\'mHungryでございます。ご予約のお名前を頂戴できますでしょうか？',
+    field: { kind: 'text', key: 'customerName', placeholder: '例: 田中様', required: true },
+  },
+  {
+    id: 'phone',
+    script: 'ありがとうございます。念のため、当日ご連絡が取れるお電話番号を教えていただけますか？',
+    field: { kind: 'tel', key: 'phone', placeholder: '例: 012-345-678' },
+  },
+  {
+    id: 'partySize',
+    script: 'ご来店の人数は何名様でしょうか？',
+    field: { kind: 'number', key: 'partySize', min: 1, max: 500, required: true },
+  },
+  {
+    id: 'reservationDate',
+    script: 'ご来店希望の日付を教えてください。',
+    field: { kind: 'date', key: 'reservationDate', required: true },
+  },
+  {
     id: 'reservationTime',
     script: 'ご来店のお時間は何時頃をご希望でしょうか？',
     field: { kind: 'time', key: 'reservationTime' },
-  };
-
-  const typeSpecific: Step[] =
-    type === 'tenderloin_block'
-      ? [
-          {
-            id: 'cut',
-            script:
-              'テンダーロインブロックは、テンダーロインステーキ(オーストラリア産)と、USプレミアムテンダーロインの2種類がございます。どちらになさいますか？',
-            field: {
-              kind: 'select',
-              key: 'cut',
-              required: true,
-              options: [
-                { value: 'AU', label: 'テンダーロインステーキ(オーストラリア産)' },
-                { value: 'US', label: 'US プレミアムテンダーロイン' },
-              ],
-            },
-          },
-          {
-            id: 'weight',
-            script: 'グラム数は1000gと1500gからお選びいただけます。どちらになさいますか？',
-            field: {
-              kind: 'select',
-              key: 'weight',
-              required: true,
-              options: [
-                { value: '1000g', label: '1000g' },
-                { value: '1500g', label: '1500g' },
-              ],
-            },
-          },
-        ]
-      : type === 'birthday_room'
-        ? [
-            {
-              id: 'occasion',
-              script: '本日はどのようなお祝い事でのご利用でしょうか？(お誕生日など)',
-              field: { kind: 'text', key: 'occasion', placeholder: '例: 奥様のお誕生日' },
-            },
-            {
-              id: 'decoration_request',
-              script: 'お部屋の飾り付けにご希望はございますか？ご予算に応じて対応させていただきます。',
-              field: { kind: 'text', key: 'decoration_request', placeholder: '例: 風船・お花など' },
-            },
-          ]
-        : type === 'group'
-          ? [
-              {
-                id: 'budget_per_person',
-                script:
-                  'お一人様あたりのご予算はおいくらくらいでお考えでしょうか？1名様$20〜のプランをご用意しております。',
-                field: { kind: 'number', key: 'budget_per_person', min: 1, max: 1000 },
-              },
-              {
-                id: 'purpose',
-                script: 'どのようなお集まりでのご利用でしょうか？(歓送迎会・宴会など)',
-                field: { kind: 'text', key: 'purpose', placeholder: '例: 会社の歓送迎会' },
-              },
-            ]
-          : [
-              {
-                id: 'seating_request',
-                script: 'お座席のご希望はございますか？(お座敷・テーブル席など)',
-                field: { kind: 'text', key: 'seating_request', placeholder: '任意' },
-              },
-            ];
-
-  const notesStep: Step = {
+  },
+  {
     id: 'notes',
     script: '最後に、アレルギーやその他ご要望がございましたら教えてください。',
     field: { kind: 'textarea', key: 'notes' },
-  };
+  },
+];
 
-  return [...common, dateStep, timeStep, ...typeSpecific, notesStep];
+const TYPE_SELECT_STEP: Step = { id: 'reservationType', field: { kind: 'type-select' } };
+
+// 予約の種類がわかった後だけ聞く追加質問。前日までの予約制などの案内は、既に伺った来店日
+// (reservationDate) を踏まえてこの時点で確認する形にした (以前は来店日を聞く時点で種類ごとに
+// 文言を出し分けていたが、種類選択がその質問より後になったため)。
+function typeSpecificSteps(type: ReservationType, reservationDate: string): Step[] {
+  const dateLabel = reservationDate || '(未入力)';
+  switch (type) {
+    case 'tenderloin_block':
+      return [
+        {
+          id: 'cut',
+          script:
+            'テンダーロインブロックは、テンダーロインステーキ(オーストラリア産)と、USプレミアムテンダーロインの2種類がございます。どちらになさいますか？',
+          note: `⚠ こちらの商品は前日までのご予約が必要です。伺った来店日(${dateLabel})が前日以前かご確認ください。間に合わない場合はお客様にその旨をお伝えください。`,
+          field: {
+            kind: 'select',
+            key: 'cut',
+            required: true,
+            options: [
+              { value: 'AU', label: 'テンダーロインステーキ(オーストラリア産)' },
+              { value: 'US', label: 'US プレミアムテンダーロイン' },
+            ],
+          },
+        },
+        {
+          id: 'weight',
+          script: 'グラム数は1000gと1500gからお選びいただけます。どちらになさいますか？',
+          field: {
+            kind: 'select',
+            key: 'weight',
+            required: true,
+            options: [
+              { value: '1000g', label: '1000g' },
+              { value: '1500g', label: '1500g' },
+            ],
+          },
+        },
+      ];
+    case 'birthday_room':
+      return [
+        {
+          id: 'occasion',
+          script: '本日はどのようなお祝い事でのご利用でしょうか？(お誕生日など)',
+          note: `⚠ 個室特典は1日前までのご予約制です。伺った来店日(${dateLabel})で間に合うかご確認ください。`,
+          field: { kind: 'text', key: 'occasion', placeholder: '例: 奥様のお誕生日' },
+        },
+        {
+          id: 'decoration_request',
+          script: 'お部屋の飾り付けにご希望はございますか？ご予算に応じて対応させていただきます。',
+          field: { kind: 'text', key: 'decoration_request', placeholder: '例: 風船・お花など' },
+        },
+      ];
+    case 'group':
+      return [
+        {
+          id: 'budget_per_person',
+          script:
+            'お一人様あたりのご予算はおいくらくらいでお考えでしょうか？1名様$20〜のプランをご用意しております。',
+          note: `⚠ 団体でのご予約は当日のお申し込みはお受けできません。伺った来店日(${dateLabel})が前日以前かご確認ください。`,
+          field: { kind: 'number', key: 'budget_per_person', min: 1, max: 1000 },
+        },
+        {
+          id: 'purpose',
+          script: 'どのようなお集まりでのご利用でしょうか？(歓送迎会・宴会など)',
+          field: { kind: 'text', key: 'purpose', placeholder: '例: 会社の歓送迎会' },
+        },
+      ];
+    default:
+      return [
+        {
+          id: 'seating_request',
+          script: 'お座席のご希望はございますか？(お座敷・テーブル席など)',
+          field: { kind: 'text', key: 'seating_request', placeholder: '任意' },
+        },
+      ];
+  }
+}
+
+// ウィザード全体のステップ列。type がまだ null (種類未選択) の間は「基本情報 + 種類選択」まで、
+// 種類が決まったら種類別の追加質問が続く (buildSteps 呼び出し側で type を都度渡す)。
+function buildSteps(type: ReservationType | null, reservationDate: string): Step[] {
+  if (!type) return [...COMMON_STEPS, TYPE_SELECT_STEP];
+  return [...COMMON_STEPS, TYPE_SELECT_STEP, ...typeSpecificSteps(type, reservationDate)];
 }
 
 const DETAIL_KEYS = ['cut', 'weight', 'occasion', 'decoration_request', 'budget_per_person', 'purpose', 'seating_request'];
@@ -186,12 +182,14 @@ const DETAIL_LABELS: Record<string, string> = {
 
 export function ReservationScreen() {
   const router = useRouter();
-  const [mode, setMode] = useState<'list' | 'select-type' | 'wizard' | 'done'>('list');
+  const [mode, setMode] = useState<'list' | 'wizard' | 'done'>('list');
   const [reservations, setReservations] = useState<ReservationRecord[]>([]);
   const [listLoading, setListLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
 
-  const [type, setType] = useState<ReservationType>('normal');
+  // 電話を取った時点では種類がわからないため、初期値は未選択 (null)。基本情報を聞き終えた
+  // 最後のステップ (TYPE_SELECT_STEP) でスタッフが選択するまで null のまま。
+  const [type, setType] = useState<ReservationType | null>(null);
   const [stepIndex, setStepIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
@@ -214,38 +212,47 @@ export function ReservationScreen() {
     setAnswers({});
     setStepIndex(0);
     setSubmitError(null);
-    setMode('select-type');
-  }
-
-  function pickType(t: ReservationType) {
-    setType(t);
-    setStepIndex(0);
-    setAnswers({});
+    setType(null);
     setMode('wizard');
   }
 
-  const steps = buildSteps(type);
+  // 種類選択ステップでボタンを押した瞬間に type を確定し、次のステップへ進む
+  // (他の選択肢と違い「次へ」を別途押させない — 元の「種類選択→即ウィザード開始」の操作感を踏襲)。
+  function chooseType(t: ReservationType) {
+    setType(t);
+    setStepIndex((i) => i + 1);
+  }
+
+  const steps = buildSteps(type, answers.reservationDate ?? '');
   const isSummary = stepIndex >= steps.length;
   const step = !isSummary ? steps[stepIndex] : null;
 
   function currentValue(): string {
-    if (!step) return '';
+    if (!step || step.field.kind === 'type-select') return '';
     return answers[step.field.key] ?? '';
   }
 
   function setValue(v: string) {
-    if (!step) return;
-    setAnswers((prev) => ({ ...prev, [step.field.key]: v }));
+    if (!step || step.field.kind === 'type-select') return;
+    const key = step.field.key;
+    setAnswers((prev) => ({ ...prev, [key]: v }));
   }
 
   function canProceed(): boolean {
     if (!step) return true;
+    if (step.field.kind === 'type-select') return type !== null;
     const required = 'required' in step.field ? !!step.field.required : false;
     if (!required) return true;
     return currentValue().trim().length > 0;
   }
 
   async function handleConfirm() {
+    // 確認画面 (isSummary) に到達する時点では、必ず種類選択ステップを通過済み
+    // (canProceed が type!==null を要求する) なので type は non-null のはずだが、念のためガードする。
+    if (!type) {
+      setSubmitError('予約の種類が選択されていません。前の画面に戻って選択してください。');
+      return;
+    }
     setSubmitting(true);
     setSubmitError(null);
     try {
@@ -359,26 +366,37 @@ export function ReservationScreen() {
           </div>
         )}
 
-        {mode === 'select-type' && (
+        {mode === 'wizard' && step && step.field.kind === 'type-select' && (
           <div className="mx-auto flex max-w-[640px] flex-col gap-3">
-            <div className="text-[15px] font-bold">どの予約を受け付けますか？</div>
+            <div className="text-[11.5px] font-semibold text-muted-foreground">
+              基本情報の確認完了 ・ 最後にご予約の種類を選択してください
+            </div>
+            <div className="text-[15px] font-bold">どの予約として受け付けますか？</div>
             {(Object.keys(TYPE_LABEL) as ReservationType[]).map((t) => (
               <button
                 key={t}
-                onClick={() => pickType(t)}
+                onClick={() => chooseType(t)}
                 className="rounded-xl border border-border bg-card p-4 text-left hover:border-primary"
               >
                 <div className="text-[14px] font-bold">{TYPE_LABEL[t]}</div>
                 <div className="mt-0.5 text-[12px] text-muted-foreground">{TYPE_DESC[t]}</div>
               </button>
             ))}
+            <div className="mt-1 flex justify-start">
+              <button
+                onClick={() => setStepIndex((i) => Math.max(0, i - 1))}
+                className="h-11 rounded-lg border border-border px-5 text-[13px] font-semibold"
+              >
+                戻る
+              </button>
+            </div>
           </div>
         )}
 
-        {mode === 'wizard' && step && (
+        {mode === 'wizard' && step && step.field.kind !== 'type-select' && (
           <div className="mx-auto flex max-w-[560px] flex-col gap-4">
             <div className="text-[11.5px] font-semibold text-muted-foreground">
-              {TYPE_LABEL[type]} ・ {stepIndex + 1} / {steps.length + 1}
+              {type ? TYPE_LABEL[type] : '基本情報のヒアリング'} ・ {stepIndex + 1} / {steps.length + 1}
             </div>
             <div className="rounded-xl border border-primary/30 bg-primary/5 p-4">
               <div className="text-[11px] font-semibold text-primary">お客様への声かけ</div>
@@ -424,7 +442,7 @@ export function ReservationScreen() {
               </div>
             </div>
             <div className="rounded-xl border border-border p-4 text-[12.5px] leading-relaxed">
-              <div className="font-bold">{TYPE_LABEL[type]}</div>
+              <div className="font-bold">{type ? TYPE_LABEL[type] : '-'}</div>
               <div className="mt-2 grid grid-cols-2 gap-y-1.5">
                 <div className="text-muted-foreground">お名前</div>
                 <div>{answers.customerName || '-'}</div>
@@ -437,7 +455,7 @@ export function ReservationScreen() {
                   {answers.reservationDate || '-'} {answers.reservationTime || ''}
                 </div>
                 {DETAIL_KEYS.filter((k) => answers[k]).map((k) => {
-                  const stepField = steps.find((s) => s.field.key === k)?.field;
+                  const stepField = steps.find((s) => s.field.kind !== 'type-select' && s.field.key === k)?.field;
                   const displayValue =
                     stepField?.kind === 'select'
                       ? (stepField.options.find((o) => o.value === answers[k])?.label ?? answers[k])
