@@ -10,7 +10,7 @@ export const GET = withPosStaff('manager', async () => {
 
   const { data, error } = await supabase
     .from('menu_items')
-    .select('id, category_id, name, price, active, sort_order, image_url')
+    .select('id, category_id, name, price, happy_hour_price, active, sort_order, image_url')
     .eq('store_id', storeId)
     .order('sort_order')
     .order('name');
@@ -25,6 +25,8 @@ const createSchema = z.object({
   categoryId: z.string().uuid().nullable().optional(),
   name: z.string().trim().min(1).max(80),
   price: z.number().nonnegative(),
+  // 省略/null = ハッピーアワー対象外。指定時はハッピーアワー中だけこの価格になる。
+  happyHourPrice: z.number().nonnegative().nullable().optional(),
 });
 
 // 新規商品登録。並び順は同一カテゴリ内の末尾に自動追加。manager 以上のみ。
@@ -60,9 +62,10 @@ export const POST = withPosStaff('manager', async (_session, req) => {
       category_id: categoryId,
       name: parsed.data.name,
       price: parsed.data.price,
+      happy_hour_price: parsed.data.happyHourPrice ?? null,
       sort_order: nextSortOrder,
     })
-    .select('id, category_id, name, price, active, sort_order, image_url')
+    .select('id, category_id, name, price, happy_hour_price, active, sort_order, image_url')
     .single();
 
   if (error) {

@@ -31,6 +31,7 @@ import {
   type TableSessionRecord,
 } from '@/lib/table-session-client';
 import { effectiveBasePrice, isHappyHourNow } from '@/lib/happy-hour';
+import { cartLineNetTotal } from '@/lib/cart';
 import { computeChange } from '@/lib/money';
 import { logoutPosStaff } from '@/lib/staff-client';
 import { useStaff } from './staff-context';
@@ -94,14 +95,22 @@ export function PosApp() {
   const [completing, setCompleting] = useState(false);
   const [completeError, setCompleteError] = useState<string | null>(null);
 
-  // メニュー・カテゴリ一覧は初出順を維持して抽出 (matsunoya-dine 側のカテゴリ表示順に合わせる)
+  // pos_native モード: レジ画面タブの並び順はサーバーが返す大カテゴリーの sort_order 順
+  // (setPosNativeCategoryOrder、設定画面から自由に並び替え可能 2026-08-31) をそのまま使う。
+  // dine_live (matsunoya-dine 連携) モードはそのような並び順情報が無いため、従来通り
+  // メニューに商品が初めて出てきた順で代用する。
+  const [posNativeCategoryOrder, setPosNativeCategoryOrder] = useState<string[] | null>(null);
   const categories = useMemo(() => {
+    if (posNativeCategoryOrder) {
+      const present = new Set(menu.map((m) => m.category));
+      return posNativeCategoryOrder.filter((c) => present.has(c));
+    }
     const seen: string[] = [];
     for (const m of menu) {
       if (!seen.includes(m.category)) seen.push(m.category);
     }
     return seen;
-  }, [menu]);
+  }, [menu, posNativeCategoryOrder]);
 
   // Phase C: まず /api/pos-order/mode (POS_STORE_ID 店舗の pos.integrations.menu_source) を見て、
   // 'pos_native' なら POS ネイティブの実データ (pos.menu_items 等) を、それ以外 (未移行 = 'dine_live')
@@ -131,6 +140,7 @@ export function PosApp() {
           ]);
           if (cancelled) return;
           setMenu(menuData.items);
+          setPosNativeCategoryOrder(menuData.categories);
           setSettings((prev) => ({ ...prev, ...settingsData }));
           setLayoutItems(layoutData.items);
           setTableSessions(sessionsData.items);
@@ -148,6 +158,7 @@ export function PosApp() {
               return { ...m, category, minorCategory: category };
             }),
           );
+          setPosNativeCategoryOrder(null);
           setSettings((prev) => ({ ...prev, ...settingsData }));
           setLayoutItems(layoutData.items);
           setTableSessions(sessionsData.items);
@@ -260,7 +271,8 @@ export function PosApp() {
     // 確定済み (サーバーに保存済み、注文確定/会計へ進むを押した分) + 未確定 (このラウンドの
     // カート) を合算して計算する。
     const confirmedSubtotal = confirmedItems.reduce((s, it) => s + it.line_total, 0);
-    const cartSubtotal = cart.reduce((s, l) => s + l.unitPrice * l.qty, 0);
+    // カートの各ラインの急遽の値引き (cartLineDiscount) を反映した金額で合算する。
+    const cartSubtotal = cart.reduce((s, l) => s + cartLineNetTotal(l), 0);
     const subtotal = confirmedSubtotal + cartSubtotal;
     // 税込み(内税)設定の場合、メニュー価格に既にVATが含まれているものとして扱う。
     // VAT額は内訳表示用にsubtotalから逆算するだけで、合計には加算しない
@@ -332,6 +344,17 @@ export function PosApp() {
   }
   function decLine(id: string) {
     setCart((prev) => prev.map((l) => (l.id === id ? { ...l, qty: l.qty - 1 } : l)).filter((l) => l.qty > 0));
+  }
+
+  // カートのライン (未確定分) に急遽の値引きを設定・解除する。「注文確定」して厨房送信済みに
+  // なったライン (confirmedItems) は後から値引きできない (既に厨房・伝票に確定済みのため)。
+  // discount=null で値引き解除。
+  function setLineDiscount(id: string, discount: { type: 'percent' | 'fixed'; value: number } | null) {
+    setCart((prev) =>
+      prev.map((l) =>
+        l.id === id ? { ...l, discountType: discount?.type, discountValue: discount?.value } : l,
+      ),
+    );
   }
 
   // オプション選択が必要な商品ならモーダルを開き、不要ならそのままカートに追加する。
@@ -633,6 +656,7 @@ export function PosApp() {
           onAddItem={onAddItem}
           onInc={incLine}
           onDec={decLine}
+          onSetDiscount={setLineDiscount}
           onConfirmOrder={confirmPendingCart}
           confirming={confirming}
           confirmError={confirmError}

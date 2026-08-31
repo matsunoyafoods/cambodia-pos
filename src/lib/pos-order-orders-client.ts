@@ -4,6 +4,7 @@
  */
 
 import type { CartLine, GuestEthnicity } from '@/lib/pos-types';
+import { cartLineDiscountLabel, cartLineNetTotal } from '@/lib/cart';
 
 export class PosOrderOrdersApiError extends Error {
   constructor(
@@ -79,14 +80,21 @@ export function confirmOrderItems(
   return request(`/api/pos-order/orders/${orderId}/items`, {
     method: 'POST',
     body: JSON.stringify({
-      items: items.map((l) => ({
-        menuId: l.menuId,
-        menuName: l.name,
-        qty: l.qty,
-        unitPrice: l.unitPrice,
-        selectedOptions: l.selectedOptions,
-        lineTotal: l.unitPrice * l.qty,
-      })),
+      // 急遽の値引き (cartLineDiscount) が入っているラインは、値引き後の金額を lineTotal と
+      // して送る (厨房伝票・会計・pos.orders の集計は全てこの line_total を積み上げて出すため、
+      // ここで反映しておけば他の画面・APIは変更不要)。menuName にも値引きラベルを付けて、
+      // 後から伝票を見た時にどのラインへ・どんな値引きが入ったか分かるようにする。
+      items: items.map((l) => {
+        const discountLabel = cartLineDiscountLabel(l);
+        return {
+          menuId: l.menuId,
+          menuName: discountLabel ? `${l.name} [${discountLabel}]` : l.name,
+          qty: l.qty,
+          unitPrice: l.unitPrice,
+          selectedOptions: l.selectedOptions,
+          lineTotal: cartLineNetTotal(l),
+        };
+      }),
     }),
   });
 }

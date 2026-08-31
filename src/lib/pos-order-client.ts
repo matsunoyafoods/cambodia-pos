@@ -47,7 +47,10 @@ export function getPosOrderMode(): Promise<{ menuSource: PosOrderMenuSource }> {
   return request('/api/pos-order/mode');
 }
 
-export function getPosOrderMenu(): Promise<{ items: MenuItem[] }> {
+// categories: 大カテゴリー名を settings 側の並び順 (sort_order) 通りに並べたもの。
+// レジ画面のタブ順はこの並びに従う (Tomさんの要望: 設定画面から大カテゴリーの並び順を
+// 自由に変更できるようにする 2026-08-31)。
+export function getPosOrderMenu(): Promise<{ items: MenuItem[]; categories: string[] }> {
   return request('/api/pos-order/menu');
 }
 

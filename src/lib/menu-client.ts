@@ -43,6 +43,8 @@ export type PosMenuItemRecord = {
   category_id: string | null;
   name: string;
   price: number;
+  /** ハッピーアワー中だけ適用される価格。null/未設定 = ハッピーアワー対象外 */
+  happy_hour_price: number | null;
   active: boolean;
   sort_order: number;
   image_url: string | null;
@@ -64,6 +66,10 @@ export function reparentMenuCategory(id: string, parentId: string | null): Promi
   return request(`/api/menu/categories/${id}`, { method: 'PATCH', body: JSON.stringify({ parentId }) });
 }
 
+export function reorderMenuCategory(id: string, sortOrder: number): Promise<{ category: PosMenuCategory }> {
+  return request(`/api/menu/categories/${id}`, { method: 'PATCH', body: JSON.stringify({ sortOrder }) });
+}
+
 export function deleteMenuCategory(id: string): Promise<{ ok: boolean }> {
   return request(`/api/menu/categories/${id}`, { method: 'DELETE' });
 }
@@ -72,7 +78,12 @@ export function listMenuItems(): Promise<{ items: PosMenuItemRecord[] }> {
   return request('/api/menu/items');
 }
 
-export function createMenuItem(input: { categoryId: string | null; name: string; price: number }): Promise<{
+export function createMenuItem(input: {
+  categoryId: string | null;
+  name: string;
+  price: number;
+  happyHourPrice?: number | null;
+}): Promise<{
   item: PosMenuItemRecord;
 }> {
   return request('/api/menu/items', { method: 'POST', body: JSON.stringify(input) });
@@ -80,7 +91,7 @@ export function createMenuItem(input: { categoryId: string | null; name: string;
 
 export function updateMenuItem(
   id: string,
-  patch: Partial<{ categoryId: string | null; name: string; price: number; active: boolean }>,
+  patch: Partial<{ categoryId: string | null; name: string; price: number; active: boolean; happyHourPrice: number | null }>,
 ): Promise<{ item: PosMenuItemRecord }> {
   return request(`/api/menu/items/${id}`, { method: 'PATCH', body: JSON.stringify(patch) });
 }

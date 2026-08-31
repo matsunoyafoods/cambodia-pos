@@ -9,11 +9,13 @@ const updateSchema = z.object({
   categoryId: z.string().uuid().nullable().optional(),
   name: z.string().trim().min(1).max(80).optional(),
   price: z.number().nonnegative().optional(),
+  // null = ハッピーアワー対象外に戻す。省略 = 変更しない。
+  happyHourPrice: z.number().nonnegative().nullable().optional(),
   active: z.boolean().optional(),
   sortOrder: z.number().int().optional(),
 });
 
-// 商品更新 (名前 / 価格 / カテゴリ / 販売中フラグ / 並び順)。manager 以上のみ。
+// 商品更新 (名前 / 価格 / ハッピーアワー価格 / カテゴリ / 販売中フラグ / 並び順)。manager 以上のみ。
 export const PATCH = withPosStaff('manager', async (_session, req, ctx: RouteContext) => {
   const { id } = await ctx.params;
   const json = await req.json().catch(() => null);
@@ -28,6 +30,7 @@ export const PATCH = withPosStaff('manager', async (_session, req, ctx: RouteCon
   if (parsed.data.categoryId !== undefined) patch.category_id = parsed.data.categoryId;
   if (parsed.data.name !== undefined) patch.name = parsed.data.name;
   if (parsed.data.price !== undefined) patch.price = parsed.data.price;
+  if (parsed.data.happyHourPrice !== undefined) patch.happy_hour_price = parsed.data.happyHourPrice;
   if (parsed.data.active !== undefined) patch.active = parsed.data.active;
   if (parsed.data.sortOrder !== undefined) patch.sort_order = parsed.data.sortOrder;
   patch.updated_at = new Date().toISOString();
@@ -37,7 +40,7 @@ export const PATCH = withPosStaff('manager', async (_session, req, ctx: RouteCon
     .update(patch)
     .eq('id', id)
     .eq('store_id', storeId)
-    .select('id, category_id, name, price, active, sort_order, image_url')
+    .select('id, category_id, name, price, happy_hour_price, active, sort_order, image_url')
     .maybeSingle();
 
   if (error) {

@@ -34,6 +34,7 @@ import {
   listMenuItems,
   listMenuOptionGroups,
   renameMenuCategory,
+  reorderMenuCategory,
   updateMenuItem,
   updateMenuOptionChoice,
   updateMenuOptionGroup,
@@ -668,6 +669,27 @@ function MenuTab() {
     }
   }
 
+  // 大カテゴリーの並び替え (レジ画面タブの表示順 = 大カテゴリーの sort_order)。
+  // 隣り合う大カテゴリーと sort_order を入れ替えるだけなので、他の大カテゴリーの
+  // 並び順には影響しない。2026-08-31: Tomさんの要望で追加。
+  async function handleReorderCategory(id: string, direction: 'up' | 'down') {
+    if (!categories) return;
+    const majors = categories
+      .filter((c) => !c.parent_id)
+      .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
+    const idx = majors.findIndex((c) => c.id === id);
+    const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
+    if (idx === -1 || swapIdx < 0 || swapIdx >= majors.length) return;
+    const a = majors[idx];
+    const b = majors[swapIdx];
+    try {
+      await Promise.all([reorderMenuCategory(a.id, b.sort_order), reorderMenuCategory(b.id, a.sort_order)]);
+      load();
+    } catch (err) {
+      setLoadError(err instanceof PosMenuApiError ? err.message : '並び順の変更に失敗しました');
+    }
+  }
+
   async function handleToggleActive(item: PosMenuItemRecord) {
     try {
       await updateMenuItem(item.id, { active: !item.active });
@@ -732,7 +754,7 @@ function MenuTab() {
           </div>
         )}
         {categories && categories.length > 0 && (
-          <CategoryTree categories={categories} onDelete={handleDeleteCategory} onChanged={load} />
+          <CategoryTree categories={categories} onDelete={handleDeleteCategory} onChanged={load} onReorder={handleReorderCategory} />
         )}
       </div>
 
@@ -896,6 +918,9 @@ function MenuItemRow({
             </div>
             <div className="mt-0.5 text-[11.5px] text-muted-foreground">
               {categoryName(item.category_id)} ・ ${item.price.toFixed(2)}
+              {item.happy_hour_price != null && (
+                <span className="ml-1.5 font-semibold text-amber-600">🍻 HH ${item.happy_hour_price.toFixed(2)}</span>
+              )}
             </div>
           </div>
         </div>
@@ -1009,10 +1034,12 @@ function CategoryTree({
   categories,
   onDelete,
   onChanged,
+  onReorder,
 }: {
   categories: PosMenuCategory[];
   onDelete: (id: string) => void;
   onChanged: () => void;
+  onReorder: (id: string, direction: 'up' | 'down') => void;
 }) {
   const [addingUnder, setAddingUnder] = useState<string | null>(null);
 
@@ -1036,12 +1063,32 @@ function CategoryTree({
 
   return (
     <div className="flex flex-col gap-3">
-      {majors.map((major) => {
+      {majors.map((major, majorIdx) => {
         const middles = childrenOf(major.id);
         return (
           <div key={major.id} className="rounded-xl border border-border p-3.5">
             <div className="flex items-center justify-between gap-2">
-              <CategoryChip category={major} onRenamed={onChanged} onDelete={() => onDelete(major.id)} />
+              <div className="flex items-center gap-1">
+                <div className="flex flex-col">
+                  <button
+                    onClick={() => onReorder(major.id, 'up')}
+                    disabled={majorIdx === 0}
+                    title="上に移動"
+                    className="flex h-4 w-5 items-center justify-center text-[10px] text-muted-foreground disabled:opacity-25"
+                  >
+                    ▲
+                  </button>
+                  <button
+                    onClick={() => onReorder(major.id, 'down')}
+                    disabled={majorIdx === majors.length - 1}
+                    title="下に移動"
+                    className="flex h-4 w-5 items-center justify-center text-[10px] text-muted-foreground disabled:opacity-25"
+                  >
+                    ▼
+                  </button>
+                </div>
+                <CategoryChip category={major} onRenamed={onChanged} onDelete={() => onDelete(major.id)} />
+              </div>
               <button
                 onClick={() => toggleAdding(major.id)}
                 className="h-7 flex-shrink-0 rounded-lg border border-dashed border-brand px-2.5 text-[11px] font-semibold text-brand"
@@ -1150,6 +1197,7 @@ function AddItemForm({
 }) {
   const [name, setName] = useState('');
   const [price, setPrice] = useState('');
+  const [happyHourPrice, setHappyHourPrice] = useState('');
   const [categoryId, setCategoryId] = useState<string>('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1158,10 +1206,12 @@ function AddItemForm({
     e.preventDefault();
     const priceValue = parseFloat(price);
     if (!name.trim() || !Number.isFinite(priceValue) || priceValue < 0 || !categoryId) return;
+    const happyHourValue = happyHourPrice.trim() === '' ? null : parseFloat(happyHourPrice);
+    if (happyHourValue !== null && (!Number.isFinite(happyHourValue) || happyHourValue < 0)) return;
     setSubmitting(true);
     setError(null);
     try {
-      await createMenuItem({ categoryId, name: name.trim(), price: priceValue });
+      await createMenuItem({ categoryId, name: name.trim(), price: priceValue, happyHourPrice: happyHourValue });
       onCreated();
     } catch (err) {
       setError(err instanceof PosMenuApiError ? err.message : '登録に失敗しました');
@@ -1185,6 +1235,13 @@ function AddItemForm({
           inputMode="decimal"
           placeholder="価格 ($)"
           className="h-10 w-28 rounded-lg border border-border px-3 text-[13.5px]"
+        />
+        <input
+          value={happyHourPrice}
+          onChange={(e) => setHappyHourPrice(e.target.value)}
+          inputMode="decimal"
+          placeholder="🍻 HH価格 ($・任意)"
+          className="h-10 w-36 rounded-lg border border-border px-3 text-[13.5px]"
         />
       </div>
       <CategoryCascadeSelect categories={categories} value={categoryId} onChange={setCategoryId} onCategoriesChanged={onCategoriesChanged} />
@@ -1323,6 +1380,7 @@ function EditItemForm({
 }) {
   const [name, setName] = useState(item.name);
   const [price, setPrice] = useState(String(item.price));
+  const [happyHourPrice, setHappyHourPrice] = useState(item.happy_hour_price != null ? String(item.happy_hour_price) : '');
   const [categoryId, setCategoryId] = useState<string>(item.category_id ?? '');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1335,10 +1393,17 @@ function EditItemForm({
     e.preventDefault();
     const priceValue = parseFloat(price);
     if (!name.trim() || !Number.isFinite(priceValue) || priceValue < 0) return;
+    const happyHourValue = happyHourPrice.trim() === '' ? null : parseFloat(happyHourPrice);
+    if (happyHourValue !== null && (!Number.isFinite(happyHourValue) || happyHourValue < 0)) return;
     setSubmitting(true);
     setError(null);
     try {
-      await updateMenuItem(item.id, { name: name.trim(), price: priceValue, categoryId: categoryId || null });
+      await updateMenuItem(item.id, {
+        name: name.trim(),
+        price: priceValue,
+        happyHourPrice: happyHourValue,
+        categoryId: categoryId || null,
+      });
       onDone();
     } catch (err) {
       setError(err instanceof PosMenuApiError ? err.message : '更新に失敗しました');
@@ -1427,6 +1492,16 @@ function EditItemForm({
           onChange={(e) => setPrice(e.target.value)}
           inputMode="decimal"
           className="h-9 w-24 rounded-lg border border-border px-3 text-[13px]"
+        />
+      </div>
+      <div>
+        <div className="mb-1 text-[10.5px] text-muted-foreground">🍻 ハッピーアワー価格 ($・空欄=対象外)</div>
+        <input
+          value={happyHourPrice}
+          onChange={(e) => setHappyHourPrice(e.target.value)}
+          inputMode="decimal"
+          placeholder="例: 3.50"
+          className="h-9 w-32 rounded-lg border border-border px-3 text-[13px]"
         />
       </div>
       <CategoryCascadeSelect categories={categories} value={categoryId} onChange={setCategoryId} onCategoriesChanged={onCategoriesChanged} />

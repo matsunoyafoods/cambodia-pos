@@ -54,6 +54,14 @@ export async function GET() {
 
   const byId = indexCategories((categoryRows ?? []) as CategoryNode[]);
 
+  // レジ画面タブの並び順は大カテゴリーの sort_order に従う (設定画面「メニュー・商品
+  // オプション」から自由に並び替えできる)。sort_order が同じ場合は名前順でタイブレークする。
+  const categories = (categoryRows ?? [])
+    .filter((c) => !c.parent_id)
+    .slice()
+    .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name))
+    .map((c) => c.name);
+
   // referencedTable での並び順指定が効かない環境でも崩れないよう、念のためここでも整列する。
   const rows = (data ?? []) as unknown as Row[];
   const items: MenuItem[] = rows.map((row) => {
@@ -86,5 +94,5 @@ export async function GET() {
     };
   });
 
-  return NextResponse.json({ items });
+  return NextResponse.json({ items, categories });
 }

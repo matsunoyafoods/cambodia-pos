@@ -7,6 +7,7 @@ import type { TableSessionRecord } from '@/lib/table-session-client';
 import type { OrderItemRecord } from '@/lib/pos-order-orders-client';
 import { drinkTimerState, elapsedMinutes, formatDuration } from '@/lib/table-timer';
 import { effectiveBasePrice } from '@/lib/happy-hour';
+import { cartLineDiscountLabel, cartLineGrossTotal, cartLineNetTotal } from '@/lib/cart';
 
 // 中カテゴリー名があればそれ、無ければ (大カテゴリーと違う名前の) 小カテゴリー名をグループ見出しに使う。
 // どちらも大カテゴリー名と同じ (=旧フラット構成、未整理) ならグループ化せず先頭にまとめて表示する。
@@ -69,6 +70,142 @@ function OrderHeaderTimers({ session }: { session: TableSessionRecord | null }) 
   );
 }
 
+// 未確定カートの1ライン。数量+/-に加えて、急遽の値引き (%引き・$引き) をその場で
+// 設定・解除できる (2026-08-31 追加)。「注文確定」して厨房送信済みになったライン
+// (confirmedItems 側) は値引き不可 — 既に厨房・伝票へ確定済みのため対象外。
+function CartLineRow({
+  line,
+  onInc,
+  onDec,
+  onSetDiscount,
+}: {
+  line: CartLine;
+  onInc: (id: string) => void;
+  onDec: (id: string) => void;
+  onSetDiscount: (id: string, discount: { type: 'percent' | 'fixed'; value: number } | null) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [mode, setMode] = useState<'percent' | 'fixed'>(line.discountType ?? 'percent');
+  const [value, setValue] = useState(line.discountValue != null ? String(line.discountValue) : '');
+
+  const gross = cartLineGrossTotal(line);
+  const net = cartLineNetTotal(line);
+  const label = cartLineDiscountLabel(line);
+
+  function apply() {
+    const v = parseFloat(value);
+    if (!Number.isFinite(v) || v <= 0) return;
+    onSetDiscount(line.id, { type: mode, value: v });
+    setEditing(false);
+  }
+  function clear() {
+    onSetDiscount(line.id, null);
+    setValue('');
+    setEditing(false);
+  }
+
+  return (
+    <div className="rounded-lg border border-border bg-card px-3 py-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[13px] font-semibold">{line.name}</div>
+          {label ? (
+            <div className="flex items-center gap-1.5 text-xs">
+              <span className="text-muted-foreground line-through">${money(gross)}</span>
+              <span className="font-semibold text-brand">
+                ${money(net)} ({label})
+              </span>
+            </div>
+          ) : (
+            <div className="text-xs text-muted-foreground">${money(line.unitPrice)}</div>
+          )}
+        </div>
+        <div className="flex flex-shrink-0 items-center gap-1.5">
+          <button
+            onClick={() => onDec(line.id)}
+            className="flex h-[26px] w-[26px] items-center justify-center rounded-md border border-border"
+          >
+            −
+          </button>
+          <div className="w-[18px] text-center text-[13px] font-semibold">{line.qty}</div>
+          <button
+            onClick={() => onInc(line.id)}
+            className="flex h-[26px] w-[26px] items-center justify-center rounded-md border border-border"
+          >
+            ＋
+          </button>
+          <button
+            onClick={() => setEditing((v) => !v)}
+            title="値引き"
+            className={
+              'flex h-[26px] items-center justify-center rounded-md border px-1.5 text-[10.5px] font-semibold ' +
+              (label ? 'border-brand text-brand' : 'border-border text-muted-foreground')
+            }
+          >
+            値引
+          </button>
+        </div>
+      </div>
+      {editing && (
+        <div className="mt-2 flex items-center gap-1.5 border-t border-dashed border-border pt-2">
+          <div className="flex rounded-md border border-border p-0.5">
+            <button
+              type="button"
+              onClick={() => setMode('percent')}
+              className={
+                'h-6 rounded px-2 text-[11px] font-semibold ' +
+                (mode === 'percent' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground')
+              }
+            >
+              ％引き
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('fixed')}
+              className={
+                'h-6 rounded px-2 text-[11px] font-semibold ' +
+                (mode === 'fixed' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground')
+              }
+            >
+              ＄引き
+            </button>
+          </div>
+          <input
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                apply();
+              }
+            }}
+            inputMode="decimal"
+            placeholder={mode === 'percent' ? '20' : '1.00'}
+            className="h-7 w-16 rounded-md border border-border px-2 text-[12px]"
+          />
+          <button
+            type="button"
+            onClick={apply}
+            disabled={!value.trim()}
+            className="h-7 rounded-md bg-primary px-2.5 text-[11px] font-semibold text-primary-foreground disabled:opacity-50"
+          >
+            適用
+          </button>
+          {label && (
+            <button
+              type="button"
+              onClick={clear}
+              className="h-7 rounded-md border border-border px-2.5 text-[11px] font-semibold text-destructive"
+            >
+              解除
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function OrderScreen({
   selectedTable,
   session,
@@ -82,6 +219,7 @@ export function OrderScreen({
   onAddItem,
   onInc,
   onDec,
+  onSetDiscount,
   onConfirmOrder,
   confirming,
   confirmError,
@@ -107,6 +245,7 @@ export function OrderScreen({
   onAddItem: (item: MenuItem) => void;
   onInc: (lineId: string) => void;
   onDec: (lineId: string) => void;
+  onSetDiscount: (lineId: string, discount: { type: 'percent' | 'fixed'; value: number } | null) => void;
   onConfirmOrder: () => void;
   confirming: boolean;
   confirmError: string | null;
@@ -257,30 +396,7 @@ export function OrderScreen({
             <div className="flex flex-col gap-1.5">
               {confirmedItems.length > 0 && <div className="text-[11px] font-bold text-muted-foreground">未確定</div>}
               {cart.map((line) => (
-                <div
-                  key={line.id}
-                  className="flex items-center justify-between gap-2 rounded-lg border border-border bg-card px-3 py-2.5"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-[13px] font-semibold">{line.name}</div>
-                    <div className="text-xs text-muted-foreground">${money(line.unitPrice)}</div>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      onClick={() => onDec(line.id)}
-                      className="flex h-[26px] w-[26px] items-center justify-center rounded-md border border-border"
-                    >
-                      −
-                    </button>
-                    <div className="w-[18px] text-center text-[13px] font-semibold">{line.qty}</div>
-                    <button
-                      onClick={() => onInc(line.id)}
-                      className="flex h-[26px] w-[26px] items-center justify-center rounded-md border border-border"
-                    >
-                      ＋
-                    </button>
-                  </div>
-                </div>
+                <CartLineRow key={line.id} line={line} onInc={onInc} onDec={onDec} onSetDiscount={onSetDiscount} />
               ))}
             </div>
           )}

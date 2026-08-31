@@ -40,6 +40,8 @@ export type SelectedOption = {
   priceDelta: number;
 };
 
+export type DiscountType = 'percent' | 'fixed';
+
 export type CartLine = {
   id: string; // menuId, or menuId + ':' + 選択choiceIdの組み合わせ
   menuId: string;
@@ -47,6 +49,10 @@ export type CartLine = {
   unitPrice: number;
   qty: number;
   selectedOptions: SelectedOption[];
+  /** 急遽の値引き (任意、そのラインだけに適用)。'percent' なら discountValue は割引率(%)、
+   * 'fixed' なら discountValue はこのライン合計(unitPrice×qty)から引くドル額。未設定 = 値引き無し。 */
+  discountType?: DiscountType;
+  discountValue?: number;
 };
 
 // 客層記録 (来店時の人種構成)。ファースト注文確定時に必須入力。
