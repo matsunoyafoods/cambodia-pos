@@ -143,7 +143,11 @@ export function OrderScreen({
           <OrderHeaderTimers session={session} />
         </div>
 
-        <div className="flex gap-1.5 overflow-x-auto px-5 pt-3.5 [scrollbar-width:thin]">
+        {/* 大カテゴリーのタブ一覧。以前は overflow-x-auto の横スクロール1行だったが、
+            大カテゴリー数が多い店舗 (20近く) だとスライドしないと全部見えないという
+            指摘があったため、折り返し (flex-wrap) にして全件を一度にスクロール無しで
+            見渡せるようにする。表示するのは変わらず category (大カテゴリーのみ)。 */}
+        <div className="flex flex-wrap gap-1.5 px-5 pb-1 pt-3.5">
           {categories.map((c) => (
             <button
               key={c}
