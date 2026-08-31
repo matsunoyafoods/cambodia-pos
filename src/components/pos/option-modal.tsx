@@ -65,7 +65,11 @@ export function OptionModal({
                     >
                       <div className="font-bold">{c.label}</div>
                       <div className="mt-0.5 text-[11px] opacity-85">
-                        ${money(item.price + c.priceDelta)}
+                        {c.priceDelta > 0
+                          ? `+$${money(c.priceDelta)}`
+                          : c.priceDelta < 0
+                            ? `-$${money(Math.abs(c.priceDelta))}`
+                            : '$0'}
                       </div>
                     </button>
                   );

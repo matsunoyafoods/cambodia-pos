@@ -106,6 +106,7 @@ export function completeOrderPayment(
     vat: number;
     service: number;
     couponDiscount: number;
+    orderDiscount: number;
     total: number;
     method: 'cash' | 'qr' | 'card';
     amount: number;
@@ -116,4 +117,20 @@ export function completeOrderPayment(
   },
 ): Promise<{ ok: true }> {
   return request(`/api/pos-order/orders/${orderId}/complete`, { method: 'POST', body: JSON.stringify(input) });
+}
+
+// 確定済み (厨房送信済み) の注文品目に、後から値引きを設定・変更・解除する。
+// discount=null で値引き解除 (2026-08-31 追加)。
+export function updateConfirmedItemDiscount(
+  orderId: string,
+  itemId: string,
+  discount: { type: 'percent' | 'fixed'; value: number } | null,
+): Promise<{ item: OrderItemRecord }> {
+  return request(`/api/pos-order/orders/${orderId}/items/${itemId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      discountType: discount?.type ?? null,
+      discountValue: discount?.value ?? null,
+    }),
+  });
 }

@@ -9,6 +9,7 @@ const postSchema = z.object({
   vat: z.number().min(0),
   service: z.number().min(0),
   couponDiscount: z.number().min(0).default(0),
+  orderDiscount: z.number().min(0).default(0),
   total: z.number().min(0),
   method: z.enum(['cash', 'qr', 'card']),
   amount: z.number().min(0),
@@ -53,6 +54,7 @@ export async function POST(req: Request, ctx: RouteContext) {
       vat: d.vat,
       service: d.service,
       coupon_discount: d.couponDiscount,
+      order_discount: d.orderDiscount,
       total: d.total,
       paid_at: nowIso,
     })

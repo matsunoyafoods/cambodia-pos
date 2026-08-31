@@ -1,10 +1,117 @@
 'use client';
 
-import type { PaymentMethod } from '@/lib/pos-types';
+import { useState } from 'react';
+import type { DiscountType, PaymentMethod } from '@/lib/pos-types';
 import type { OrderItemRecord } from '@/lib/pos-order-orders-client';
 import { computeChange, money } from '@/lib/money';
 
-type Totals = { subtotal: number; vat: number; service: number; couponDiscount: number; total: number };
+type Totals = {
+  subtotal: number;
+  vat: number;
+  service: number;
+  couponDiscount: number;
+  orderDiscount: number;
+  total: number;
+};
+
+// 会計画面の「合計」から直接かける急遽の値引き (%引き・$引き) の編集UI。CartLineRow の
+// 値引きエディタと同じ操作感。顧客紐付け・クーポンとは独立の枠 (2026-08-31 追加)。
+function OrderDiscountEditor({
+  discount,
+  amount,
+  onSet,
+}: {
+  discount: { type: DiscountType; value: number } | null;
+  amount: number;
+  onSet: (discount: { type: DiscountType; value: number } | null) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [mode, setMode] = useState<DiscountType>(discount?.type ?? 'percent');
+  const [value, setValue] = useState(discount ? String(discount.value) : '');
+
+  function apply() {
+    const v = parseFloat(value);
+    if (!Number.isFinite(v) || v <= 0) return;
+    onSet({ type: mode, value: v });
+    setEditing(false);
+  }
+  function clear() {
+    onSet(null);
+    setValue('');
+    setEditing(false);
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between text-[12.5px]">
+        <button
+          type="button"
+          onClick={() => setEditing((v) => !v)}
+          className={'text-left font-semibold ' + (discount ? 'text-brand' : 'text-muted-foreground underline decoration-dotted')}
+        >
+          {discount ? `割引 (${discount.type === 'percent' ? discount.value + '%' : '$' + discount.value.toFixed(2)})` : '割引を追加'}
+        </button>
+        {discount && <span className="text-brand">-${money(amount)}</span>}
+      </div>
+      {editing && (
+        <div className="mt-1.5 flex items-center gap-1.5 rounded-md border border-dashed border-border p-1.5">
+          <div className="flex rounded-md border border-border p-0.5">
+            <button
+              type="button"
+              onClick={() => setMode('percent')}
+              className={
+                'h-6 rounded px-2 text-[11px] font-semibold ' +
+                (mode === 'percent' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground')
+              }
+            >
+              ％引き
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('fixed')}
+              className={
+                'h-6 rounded px-2 text-[11px] font-semibold ' +
+                (mode === 'fixed' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground')
+              }
+            >
+              ＄引き
+            </button>
+          </div>
+          <input
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                apply();
+              }
+            }}
+            inputMode="decimal"
+            placeholder={mode === 'percent' ? '10' : '5.00'}
+            className="h-7 w-16 rounded-md border border-border px-2 text-[12px]"
+          />
+          <button
+            type="button"
+            onClick={apply}
+            disabled={!value.trim()}
+            className="h-7 rounded-md bg-primary px-2.5 text-[11px] font-semibold text-primary-foreground disabled:opacity-50"
+          >
+            適用
+          </button>
+          {discount && (
+            <button
+              type="button"
+              onClick={clear}
+              className="h-7 rounded-md border border-border px-2.5 text-[11px] font-semibold text-destructive"
+            >
+              解除
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function CheckoutScreen({
   selectedTable,
@@ -17,6 +124,8 @@ export function CheckoutScreen({
   customerLinked,
   onLinkCustomer,
   onApplyCoupon,
+  orderDiscount,
+  onSetOrderDiscount,
   paymentTab,
   onPaymentTab,
   cashUsdReceivedStr,
@@ -46,6 +155,8 @@ export function CheckoutScreen({
   customerLinked: boolean;
   onLinkCustomer: () => void;
   onApplyCoupon: () => void;
+  orderDiscount: { type: DiscountType; value: number } | null;
+  onSetOrderDiscount: (discount: { type: DiscountType; value: number } | null) => void;
   paymentTab: PaymentMethod;
   onPaymentTab: (t: PaymentMethod) => void;
   cashUsdReceivedStr: string;
@@ -137,6 +248,9 @@ export function CheckoutScreen({
               <span>-${money(totals.couponDiscount)}</span>
             </div>
           )}
+          <div className="pt-1">
+            <OrderDiscountEditor discount={orderDiscount} amount={totals.orderDiscount} onSet={onSetOrderDiscount} />
+          </div>
           <div className="mt-1 flex justify-between border-t border-dashed border-border pt-2 text-[17px] font-bold">
             <span>合計</span>
             <span>${money(totals.total)}</span>

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import type { CartLine, GuestEthnicity, MenuItem, PaymentMethod, TableStatus } from '@/lib/pos-types';
+import type { CartLine, DiscountType, GuestEthnicity, MenuItem, PaymentMethod, TableStatus } from '@/lib/pos-types';
 import { DEFAULT_SETTINGS } from '@/lib/pos-types';
 import { getPosMenus, getPosSettings, PosApiError } from '@/lib/api-client';
 import {
@@ -17,6 +17,7 @@ import {
   confirmOrderItems,
   createOpenOrder,
   getOpenOrder,
+  updateConfirmedItemDiscount,
   PosOrderOrdersApiError,
   type OpenOrderRecord,
   type OrderItemRecord,
@@ -31,7 +32,7 @@ import {
   type TableSessionRecord,
 } from '@/lib/table-session-client';
 import { effectiveBasePrice, isHappyHourNow } from '@/lib/happy-hour';
-import { cartLineNetTotal } from '@/lib/cart';
+import { cartLineNetTotal, discountAmount } from '@/lib/cart';
 import { computeChange } from '@/lib/money';
 import { logoutPosStaff } from '@/lib/staff-client';
 import { useStaff } from './staff-context';
@@ -66,6 +67,9 @@ export function PosApp() {
   const [cart, setCart] = useState<CartLine[]>([]);
   const [customerLinked, setCustomerLinked] = useState(false);
   const [couponApplied, setCouponApplied] = useState(false);
+  // 会計画面の合計から直接かける急遽の値引き (%引き・$引き)。ラインごとの値引きとは別枠で、
+  // 顧客紐付け不要 (2026-08-31 追加。「合計の会計から割引ができるようにもしてほしい」)。
+  const [orderDiscount, setOrderDiscount] = useState<{ type: DiscountType; value: number } | null>(null);
   const [paymentTab, setPaymentTab] = useState<PaymentMethod>('cash');
   const [cashUsdReceivedStr, setCashUsdReceivedStr] = useState('');
   const [cashKhrReceivedStr, setCashKhrReceivedStr] = useState('');
@@ -282,15 +286,19 @@ export function PosApp() {
       : subtotal * (settings.vatRate / 100);
     const service = subtotal * (settings.serviceRate / 100);
     const couponDiscount = couponApplied ? Math.min(5, subtotal) : 0;
+    // 会計画面の合計からの急遽の値引き。ライン値引き・クーポンとは独立に、subtotal を基準に
+    // 計算する (％引きなら subtotal に対する割合、＄引きなら subtotal を上限とするドル額)。
+    const orderDiscountAmount = discountAmount(subtotal, orderDiscount?.type, orderDiscount?.value);
     const total = settings.vatInclusive
-      ? Math.max(0, subtotal + service - couponDiscount)
-      : Math.max(0, subtotal + vat + service - couponDiscount);
-    return { subtotal, vat, service, couponDiscount, total };
-  }, [cart, confirmedItems, couponApplied, settings.vatRate, settings.vatInclusive, settings.serviceRate]);
+      ? Math.max(0, subtotal + service - couponDiscount - orderDiscountAmount)
+      : Math.max(0, subtotal + vat + service - couponDiscount - orderDiscountAmount);
+    return { subtotal, vat, service, couponDiscount, orderDiscount: orderDiscountAmount, total };
+  }, [cart, confirmedItems, couponApplied, orderDiscount, settings.vatRate, settings.vatInclusive, settings.serviceRate]);
 
   function resetOrderState() {
     setCustomerLinked(false);
     setCouponApplied(false);
+    setOrderDiscount(null);
     setPaymentTab('cash');
     setCashUsdReceivedStr('');
     setCashKhrReceivedStr('');
@@ -355,6 +363,18 @@ export function PosApp() {
         l.id === id ? { ...l, discountType: discount?.type, discountValue: discount?.value } : l,
       ),
     );
+  }
+
+  // 確定済み (厨房送信済み) の品目に、後から値引きを設定・変更・解除する (2026-08-31 追加)。
+  // サーバー (PATCH) が menu_name・line_total を再計算して返すので、その結果でローカルの
+  // confirmedItems を差し替える。
+  async function setConfirmedItemDiscount(
+    itemId: string,
+    discount: { type: 'percent' | 'fixed'; value: number } | null,
+  ) {
+    if (!currentOrder) return;
+    const { item } = await updateConfirmedItemDiscount(currentOrder.id, itemId, discount);
+    setConfirmedItems((prev) => prev.map((it) => (it.id === itemId ? item : it)));
   }
 
   // オプション選択が必要な商品ならモーダルを開き、不要ならそのままカートに追加する。
@@ -495,6 +515,7 @@ export function PosApp() {
         vat: totals.vat,
         service: totals.service,
         couponDiscount: totals.couponDiscount,
+        orderDiscount: totals.orderDiscount,
         total: totals.total,
         method: paymentTab,
         amount: totals.total,
@@ -657,6 +678,7 @@ export function PosApp() {
           onInc={incLine}
           onDec={decLine}
           onSetDiscount={setLineDiscount}
+          onSetConfirmedItemDiscount={setConfirmedItemDiscount}
           onConfirmOrder={confirmPendingCart}
           confirming={confirming}
           confirmError={confirmError}
@@ -684,6 +706,8 @@ export function PosApp() {
           customerLinked={customerLinked}
           onLinkCustomer={() => setCustomerLinked(true)}
           onApplyCoupon={() => setCouponApplied(true)}
+          orderDiscount={orderDiscount}
+          onSetOrderDiscount={setOrderDiscount}
           paymentTab={paymentTab}
           onPaymentTab={setPaymentTab}
           cashUsdReceivedStr={cashUsdReceivedStr}
