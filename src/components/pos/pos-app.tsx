@@ -973,6 +973,12 @@ export function PosApp() {
                     ハンディ注文
                   </button>
                   <button
+                    onClick={() => router.push('/pos/qr-codes')}
+                    className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary"
+                  >
+                    QRコード印刷
+                  </button>
+                  <button
                     onClick={() => router.push('/pos/register-closing')}
                     className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary"
                   >

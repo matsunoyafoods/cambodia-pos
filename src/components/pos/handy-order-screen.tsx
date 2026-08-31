@@ -181,6 +181,7 @@ export function HandyOrderScreen({
   menuImageStyle,
   onBackToTableList,
   onResetTable,
+  guestMode,
 }: {
   selectedTable: string | null;
   session: TableSessionRecord | null;
@@ -210,6 +211,10 @@ export function HandyOrderScreen({
   menuImageStyle?: MenuImageStyle;
   onBackToTableList: () => void;
   onResetTable: () => void;
+  /** true = QRセルフオーダー (認証なしのお客様向け画面) からの利用。2026-08-31 追加。
+   * 「卓をリセット」(取消不能・伝票を破棄する) と「卓一覧へ戻る」(スタッフのハンディ専用の
+   * 導線) はスタッフ専用の操作のため、お客様には一切見せない。 */
+  guestMode?: boolean;
 }) {
   const [cartOpen, setCartOpen] = useState(false);
   const items = menu.filter((m) => m.category === activeCategory);
@@ -221,21 +226,25 @@ export function HandyOrderScreen({
     <div className="relative flex h-full flex-col overflow-hidden">
       <div className="flex items-center justify-between gap-2 border-b border-border px-3.5 py-2.5">
         <div className="flex min-w-0 items-center gap-2">
-          <button onClick={onBackToTableList} className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-border bg-card">
-            ←
-          </button>
+          {!guestMode && (
+            <button onClick={onBackToTableList} className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-border bg-card">
+              ←
+            </button>
+          )}
           <div className="min-w-0">
             <div className="truncate text-[15px] font-bold">テーブル {selectedTable}</div>
             <HeaderTimers session={session} />
           </div>
         </div>
-        <button
-          onClick={onResetTable}
-          title="会計せずにこの卓を空席へ戻す (間違えて選択・注文した場合)"
-          className="flex-shrink-0 rounded-lg border border-destructive/40 px-2 py-1.5 text-[11px] font-medium text-destructive"
-        >
-          卓をリセット
-        </button>
+        {!guestMode && (
+          <button
+            onClick={onResetTable}
+            title="会計せずにこの卓を空席へ戻す (間違えて選択・注文した場合)"
+            className="flex-shrink-0 rounded-lg border border-destructive/40 px-2 py-1.5 text-[11px] font-medium text-destructive"
+          >
+            卓をリセット
+          </button>
+        )}
       </div>
 
       <div className="flex flex-shrink-0 gap-1.5 overflow-x-auto px-3.5 pb-2 pt-3">
