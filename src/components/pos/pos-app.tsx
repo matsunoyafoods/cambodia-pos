@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import type { CartLine, DiscountType, GuestEthnicity, MenuItem, PaymentMethod, TableStatus } from '@/lib/pos-types';
+import type { CartLine, DiscountType, GuestEthnicity, MenuItem, PaymentLineInput, TableStatus } from '@/lib/pos-types';
 import { DEFAULT_SETTINGS } from '@/lib/pos-types';
 import { getPosMenus, getPosSettings, PosApiError } from '@/lib/api-client';
 import {
@@ -16,8 +16,10 @@ import {
   completeOrderPayment,
   confirmOrderItems,
   createOpenOrder,
+  deleteConfirmedItem,
   getOpenOrder,
   updateConfirmedItemDiscount,
+  updateConfirmedItemQty,
   PosOrderOrdersApiError,
   type OpenOrderRecord,
   type OrderItemRecord,
@@ -33,7 +35,6 @@ import {
 } from '@/lib/table-session-client';
 import { effectiveBasePrice, isHappyHourNow } from '@/lib/happy-hour';
 import { cartLineNetTotal, discountAmount } from '@/lib/cart';
-import { computeChange } from '@/lib/money';
 import { logoutPosStaff } from '@/lib/staff-client';
 import { useStaff } from './staff-context';
 import { TableMapScreen } from './table-map-screen';
@@ -70,12 +71,12 @@ export function PosApp() {
   // 会計画面の合計から直接かける急遽の値引き (%引き・$引き)。ラインごとの値引きとは別枠で、
   // 顧客紐付け不要 (2026-08-31 追加。「合計の会計から割引ができるようにもしてほしい」)。
   const [orderDiscount, setOrderDiscount] = useState<{ type: DiscountType; value: number } | null>(null);
-  const [paymentTab, setPaymentTab] = useState<PaymentMethod>('cash');
-  const [cashUsdReceivedStr, setCashUsdReceivedStr] = useState('');
-  const [cashKhrReceivedStr, setCashKhrReceivedStr] = useState('');
-  const [changeUsdStr, setChangeUsdStr] = useState('');
-  const [qrConfirmed, setQrConfirmed] = useState(false);
-  const [cardConfirmed, setCardConfirmed] = useState(false);
+  // 会計の支払いライン一覧。分割払い ($10 ABA + $10 現金) や割り勘 (人数で分けて個別に会計) に
+  // 対応するため、単一の支払い方法ではなく配列で保持する (2026-08-31 追加)。各ラインの入力途中
+  // の値 (どの支払い方法を選んでいるか、お預かり金額など) は checkout-screen.tsx 側のローカル
+  // stateで、確定して追加されたラインだけここに積み上がる。画面遷移をまたいでも保持したいので
+  // (会計画面↔注文画面を行き来しても入力済みの支払いが消えないように) pos-app 側に置く。
+  const [paymentLines, setPaymentLines] = useState<PaymentLineInput[]>([]);
   const [optionModalItem, setOptionModalItem] = useState<MenuItem | null>(null);
   const [optionSelection, setOptionSelection] = useState<ModalSelection>({});
 
@@ -285,26 +286,31 @@ export function PosApp() {
       ? subtotal - subtotal / (1 + settings.vatRate / 100)
       : subtotal * (settings.vatRate / 100);
     const service = subtotal * (settings.serviceRate / 100);
-    const couponDiscount = couponApplied ? Math.min(5, subtotal) : 0;
+    // 2026-08-31 方針決定 (Tomさん): 値引き (クーポン・会計からの割引) は税抜き部分 + サービス料
+    // までしか対象にできず、VATは値引き後も必ず請求する。以前は税込み設定の場合、値引きが
+    // VATごと丸ごと打ち消してしまい ($5の商品に$5引くと合計$0円) 、フル値引きの伝票でVATが
+    // 一切請求されない状態になっていた。「税抜き土台+サービス料」というプール (discountable)
+    // から値引きを順番に (クーポン→会計からの割引の順で) 消費させ、使い切ったら以降は
+    // VATだけが残る形にする。値引きが小さければ従来通りの計算結果と変わらない。
+    const base = settings.vatInclusive ? subtotal - vat : subtotal;
+    let discountable = base + service;
+    const requestedCouponDiscount = couponApplied ? Math.min(5, subtotal) : 0;
+    const couponDiscount = Math.min(requestedCouponDiscount, discountable);
+    discountable -= couponDiscount;
     // 会計画面の合計からの急遽の値引き。ライン値引き・クーポンとは独立に、subtotal を基準に
     // 計算する (％引きなら subtotal に対する割合、＄引きなら subtotal を上限とするドル額)。
-    const orderDiscountAmount = discountAmount(subtotal, orderDiscount?.type, orderDiscount?.value);
-    const total = settings.vatInclusive
-      ? Math.max(0, subtotal + service - couponDiscount - orderDiscountAmount)
-      : Math.max(0, subtotal + vat + service - couponDiscount - orderDiscountAmount);
-    return { subtotal, vat, service, couponDiscount, orderDiscount: orderDiscountAmount, total };
+    const requestedOrderDiscount = discountAmount(subtotal, orderDiscount?.type, orderDiscount?.value);
+    const appliedOrderDiscount = Math.min(requestedOrderDiscount, discountable);
+    discountable -= appliedOrderDiscount;
+    const total = Math.max(0, discountable + vat);
+    return { subtotal, vat, service, couponDiscount, orderDiscount: appliedOrderDiscount, total };
   }, [cart, confirmedItems, couponApplied, orderDiscount, settings.vatRate, settings.vatInclusive, settings.serviceRate]);
 
   function resetOrderState() {
     setCustomerLinked(false);
     setCouponApplied(false);
     setOrderDiscount(null);
-    setPaymentTab('cash');
-    setCashUsdReceivedStr('');
-    setCashKhrReceivedStr('');
-    setChangeUsdStr('');
-    setQrConfirmed(false);
-    setCardConfirmed(false);
+    setPaymentLines([]);
     setOptionModalItem(null);
     setOptionSelection({});
     setGuestModalOpen(false);
@@ -375,6 +381,31 @@ export function PosApp() {
     if (!currentOrder) return;
     const { item } = await updateConfirmedItemDiscount(currentOrder.id, itemId, discount);
     setConfirmedItems((prev) => prev.map((it) => (it.id === itemId ? item : it)));
+  }
+
+  // 確定済み品目の数量+/-・削除 (2026-08-31 追加。「カートに一度注文済みになると削除や変更が
+  // できません。できるようにしてください」)。数量を1未満にはできない — 0にしたい場合は
+  // removeConfirmedItem (削除ボタン) を明示的に使う設計にして、連打による誤削除を防ぐ。
+  async function incConfirmedItemQty(itemId: string) {
+    if (!currentOrder) return;
+    const target = confirmedItems.find((it) => it.id === itemId);
+    if (!target) return;
+    const { item } = await updateConfirmedItemQty(currentOrder.id, itemId, target.qty + 1);
+    setConfirmedItems((prev) => prev.map((it) => (it.id === itemId ? item : it)));
+  }
+
+  async function decConfirmedItemQty(itemId: string) {
+    if (!currentOrder) return;
+    const target = confirmedItems.find((it) => it.id === itemId);
+    if (!target || target.qty <= 1) return;
+    const { item } = await updateConfirmedItemQty(currentOrder.id, itemId, target.qty - 1);
+    setConfirmedItems((prev) => prev.map((it) => (it.id === itemId ? item : it)));
+  }
+
+  async function removeConfirmedItem(itemId: string) {
+    if (!currentOrder) return;
+    await deleteConfirmedItem(currentOrder.id, itemId);
+    setConfirmedItems((prev) => prev.filter((it) => it.id !== itemId));
   }
 
   // オプション選択が必要な商品ならモーダルを開き、不要ならそのままカートに追加する。
@@ -496,20 +527,23 @@ export function PosApp() {
     setOptionSelection({});
   }
 
+  // 支払いラインの合計 (= 実際に集まった金額)。会計完了ボタンはこれが合計以上になるまで
+  // 無効化する (checkout-screen.tsx 側の canComplete)。
+  const paymentLinesTotal = paymentLines.reduce((s, l) => s + l.amount, 0);
+
+  function addPaymentLine(line: Omit<PaymentLineInput, 'id'>) {
+    setPaymentLines((prev) => [...prev, { ...line, id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}` }]);
+  }
+  function removePaymentLine(id: string) {
+    setPaymentLines((prev) => prev.filter((l) => l.id !== id));
+  }
+
   async function completeOrder() {
     if (!currentOrder || completing) return;
+    if (paymentLinesTotal < totals.total - 0.01) return;
     setCompleting(true);
     setCompleteError(null);
     try {
-      const usdReceived = parseFloat(cashUsdReceivedStr) || 0;
-      const khrReceived = parseInt(cashKhrReceivedStr, 10) || 0;
-      const change = computeChange({
-        total: totals.total,
-        usdReceived,
-        khrReceived,
-        khrRate: settings.khrRate,
-        changeUsdOverride: changeUsdStr === '' ? undefined : parseInt(changeUsdStr, 10) || 0,
-      });
       await completeOrderPayment(currentOrder.id, {
         subtotal: totals.subtotal,
         vat: totals.vat,
@@ -517,12 +551,14 @@ export function PosApp() {
         couponDiscount: totals.couponDiscount,
         orderDiscount: totals.orderDiscount,
         total: totals.total,
-        method: paymentTab,
-        amount: totals.total,
-        cashReceivedUsd: paymentTab === 'cash' ? usdReceived : undefined,
-        cashReceivedKhr: paymentTab === 'cash' ? khrReceived : undefined,
-        changeUsd: paymentTab === 'cash' ? change.changeUsd : undefined,
-        changeKhr: paymentTab === 'cash' ? change.changeKhr : undefined,
+        payments: paymentLines.map((l) => ({
+          method: l.method,
+          amount: l.amount,
+          cashReceivedUsd: l.cashReceivedUsd,
+          cashReceivedKhr: l.cashReceivedKhr,
+          changeUsd: l.changeUsd,
+          changeKhr: l.changeKhr,
+        })),
       });
       // 会計完了 = この卓の来店セッションが終わるので、滞在・飲み放題タイマーをリセットする。
       if (selectedTable) {
@@ -679,6 +715,9 @@ export function PosApp() {
           onDec={decLine}
           onSetDiscount={setLineDiscount}
           onSetConfirmedItemDiscount={setConfirmedItemDiscount}
+          onIncConfirmedItem={incConfirmedItemQty}
+          onDecConfirmedItem={decConfirmedItemQty}
+          onRemoveConfirmedItem={removeConfirmedItem}
           onConfirmOrder={confirmPendingCart}
           confirming={confirming}
           confirmError={confirmError}
@@ -689,6 +728,7 @@ export function PosApp() {
           serviceRate={settings.serviceRate}
           vatInclusive={settings.vatInclusive}
           total={totals.total}
+          menuImageStyle={settings.menuImageStyle}
           onBackToTableMap={() => setScreen('tablemap')}
           onCheckout={handleCheckout}
         />
@@ -708,26 +748,10 @@ export function PosApp() {
           onApplyCoupon={() => setCouponApplied(true)}
           orderDiscount={orderDiscount}
           onSetOrderDiscount={setOrderDiscount}
-          paymentTab={paymentTab}
-          onPaymentTab={setPaymentTab}
-          cashUsdReceivedStr={cashUsdReceivedStr}
-          cashKhrReceivedStr={cashKhrReceivedStr}
-          onUsdReceivedChange={(v) => {
-            setCashUsdReceivedStr(v);
-            setChangeUsdStr('');
-          }}
-          onKhrReceivedChange={(v) => {
-            setCashKhrReceivedStr(v);
-            setChangeUsdStr('');
-          }}
-          changeUsdStr={changeUsdStr}
-          onChangeUsdInc={() => setChangeUsdStr((v) => String((parseInt(v, 10) || 0) + 1))}
-          onChangeUsdDec={() => setChangeUsdStr((v) => String(Math.max(0, (parseInt(v, 10) || 0) - 1)))}
+          paymentLines={paymentLines}
+          onAddPaymentLine={addPaymentLine}
+          onRemovePaymentLine={removePaymentLine}
           khrRate={settings.khrRate}
-          qrConfirmed={qrConfirmed}
-          onConfirmQr={() => setQrConfirmed(true)}
-          cardConfirmed={cardConfirmed}
-          onConfirmCard={() => setCardConfirmed(true)}
           onBackToOrder={() => setScreen('order')}
           onComplete={completeOrder}
           completing={completing}

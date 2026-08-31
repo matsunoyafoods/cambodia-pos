@@ -19,7 +19,10 @@ export function computeChange(params: {
   const maxChangeUsd = Math.max(0, Math.floor(rawChange + 1e-9));
   const changeUsd = Math.max(0, Math.min(changeUsdOverride ?? maxChangeUsd, maxChangeUsd));
   const changeKhr = Math.max(0, Math.round(((rawChange - changeUsd) * khrRate) / 100) * 100);
-  const ok = total > 0 && totalReceivedUsdEquiv >= total - 0.005;
+  // 割引・クーポンで合計が $0 (またはそれ以下) になった伝票は、お預かり金額が無くても
+  // 会計を完了できる (受け取るお金が無いだけで、会計自体は成立する)。以前は total > 0 を
+  // 必須にしていたため、全額値引きの伝票が永久に会計完了できないバグがあった (2026-08-31 修正)。
+  const ok = total <= 0 || totalReceivedUsdEquiv >= total - 0.005;
 
   return { totalReceivedUsdEquiv, rawChange, maxChangeUsd, changeUsd, changeKhr, ok };
 }

@@ -99,6 +99,8 @@ export function confirmOrderItems(
   });
 }
 
+// 分割払い ($10 ABA + $10 現金) や割り勘 (人数で分けて個別に会計) に対応するため、payments を
+// 配列で渡す (2026-08-31 変更。以前は method/amount 等が単一の支払いのみだった)。
 export function completeOrderPayment(
   orderId: string,
   input: {
@@ -108,12 +110,14 @@ export function completeOrderPayment(
     couponDiscount: number;
     orderDiscount: number;
     total: number;
-    method: 'cash' | 'qr' | 'card';
-    amount: number;
-    cashReceivedUsd?: number;
-    cashReceivedKhr?: number;
-    changeUsd?: number;
-    changeKhr?: number;
+    payments: {
+      method: 'cash' | 'qr' | 'card';
+      amount: number;
+      cashReceivedUsd?: number;
+      cashReceivedKhr?: number;
+      changeUsd?: number;
+      changeKhr?: number;
+    }[];
   },
 ): Promise<{ ok: true }> {
   return request(`/api/pos-order/orders/${orderId}/complete`, { method: 'POST', body: JSON.stringify(input) });
@@ -133,4 +137,23 @@ export function updateConfirmedItemDiscount(
       discountValue: discount?.value ?? null,
     }),
   });
+}
+
+// 確定済み (厨房送信済み) の注文品目の数量を変更する。既存の値引きはサーバー側で
+// (menu_name のラベルから) 維持したまま再計算される (2026-08-31 追加)。
+export function updateConfirmedItemQty(
+  orderId: string,
+  itemId: string,
+  qty: number,
+): Promise<{ item: OrderItemRecord }> {
+  return request(`/api/pos-order/orders/${orderId}/items/${itemId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ qty }),
+  });
+}
+
+// 確定済みの注文品目を丸ごと削除する (取り消し) (2026-08-31 追加。「カートに一度注文済みに
+// なると削除や変更ができません。できるようにしてください」)。
+export function deleteConfirmedItem(orderId: string, itemId: string): Promise<{ ok: true }> {
+  return request(`/api/pos-order/orders/${orderId}/items/${itemId}`, { method: 'DELETE' });
 }

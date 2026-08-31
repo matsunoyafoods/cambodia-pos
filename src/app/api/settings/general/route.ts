@@ -25,6 +25,10 @@ function toPosSettings(storeId: string, raw: unknown): PosSettings {
       typeof stored.happyHourEnabled === 'boolean' ? stored.happyHourEnabled : DEFAULT_SETTINGS.happyHourEnabled,
     happyHourStart: typeof stored.happyHourStart === 'string' ? stored.happyHourStart : DEFAULT_SETTINGS.happyHourStart,
     happyHourEnd: typeof stored.happyHourEnd === 'string' ? stored.happyHourEnd : DEFAULT_SETTINGS.happyHourEnd,
+    menuImageStyle:
+      stored.menuImageStyle === 'compact' || stored.menuImageStyle === 'full'
+        ? stored.menuImageStyle
+        : DEFAULT_SETTINGS.menuImageStyle,
   };
 }
 
@@ -53,6 +57,7 @@ const patchSchema = z.object({
   happyHourEnabled: z.boolean().optional(),
   happyHourStart: z.string().regex(HHMM_RE, 'HH:MM 形式で入力してください').optional(),
   happyHourEnd: z.string().regex(HHMM_RE, 'HH:MM 形式で入力してください').optional(),
+  menuImageStyle: z.enum(['compact', 'full']).optional(),
 });
 
 // 更新。manager 以上のみ。

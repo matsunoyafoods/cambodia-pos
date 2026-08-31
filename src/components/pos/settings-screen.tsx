@@ -130,6 +130,7 @@ export function SettingsScreen() {
           happyHourEnabled,
           happyHourStart,
           happyHourEnd,
+          menuImageStyle,
         } = settings;
         const s = await updateGeneralSettings({
           vatRate,
@@ -142,6 +143,7 @@ export function SettingsScreen() {
           happyHourEnabled,
           happyHourStart,
           happyHourEnd,
+          menuImageStyle,
         });
         setSettings((prev) => ({ ...prev, ...s }));
       } else {
@@ -274,6 +276,38 @@ export function SettingsScreen() {
                   レジ締め・会計画面のKHR自動計算に使用されます。日次で更新してください。
                 </div>
               </Field>
+
+              {isPosNative && (
+                <Field label="レジ画面のメニュー写真">
+                  <div className="flex w-fit gap-1.5 rounded-lg bg-secondary p-1">
+                    <button
+                      type="button"
+                      disabled={!canManageSettings}
+                      onClick={() => update('menuImageStyle', 'compact')}
+                      className={
+                        'h-9 rounded-md px-4 text-[12.5px] font-semibold disabled:opacity-60 ' +
+                        (settings.menuImageStyle !== 'full' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground')
+                      }
+                    >
+                      小さめ (一覧性重視)
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!canManageSettings}
+                      onClick={() => update('menuImageStyle', 'full')}
+                      className={
+                        'h-9 rounded-md px-4 text-[12.5px] font-semibold disabled:opacity-60 ' +
+                        (settings.menuImageStyle === 'full' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground')
+                      }
+                    >
+                      商品全体を表示
+                    </button>
+                  </div>
+                  <div className="mt-1.5 text-[11px] text-muted-foreground">
+                    小さめ: 従来通りコンパクトに表示 (商品を切り取って詰めるため画像が見切れることがあります)。商品全体を表示: 写真を切り取らず全体が見えるように大きめに表示します (商品数が多いと縦スクロールが増えます)。
+                  </div>
+                </Field>
+              )}
 
               {isPosNative && (
                 <>

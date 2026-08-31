@@ -70,6 +70,13 @@ export type GuestEthnicity = Partial<Record<EthnicityKey, number>>;
 
 export type TableStatus = 'available' | 'occupied' | 'billing';
 
+// レジ画面のメニュー写真の見せ方。'compact' = 従来通り小さめ・トリミングあり (一覧性重視、
+// 商品数が多い店舗向け)。'full' = 商品全体が切れずに見えるよう大きめ・トリミング無し
+// (見た目重視・商品数が少ない店舗向け)。店舗ごとに設定できるようにする (2026-08-31 追加。
+// 「画像が見切れます。画像が小さいほうがいい店舗と商品全部が見えてほうがいい店舗と
+// わかれると思うので表示される画像を設定できるようにしたほうがいい」)。
+export type MenuImageStyle = 'compact' | 'full';
+
 export type TableInfo = {
   code: string;
   seats: number;
@@ -77,6 +84,20 @@ export type TableInfo = {
 };
 
 export type PaymentMethod = 'cash' | 'qr' | 'card';
+
+// 会計の1つの支払いライン。1つの伝票を複数の支払い方法・複数人に分けて会計できるようにする
+// ため (2026-08-31 追加。「ABAで$10現金で$10」の分割払い、「割り勘」の両方をこの1つの仕組みで
+// 表現する — amount は会計全体のうち、このラインが受け持つ金額)。id はクライアント側で
+// 生成するローカルID (crypto.randomUUID 等)。現金以外は cashReceivedUsd/Khr は未設定。
+export type PaymentLineInput = {
+  id: string;
+  method: PaymentMethod;
+  amount: number;
+  cashReceivedUsd?: number;
+  cashReceivedKhr?: number;
+  changeUsd?: number;
+  changeKhr?: number;
+};
 
 // pos.settings 1行 (store 単位)
 export type PosSettings = {
@@ -93,6 +114,8 @@ export type PosSettings = {
   happyHourEnabled: boolean;
   happyHourStart: string; // 'HH:MM' (店舗タイムゾーン基準)
   happyHourEnd: string; // 'HH:MM'
+  /** レジ画面のメニュー写真の見せ方 (2026-08-31 追加。未設定 = 'compact') */
+  menuImageStyle: MenuImageStyle;
 };
 
 export const DEFAULT_SETTINGS: PosSettings = {
@@ -107,4 +130,5 @@ export const DEFAULT_SETTINGS: PosSettings = {
   happyHourEnabled: true,
   happyHourStart: '17:00',
   happyHourEnd: '19:00',
+  menuImageStyle: 'compact',
 };

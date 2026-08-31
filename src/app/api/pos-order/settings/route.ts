@@ -30,6 +30,10 @@ export async function GET() {
       typeof stored.happyHourEnabled === 'boolean' ? stored.happyHourEnabled : DEFAULT_SETTINGS.happyHourEnabled,
     happyHourStart: typeof stored.happyHourStart === 'string' ? stored.happyHourStart : DEFAULT_SETTINGS.happyHourStart,
     happyHourEnd: typeof stored.happyHourEnd === 'string' ? stored.happyHourEnd : DEFAULT_SETTINGS.happyHourEnd,
+    menuImageStyle:
+      stored.menuImageStyle === 'compact' || stored.menuImageStyle === 'full'
+        ? stored.menuImageStyle
+        : DEFAULT_SETTINGS.menuImageStyle,
   };
   return NextResponse.json(settings);
 }

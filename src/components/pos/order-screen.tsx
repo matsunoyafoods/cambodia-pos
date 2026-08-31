@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { CartLine, MenuItem } from '@/lib/pos-types';
+import type { CartLine, MenuImageStyle, MenuItem } from '@/lib/pos-types';
 import { money } from '@/lib/money';
 import type { TableSessionRecord } from '@/lib/table-session-client';
 import type { OrderItemRecord } from '@/lib/pos-order-orders-client';
@@ -70,7 +70,7 @@ function OrderHeaderTimers({ session }: { session: TableSessionRecord | null }) 
                 : 'bg-emerald-100 text-emerald-800')
           }
         >
-          🍺 {drink.isExpired ? `延長してください (${formatDuration(-drink.remainingMinutes)}超過)` : `残り${formatDuration(drink.remainingMinutes)}`}
+          🍺 {drink.isExpired ? `飲み放題終了 (${formatDuration(-drink.remainingMinutes)}超過・延長は追加注文で)` : `残り${formatDuration(drink.remainingMinutes)}`}
         </span>
       )}
     </div>
@@ -218,15 +218,26 @@ function CartLineRow({
 // 専用カラムが無く menu_name の角括弧ラベルに焼き込まれているため、現在の値引きは
 // parseOrderItemDiscount で menu_name から復元して表示する。保存はサーバーへの
 // PATCH (onSetDiscount) を伴うため保存中・失敗時の表示も持つ。
+// 数量+/-・削除にも対応 (2026-08-31 追加。「カートに一度注文済みになると削除や変更が
+// できません。できるようにしてください」)。数量は1未満にできない (0にしたい場合は削除
+// ボタンを明示的に押す — 連打による誤削除を防ぐ意図)。削除は厨房へ送信済みの品目を取り消す
+// 操作のため、誤操作防止に window.confirm で確認する (テーブルレイアウト編集画面の
+// 未保存確認と同じパターン)。
 function ConfirmedItemRow({
   item,
   onSetDiscount,
+  onInc,
+  onDec,
+  onRemove,
 }: {
   item: OrderItemRecord;
   onSetDiscount: (
     itemId: string,
     discount: { type: 'percent' | 'fixed'; value: number } | null,
   ) => Promise<void>;
+  onInc: (itemId: string) => Promise<void>;
+  onDec: (itemId: string) => Promise<void>;
+  onRemove: (itemId: string) => Promise<void>;
 }) {
   const parsed = parseOrderItemDiscount(item.menu_name);
   const [editing, setEditing] = useState(false);
@@ -266,14 +277,47 @@ function ConfirmedItemRow({
       setSaving(false);
     }
   }
+  async function inc() {
+    setSaving(true);
+    setError(null);
+    try {
+      await onInc(item.id);
+    } catch {
+      setError('数量の変更に失敗しました');
+    } finally {
+      setSaving(false);
+    }
+  }
+  async function dec() {
+    if (item.qty <= 1) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await onDec(item.id);
+    } catch {
+      setError('数量の変更に失敗しました');
+    } finally {
+      setSaving(false);
+    }
+  }
+  async function remove() {
+    if (!window.confirm(`「${baseName}」を削除しますか？(厨房へ送信済みの品目です)`)) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await onRemove(item.id);
+    } catch {
+      setError('削除に失敗しました');
+      setSaving(false);
+    }
+    // 成功時はこの行自体が親から消えるので setSaving(false) は不要
+  }
 
   return (
     <div className="rounded-lg border border-dashed border-border bg-card/60 px-3 py-2">
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <div className="truncate text-[12.5px] font-semibold text-muted-foreground">
-            {baseName} × {item.qty}
-          </div>
+          <div className="truncate text-[12.5px] font-semibold text-muted-foreground">{baseName}</div>
           {label ? (
             <div className="flex items-center gap-1.5 text-xs">
               <span className="text-muted-foreground line-through">${money(gross)}</span>
@@ -281,10 +325,26 @@ function ConfirmedItemRow({
                 ${money(item.line_total)} ({label})
               </span>
             </div>
-          ) : null}
+          ) : (
+            <div className="text-xs text-muted-foreground">${money(item.line_total)}</div>
+          )}
         </div>
         <div className="flex flex-shrink-0 items-center gap-1.5">
-          {!label && <div className="text-xs text-muted-foreground">${money(item.line_total)}</div>}
+          <button
+            onClick={dec}
+            disabled={saving || item.qty <= 1}
+            className="flex h-[26px] w-[26px] items-center justify-center rounded-md border border-border disabled:opacity-40"
+          >
+            −
+          </button>
+          <div className="w-[18px] text-center text-[13px] font-semibold">{item.qty}</div>
+          <button
+            onClick={inc}
+            disabled={saving}
+            className="flex h-[26px] w-[26px] items-center justify-center rounded-md border border-border disabled:opacity-50"
+          >
+            ＋
+          </button>
           <button
             onClick={() => setEditing((v) => !v)}
             disabled={saving}
@@ -295,6 +355,14 @@ function ConfirmedItemRow({
             }
           >
             値引
+          </button>
+          <button
+            onClick={remove}
+            disabled={saving}
+            title="削除"
+            className="flex h-[26px] w-[26px] items-center justify-center rounded-md border border-border text-destructive disabled:opacity-50"
+          >
+            🗑
           </button>
         </div>
       </div>
@@ -375,6 +443,9 @@ export function OrderScreen({
   onDec,
   onSetDiscount,
   onSetConfirmedItemDiscount,
+  onIncConfirmedItem,
+  onDecConfirmedItem,
+  onRemoveConfirmedItem,
   onConfirmOrder,
   confirming,
   confirmError,
@@ -385,6 +456,7 @@ export function OrderScreen({
   serviceRate,
   vatInclusive,
   total,
+  menuImageStyle,
   onBackToTableMap,
   onCheckout,
 }: {
@@ -405,6 +477,9 @@ export function OrderScreen({
     itemId: string,
     discount: { type: 'percent' | 'fixed'; value: number } | null,
   ) => Promise<void>;
+  onIncConfirmedItem: (itemId: string) => Promise<void>;
+  onDecConfirmedItem: (itemId: string) => Promise<void>;
+  onRemoveConfirmedItem: (itemId: string) => Promise<void>;
   onConfirmOrder: () => void;
   confirming: boolean;
   confirmError: string | null;
@@ -415,12 +490,15 @@ export function OrderScreen({
   serviceRate: number;
   vatInclusive: boolean;
   total: number;
+  /** レジ画面のメニュー写真の見せ方。未指定時は 'compact' (2026-08-31 追加) */
+  menuImageStyle?: MenuImageStyle;
   onBackToTableMap: () => void;
   onCheckout: () => void;
 }) {
   const items = menu.filter((m) => m.category === activeCategory);
   const groups = groupItemsByMiddle(items);
   const cartCount = cart.reduce((a, l) => a + l.qty, 0);
+  const imageFull = menuImageStyle === 'full';
 
   return (
     <div className="flex flex-1 overflow-hidden">
@@ -466,7 +544,7 @@ export function OrderScreen({
           {groups.map((g, gi) => (
             <div key={g.label ?? `_flat_${gi}`} className={gi > 0 ? 'mt-5' : ''}>
               {g.label && <div className="mb-2.5 text-[12px] font-bold text-muted-foreground">{g.label}</div>}
-              <div className="grid auto-rows-min grid-cols-3 gap-3">
+              <div className={'grid auto-rows-min gap-3 ' + (imageFull ? 'grid-cols-2' : 'grid-cols-3')}>
                 {g.items.map((m) => {
                   const hasOptions = !!(m.optionGroups && m.optionGroups.length);
                   const isHappyHourItem = happyHourActive && typeof m.happyHourPrice === 'number';
@@ -495,10 +573,19 @@ export function OrderScreen({
                         (isHappyHourItem ? 'border-amber-300 bg-amber-50' : 'border-border bg-card')
                       }
                     >
-                      <div className="flex h-16 items-center justify-center overflow-hidden rounded-lg bg-secondary text-muted-foreground">
+                      <div
+                        className={
+                          'flex items-center justify-center overflow-hidden rounded-lg bg-secondary text-muted-foreground ' +
+                          (imageFull ? 'h-32' : 'h-16')
+                        }
+                      >
                         {m.imageUrl ? (
                           // eslint-disable-next-line @next/next/no-img-element
-                          <img src={m.imageUrl} alt="" className="h-full w-full object-cover" />
+                          <img
+                            src={m.imageUrl}
+                            alt=""
+                            className={'h-full w-full ' + (imageFull ? 'object-contain' : 'object-cover')}
+                          />
                         ) : (
                           '🍽'
                         )}
@@ -531,7 +618,14 @@ export function OrderScreen({
             <div className="flex flex-col gap-1.5">
               <div className="text-[11px] font-bold text-muted-foreground">注文済み (厨房送信済み)</div>
               {confirmedItems.map((line) => (
-                <ConfirmedItemRow key={line.id} item={line} onSetDiscount={onSetConfirmedItemDiscount} />
+                <ConfirmedItemRow
+                  key={line.id}
+                  item={line}
+                  onSetDiscount={onSetConfirmedItemDiscount}
+                  onInc={onIncConfirmedItem}
+                  onDec={onDecConfirmedItem}
+                  onRemove={onRemoveConfirmedItem}
+                />
               ))}
             </div>
           )}

@@ -22,6 +22,13 @@ const STATUS_CLASS: Record<TableStatus, string> = {
 
 const OBSTACLE_LABEL: Record<string, string> = { pillar: '柱', counter: 'カウンター', wall: '壁' };
 
+// 飲み放題タイマーが切れているか (テーブルマップ全体で「小さなバッジだけだと気づきにくい」
+// という指摘を受け、卓の枠自体を赤くパルスさせて一目でわかるようにする 2026-08-31 追加)。
+function isDrinkTimerExpired(session: TableSessionRecord | undefined): boolean {
+  if (!session) return false;
+  return !!drinkTimerState(session.drink_timer_started_at, session.drink_timer_minutes)?.isExpired;
+}
+
 // 卓の「滞在○分」「🍺残り○分」バッジ。1分ごとに再描画して経過時間を最新に保つ。
 function TableTimerBadges({ session }: { session: TableSessionRecord | undefined }) {
   const [, tick] = useState(0);
@@ -48,7 +55,7 @@ function TableTimerBadges({ session }: { session: TableSessionRecord | undefined
             (drink.isExpired ? 'animate-pulse bg-destructive text-destructive-foreground' : 'bg-black/10')
           }
         >
-          🍺{drink.isExpired ? '延長要' : formatDuration(drink.remainingMinutes)}
+          🍺{drink.isExpired ? '終了' : formatDuration(drink.remainingMinutes)}
         </span>
       )}
     </div>
@@ -70,6 +77,14 @@ export function TableMapScreen({
   layoutItems: TableLayoutItemRecord[];
   tableSessions: TableSessionRecord[];
 }) {
+  // 飲み放題の残り時間は Date.now() 基準で計算するため、セッション自体に変化が無くても
+  // 定期的に再描画して「切れた瞬間」を卓の枠ハイライトに反映する。
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => tick((t) => t + 1), 30000);
+    return () => clearInterval(id);
+  }, []);
+
   const sessionByTable = new Map(tableSessions.map((s) => [s.table_code, s]));
   const filters: { key: 'all' | TableStatus; label: string }[] = [
     { key: 'all', label: 'すべて' },
@@ -131,13 +146,15 @@ export function TableMapScreen({
               })
               .map((t) => {
                 const status = tableStatus[t.table_code] ?? 'available';
+                const drinkExpired = isDrinkTimerExpired(sessionByTable.get(t.table_code));
                 return (
                   <button
                     key={t.id}
                     onClick={() => onSelectTable(t.table_code)}
                     className={
                       'absolute flex flex-col items-center justify-center gap-0.5 rounded-lg border p-1 text-center ' +
-                      STATUS_CLASS[status]
+                      STATUS_CLASS[status] +
+                      (drinkExpired ? ' animate-pulse ring-2 ring-destructive ring-offset-1' : '')
                     }
                     style={{ left: t.x, top: t.y, width: t.width, height: t.height }}
                   >
@@ -170,7 +187,11 @@ export function TableMapScreen({
                       key={t.code}
                       onClick={() => onSelectTable(t.code)}
                       className={
-                        'flex min-h-20 flex-col gap-1.5 rounded-xl border p-3 text-left ' + STATUS_CLASS[t.status]
+                        'flex min-h-20 flex-col gap-1.5 rounded-xl border p-3 text-left ' +
+                        STATUS_CLASS[t.status] +
+                        (isDrinkTimerExpired(sessionByTable.get(t.code))
+                          ? ' animate-pulse ring-2 ring-destructive ring-offset-1'
+                          : '')
                       }
                     >
                       <div className="text-sm font-bold">{t.code}</div>
