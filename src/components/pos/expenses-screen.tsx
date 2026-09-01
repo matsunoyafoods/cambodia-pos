@@ -30,6 +30,16 @@ function todayIso() {
   return new Date().toISOString().slice(0, 10);
 }
 
+// PDF出力 (2026-09-01 追加。Tom「経費もタイムカードもPDF出力できるようにして欲しい」)。
+// 専用のPDFライブラリは追加せず、ブラウザの印刷機能 (印刷ダイアログの「PDFとして保存」) を使う
+// 方式にした。QRコード印刷画面と同じ考え方で、サーバー側でPDF生成の仕組みを新設せずに済む。
+function printReport(title: string) {
+  const prevTitle = document.title;
+  document.title = title;
+  window.print();
+  document.title = prevTitle;
+}
+
 export function ExpensesScreen() {
   const router = useRouter();
   const me = useStaff();
@@ -54,25 +64,29 @@ export function ExpensesScreen() {
   }, [loadMasters]);
 
   return (
-    <div className="flex h-dvh w-full flex-col overflow-hidden bg-background">
-      <div className="flex flex-shrink-0 items-center gap-3 border-b border-border px-5 py-3">
+    <div className="flex h-dvh w-full flex-col overflow-hidden bg-background print:h-auto print:overflow-visible">
+      <div className="flex flex-shrink-0 items-center gap-3 border-b border-border px-5 py-3 print:hidden">
         <button onClick={() => router.push('/pos')} className="flex h-9 items-center rounded-lg border border-border bg-card px-3 text-[13px] font-semibold">
           ← レジ画面へ
         </button>
         <div className="text-[15px] font-bold">経費</div>
       </div>
-      <div className="flex-1 overflow-auto p-5">
-        <div className="mx-auto flex max-w-[820px] flex-col gap-6">
-          {mastersError && <div className="text-[12.5px] text-destructive">{mastersError}</div>}
-          <QuickEntryForm
-            vendors={vendors}
-            categories={categories}
-            onCreated={() => setRefreshKey((k) => k + 1)}
-          />
+      <div className="flex-1 overflow-auto p-5 print:overflow-visible print:p-0">
+        <div className="mx-auto flex max-w-[820px] flex-col gap-6 print:max-w-none">
+          {mastersError && <div className="text-[12.5px] text-destructive print:hidden">{mastersError}</div>}
+          <div className="print:hidden">
+            <QuickEntryForm
+              vendors={vendors}
+              categories={categories}
+              onCreated={() => setRefreshKey((k) => k + 1)}
+            />
+          </div>
           {canManage && (
             <>
               <ExpenseReport refreshKey={refreshKey} onChanged={() => setRefreshKey((k) => k + 1)} />
-              <MasterListsSection vendors={vendors} categories={categories} onChanged={loadMasters} />
+              <div className="print:hidden">
+                <MasterListsSection vendors={vendors} categories={categories} onChanged={loadMasters} />
+              </div>
             </>
           )}
         </div>
@@ -224,6 +238,7 @@ function QuickEntryForm({
 }
 
 function ExpenseReport({ refreshKey, onChanged }: { refreshKey: number; onChanged: () => void }) {
+  const me = useStaff();
   const [from, setFrom] = useState(() => todayIso().slice(0, 8) + '01');
   const [to, setTo] = useState(todayIso());
   const [statusFilter, setStatusFilter] = useState<'all' | ExpensePaymentStatus>('all');
@@ -267,8 +282,8 @@ function ExpenseReport({ refreshKey, onChanged }: { refreshKey: number; onChange
   }
 
   return (
-    <div className="rounded-xl border border-border bg-card p-5">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2.5">
+    <div className="rounded-xl border border-border bg-card p-5 print:border-0 print:p-0">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2.5 print:hidden">
         <div className="text-[13.5px] font-semibold">経費レポート</div>
         <div className="flex flex-wrap items-center gap-2">
           <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-9 rounded-lg border border-border px-2.5 text-[12.5px]" />
@@ -282,11 +297,27 @@ function ExpenseReport({ refreshKey, onChanged }: { refreshKey: number; onChange
           <button onClick={load} className="h-9 rounded-lg border border-border px-3 text-[12.5px] font-semibold">
             更新
           </button>
+          <button
+            onClick={() => printReport(`経費レポート_${from}_${to}`)}
+            disabled={!rows || rows.length === 0}
+            className="h-9 rounded-lg bg-primary px-3 text-[12.5px] font-semibold text-primary-foreground disabled:opacity-50"
+          >
+            PDF出力
+          </button>
+        </div>
+      </div>
+
+      {/* 印刷時のみ表示するヘッダー (店名・期間・絞り込み条件・出力日時) */}
+      <div className="hidden print:mb-4 print:block">
+        <div className="text-[16px] font-bold">経費レポート{me.store_name ? ` — ${me.store_name}` : ''}</div>
+        <div className="text-[12px] text-muted-foreground">
+          対象期間: {from} 〜 {to} ・ 支払い状況: {statusFilter === 'all' ? 'すべて' : statusFilter === 'paid' ? '支払い済み' : '買掛のみ'} ・ 出力日時:{' '}
+          {new Date().toLocaleString('ja-JP')}
         </div>
       </div>
 
       {rows && (
-        <div className="mb-3 flex gap-5 rounded-lg bg-secondary/40 px-4 py-2.5 text-[12.5px]">
+        <div className="mb-3 flex gap-5 rounded-lg bg-secondary/40 px-4 py-2.5 text-[12.5px] print:rounded-none print:bg-transparent print:px-0">
           <div>
             合計: <span className="font-semibold">${total.toFixed(2)}</span>
           </div>
@@ -296,13 +327,13 @@ function ExpenseReport({ refreshKey, onChanged }: { refreshKey: number; onChange
         </div>
       )}
 
-      {error && <div className="mb-2 text-[12.5px] text-destructive">{error}</div>}
+      {error && <div className="mb-2 text-[12.5px] text-destructive print:hidden">{error}</div>}
       {!rows && <div className="text-[12.5px] text-muted-foreground">読み込み中…</div>}
       {rows?.length === 0 && <div className="text-[12.5px] text-muted-foreground">この条件の経費記録はありません。</div>}
 
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-2 print:gap-1.5">
         {rows?.map((r) => (
-          <div key={r.id} className="rounded-lg border border-border px-3.5 py-2.5">
+          <div key={r.id} className="rounded-lg border border-border px-3.5 py-2.5 print:rounded-none print:border-0 print:border-b print:px-0 print:py-1.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="text-[13px]">
                 <span className="font-semibold">${r.amountUsd.toFixed(2)}</span>
@@ -313,10 +344,10 @@ function ExpenseReport({ refreshKey, onChanged }: { refreshKey: number; onChange
                 {r.paymentStatus === 'unpaid' ? (
                   <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-[10.5px] font-semibold text-amber-700">買掛</span>
                 ) : (
-                  <span className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 text-[10.5px] font-semibold text-emerald-700">支払い済み</span>
+                  <span className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 text-[10.5px] font-semibold text-emerald-700 print:hidden">支払い済み</span>
                 )}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 print:hidden">
                 {r.paymentStatus === 'unpaid' && (
                   <button onClick={() => handleSettle(r.id)} className="rounded-md border border-emerald-600 px-2 py-1 text-[11.5px] font-semibold text-emerald-700">
                     精算する
@@ -380,7 +411,7 @@ function ExpenseEditForm({ record, onDone, onCancel }: { record: ExpenseRecord; 
   }
 
   return (
-    <div className="mt-2.5 flex flex-col gap-2 border-t border-border pt-2.5">
+    <div className="mt-2.5 flex flex-col gap-2 border-t border-border pt-2.5 print:hidden">
       <div className="flex flex-wrap gap-2.5">
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="h-9 rounded-lg border border-border px-2.5 text-[12.5px]" />
         <input type="number" min="0" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} className="h-9 w-28 rounded-lg border border-border px-2.5 text-[12.5px]" />

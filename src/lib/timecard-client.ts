@@ -42,35 +42,39 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-// ---------- 自分の打刻 (staff 以上) ----------
+// ---------- 打刻 (staff 以上) ----------
+// 2026-09-01: 共有端末 (レジ横のタブレット等) で、ログイン中の本人以外もプルダウンで選んで
+// 打刻できるようにするため、全関数が任意で対象スタッフID (staffId) を受け取れるようにした。
+// 省略時は従来通りログイン中の本人。
 
 export type MyTimecardStatus = {
   status: TimecardStatus;
   timecard: { id: string; clockIn: string; breaks: TimecardBreak[] } | null;
 };
 
-export function getMyTimecardStatus(): Promise<MyTimecardStatus> {
-  return request('/api/timecards/status');
+export function getTimecardStatus(staffId?: string): Promise<MyTimecardStatus> {
+  const qs = staffId ? `?staffId=${encodeURIComponent(staffId)}` : '';
+  return request(`/api/timecards/status${qs}`);
 }
 
-// 以下4つのアクションはレスポンスの詳細を使わず、呼び出し側は成功したら getMyTimecardStatus() で
+// 以下4つのアクションはレスポンスの詳細を使わず、呼び出し側は成功したら getTimecardStatus() で
 // 状態を取り直す想定 (API 側のレスポンス形はエンドポイントごとに素朴な snake_case のままなので、
 // ここで無理に camelCase 型に整形しない)。
 
-export async function clockIn(): Promise<void> {
-  await request('/api/timecards/clock-in', { method: 'POST' });
+export async function clockIn(staffId?: string): Promise<void> {
+  await request('/api/timecards/clock-in', { method: 'POST', body: JSON.stringify({ staffId }) });
 }
 
-export async function startBreak(): Promise<void> {
-  await request('/api/timecards/break-start', { method: 'POST' });
+export async function startBreak(staffId?: string): Promise<void> {
+  await request('/api/timecards/break-start', { method: 'POST', body: JSON.stringify({ staffId }) });
 }
 
-export async function endBreak(): Promise<void> {
-  await request('/api/timecards/break-end', { method: 'POST' });
+export async function endBreak(staffId?: string): Promise<void> {
+  await request('/api/timecards/break-end', { method: 'POST', body: JSON.stringify({ staffId }) });
 }
 
-export async function clockOut(): Promise<void> {
-  await request('/api/timecards/clock-out', { method: 'POST' });
+export async function clockOut(staffId?: string): Promise<void> {
+  await request('/api/timecards/clock-out', { method: 'POST', body: JSON.stringify({ staffId }) });
 }
 
 // ---------- 勤怠一覧・人件費レポート (manager 以上) ----------

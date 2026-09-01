@@ -1,17 +1,24 @@
 import { NextResponse } from 'next/server';
 import { createPosAdminClient } from '@/lib/supabase/admin';
 import { withPosStaff } from '@/lib/pos-auth';
+import { resolveTargetStaffId } from '@/lib/timecard-server';
 import type { TimecardBreak } from '@/lib/pos-types';
 
 // 休憩終了 (2026-08-31 追加。勤怠記録機能)。
+// 2026-09-01: リクエストボディの staffId で対象スタッフを指定できるようにした (共有端末対応)。
 
-export const POST = withPosStaff('staff', async (session) => {
+export const POST = withPosStaff('staff', async (session, req) => {
+  const json = await req.json().catch(() => ({}) as { staffId?: string });
+  const resolved = await resolveTargetStaffId(session, json?.staffId);
+  if (resolved.error) return NextResponse.json({ error: resolved.error }, { status: 400 });
+  const targetStaffId = resolved.staffId;
+
   const supabase = createPosAdminClient();
 
   const { data: current, error: findError } = await supabase
     .from('timecards')
     .select('id, breaks')
-    .eq('staff_id', session.staffId)
+    .eq('staff_id', targetStaffId)
     .is('clock_out', null)
     .order('clock_in', { ascending: false })
     .limit(1)
