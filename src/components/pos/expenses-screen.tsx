@@ -43,6 +43,7 @@ function printReport(title: string) {
 export function ExpensesScreen() {
   const router = useRouter();
   const me = useStaff();
+  const isPosNative = me.authMode === 'pos_native';
   const canManage = me.role === 'owner' || me.role === 'manager';
 
   const [vendors, setVendors] = useState<ExpenseVendor[]>([]);
@@ -51,13 +52,14 @@ export function ExpensesScreen() {
   const [refreshKey, setRefreshKey] = useState(0);
 
   const loadMasters = useCallback(() => {
+    if (!isPosNative) return;
     Promise.all([listExpenseVendors(), listExpenseCategories()])
       .then(([v, c]) => {
         setVendors(v);
         setCategories(c);
       })
       .catch((err) => setMastersError(err instanceof PosExpenseApiError ? err.message : 'マスタの取得に失敗しました'));
-  }, []);
+  }, [isPosNative]);
 
   useEffect(() => {
     loadMasters();
@@ -73,24 +75,54 @@ export function ExpensesScreen() {
       </div>
       <div className="flex-1 overflow-auto p-5 print:overflow-visible print:p-0">
         <div className="mx-auto flex max-w-[820px] flex-col gap-6 print:max-w-none">
-          {mastersError && <div className="text-[12.5px] text-destructive print:hidden">{mastersError}</div>}
-          <div className="print:hidden">
-            <QuickEntryForm
-              vendors={vendors}
-              categories={categories}
-              onCreated={() => setRefreshKey((k) => k + 1)}
-            />
-          </div>
-          {canManage && (
+          {!isPosNative ? (
+            <PosNativeOnlyNotice />
+          ) : (
             <>
-              <ExpenseReport refreshKey={refreshKey} onChanged={() => setRefreshKey((k) => k + 1)} />
+              {mastersError && <div className="text-[12.5px] text-destructive print:hidden">{mastersError}</div>}
               <div className="print:hidden">
-                <MasterListsSection vendors={vendors} categories={categories} onChanged={loadMasters} />
+                <QuickEntryForm
+                  vendors={vendors}
+                  categories={categories}
+                  onCreated={() => setRefreshKey((k) => k + 1)}
+                />
               </div>
+              {canManage && (
+                <>
+                  <ExpenseReport refreshKey={refreshKey} onChanged={() => setRefreshKey((k) => k + 1)} />
+                  <div className="print:hidden">
+                    <MasterListsSection vendors={vendors} categories={categories} onChanged={loadMasters} />
+                  </div>
+                </>
+              )}
             </>
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// 経費・勤怠は POS PIN ログイン (pos_staff_session Cookie) 専用の API しか無いため、
+// matsunoya-dine ログイン (authMode 'dine') で /pos に入っているスタッフには、生の
+// "unauthorized" エラーではなくこの案内を出す (2026-09-01 追加。dine ログインでは
+// この画面のデータが扱えない、という Tom への説明に対応)。
+// dine 対応は別途 matsunoya-dine 側に署名付きトークン発行 API を追加する必要があり、
+// 今回は見送り (「I'm hungryアプリ」チャット側の対応事項として later)。
+function PosNativeOnlyNotice() {
+  return (
+    <div className="rounded-xl border-2 border-amber-300 bg-amber-50 p-5 text-amber-900">
+      <p className="mb-2 font-bold">POS PINログインが必要です</p>
+      <p className="mb-3 text-[13px] leading-relaxed">
+        経費・勤怠は現在、POS PINログイン (スタッフ選択 + PINでのログイン) をした端末専用です。matsunoya-dine
+        (Telegram) のログインだけではこの画面のデータは扱えません。
+      </p>
+      <a
+        href="/login"
+        className="inline-flex h-10 items-center rounded-full bg-primary px-5 text-[13px] font-bold text-primary-foreground shadow-md"
+      >
+        PINでログインする
+      </a>
     </div>
   );
 }
