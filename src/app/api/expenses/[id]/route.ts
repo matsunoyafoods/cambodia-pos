@@ -6,7 +6,8 @@ import type { ExpenseRecord } from '@/lib/pos-types';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
-const selectCols = 'id, date, amount_usd, category, vendor, note, payment_status, paid_at, receipt_image_url, created_by, created_at';
+const selectCols =
+  'id, date, amount_usd, category, vendor, note, payment_status, paid_at, paid_from, receipt_image_url, created_by, created_at';
 
 function toRecord(row: {
   id: string;
@@ -17,6 +18,7 @@ function toRecord(row: {
   note: string | null;
   payment_status: 'paid' | 'unpaid';
   paid_at: string | null;
+  paid_from: 'register_cash' | 'other';
   receipt_image_url: string | null;
   created_by: string | null;
   created_at: string;
@@ -30,6 +32,7 @@ function toRecord(row: {
     note: row.note,
     paymentStatus: row.payment_status,
     paidAt: row.paid_at,
+    paidFrom: row.paid_from,
     receiptImageUrl: row.receipt_image_url,
     createdBy: row.created_by,
     createdAt: row.created_at,
@@ -44,6 +47,9 @@ const patchSchema = z.object({
   note: z.string().trim().max(500).nullable().optional(),
   // 買掛の精算: 'paid' に変更すると paidAt を自動で今日時刻にする (下記参照)。
   paymentStatus: z.enum(['paid', 'unpaid']).optional(),
+  // 支払い元 (2026-09-02 追加)。買掛を精算する時 (paymentStatus を 'paid' にする時) に
+  // 一緒に渡すことを想定 — その時点で初めて現金が動くため。
+  paidFrom: z.enum(['register_cash', 'other']).optional(),
 });
 
 // 編集・買掛の精算 ('paid' に変更)。manager 以上のみ。
@@ -68,6 +74,7 @@ export const PATCH = withPosStaff('manager', async (_session, req, ctx: RouteCon
     patch.payment_status = d.paymentStatus;
     patch.paid_at = d.paymentStatus === 'paid' ? new Date().toISOString() : null;
   }
+  if (d.paidFrom !== undefined) patch.paid_from = d.paidFrom;
 
   const { data, error } = await supabase
     .from('expenses')

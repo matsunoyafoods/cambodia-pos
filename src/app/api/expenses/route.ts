@@ -8,7 +8,8 @@ import type { ExpenseRecord } from '@/lib/pos-types';
 // 一覧・集計は manager 以上限定 (店舗の支出状況が見えるため)。登録は staff でも可
 // (「よく買うところ」等で実際に立て替え購入したスタッフが、その場で記録できるように)。
 
-const selectCols = 'id, date, amount_usd, category, vendor, note, payment_status, paid_at, receipt_image_url, created_by, created_at';
+const selectCols =
+  'id, date, amount_usd, category, vendor, note, payment_status, paid_at, paid_from, receipt_image_url, created_by, created_at';
 
 function toRecord(row: {
   id: string;
@@ -19,6 +20,7 @@ function toRecord(row: {
   note: string | null;
   payment_status: 'paid' | 'unpaid';
   paid_at: string | null;
+  paid_from: 'register_cash' | 'other';
   receipt_image_url: string | null;
   created_by: string | null;
   created_at: string;
@@ -32,6 +34,7 @@ function toRecord(row: {
     note: row.note,
     paymentStatus: row.payment_status,
     paidAt: row.paid_at,
+    paidFrom: row.paid_from,
     receiptImageUrl: row.receipt_image_url,
     createdBy: row.created_by,
     createdAt: row.created_at,
@@ -78,6 +81,8 @@ const postSchema = z.object({
   vendor: z.string().trim().max(60).optional(),
   note: z.string().trim().max(500).optional(),
   paymentStatus: z.enum(['paid', 'unpaid']).default('paid'),
+  // 支払い元 (2026-09-02 追加)。'unpaid' の場合は無視される (まだ現金が動いていないため)。
+  paidFrom: z.enum(['register_cash', 'other']).default('other'),
 });
 
 // 新規登録。staff 以上 (誰でも記録できる)。
@@ -102,6 +107,7 @@ export const POST = withPosStaff('staff', async (session, req) => {
       note: d.note || null,
       payment_status: d.paymentStatus,
       paid_at: d.paymentStatus === 'paid' ? new Date().toISOString() : null,
+      paid_from: d.paidFrom,
       created_by: session.staffId,
     })
     .select(selectCols)

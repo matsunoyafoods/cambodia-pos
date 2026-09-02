@@ -20,7 +20,8 @@ import {
   uploadExpenseReceipt,
 } from '@/lib/expense-client';
 import { downloadCsv } from '@/lib/csv-export';
-import type { ExpenseCategory, ExpensePaymentStatus, ExpenseRecord, ExpenseVendor } from '@/lib/pos-types';
+import type { ExpenseCategory, ExpensePaidFrom, ExpensePaymentStatus, ExpenseRecord, ExpenseVendor } from '@/lib/pos-types';
+import { createCashDeposit, deleteCashDeposit, getCashBalance, listCashDeposits, PosCashApiError, type CashBalance, type CashDepositRecord } from '@/lib/cash-client';
 
 // 経費管理画面 (2026-08-31 追加)。
 // 「経費はよく買うところなどは登録できるようにしましょう！経費は雑費や仕入れなどの項目も登録して
@@ -92,6 +93,9 @@ export function ExpensesScreen() {
               </div>
               {canManage && (
                 <>
+                  <div className="print:hidden">
+                    <CashBalanceCard refreshKey={refreshKey} onChanged={() => setRefreshKey((k) => k + 1)} />
+                  </div>
                   <ExpenseReport refreshKey={refreshKey} onChanged={() => setRefreshKey((k) => k + 1)} />
                   <div className="print:hidden">
                     <MasterListsSection vendors={vendors} categories={categories} onChanged={loadMasters} />
@@ -130,6 +134,166 @@ function PosNativeOnlyNotice() {
   );
 }
 
+// 現金残高・銀行入金 (2026-09-02 追加)。
+// Tom「レジの中に現金売上が貯まります。現金売上を銀行入金します。現金売上残高がいくらあるか
+// 分かるようにしたいです。」への対応。
+// 現金残高 = Σ(確定したレジ締めの現金売上) − Σ(銀行入金) − Σ(レジの現金で払った経費、支払い済みのみ)。
+// 常に元データから計算する (この画面では表示のみ。レジ締め自体は /pos/register-closing で行う)。
+function CashBalanceCard({ refreshKey, onChanged }: { refreshKey: number; onChanged: () => void }) {
+  const [balance, setBalance] = useState<CashBalance | null>(null);
+  const [deposits, setDeposits] = useState<CashDepositRecord[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
+
+  const load = useCallback(() => {
+    setError(null);
+    Promise.all([getCashBalance(), listCashDeposits()])
+      .then(([b, d]) => {
+        setBalance(b);
+        setDeposits(d);
+      })
+      .catch((err) => setError(err instanceof PosCashApiError ? err.message : '現金残高の取得に失敗しました'));
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load, refreshKey]);
+
+  async function handleDeleteDeposit(id: string) {
+    if (!confirm('この銀行入金の記録を削除しますか？')) return;
+    try {
+      await deleteCashDeposit(id);
+      load();
+      onChanged();
+    } catch (err) {
+      setError(err instanceof PosCashApiError ? err.message : '削除に失敗しました');
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-5">
+      <div className="mb-3 text-[13.5px] font-semibold">現金残高</div>
+      {error && <div className="mb-2 text-[12.5px] text-destructive">{error}</div>}
+      {!balance ? (
+        <div className="text-[12.5px] text-muted-foreground">読み込み中…</div>
+      ) : (
+        <>
+          <div className="mb-3 rounded-xl bg-secondary/40 px-4 py-3.5">
+            <div className="text-[11px] text-muted-foreground">レジにあるはずの現金 (概算)</div>
+            <div className="text-[24px] font-bold">${balance.balance.toFixed(2)}</div>
+            <div className="mt-1.5 text-[11.5px] text-muted-foreground">
+              現金売上 ${balance.cashSalesTotal.toFixed(2)} − 銀行入金 ${balance.bankDepositsTotal.toFixed(2)} − 現金払いの経費 $
+              {balance.cashExpensesTotal.toFixed(2)}
+            </div>
+            <div className="mt-1 text-[11px] text-muted-foreground">
+              {balance.lastClosingDate ? `最後にレジ締めした日: ${balance.lastClosingDate}` : 'まだレジ締めが確定されていません (レジ締め画面から確定してください)'}
+            </div>
+          </div>
+
+          <CashDepositForm
+            onCreated={() => {
+              load();
+              onChanged();
+            }}
+          />
+
+          <button onClick={() => setShowHistory((v) => !v)} className="mt-3 text-[12px] font-semibold text-primary">
+            {showHistory ? '入金履歴を隠す' : `入金履歴を見る (${deposits?.length ?? 0}件)`}
+          </button>
+          {showHistory && (
+            <div className="mt-2 flex flex-col gap-1.5">
+              {(deposits ?? []).length === 0 && <div className="text-[12px] text-muted-foreground">まだ銀行入金の記録はありません。</div>}
+              {deposits?.map((d) => (
+                <div key={d.id} className="flex items-center justify-between rounded-lg border border-border px-3 py-2 text-[12.5px]">
+                  <div>
+                    <span className="font-semibold">${d.amountUsd.toFixed(2)}</span>
+                    <span className="ml-2 text-muted-foreground">
+                      {d.date}
+                      {d.note ? ` ・ ${d.note}` : ''} ・ {d.createdByName ?? '-'}
+                    </span>
+                  </div>
+                  <button onClick={() => handleDeleteDeposit(d.id)} className="text-[11px] font-semibold text-destructive">
+                    削除
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function CashDepositForm({ onCreated }: { onCreated: () => void }) {
+  const [date, setDate] = useState(todayIso());
+  const [amount, setAmount] = useState('');
+  const [note, setNote] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+
+  const amountNum = Number(amount);
+  const canSubmit = date && amountNum > 0 && !submitting;
+
+  async function submit() {
+    if (!canSubmit) return;
+    setSubmitting(true);
+    setError(null);
+    setDone(false);
+    try {
+      await createCashDeposit({ date, amountUsd: amountNum, note: note.trim() || undefined });
+      setAmount('');
+      setNote('');
+      setDone(true);
+      onCreated();
+    } catch (err) {
+      setError(err instanceof PosCashApiError ? err.message : '登録に失敗しました');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-dashed border-border p-3.5">
+      <div className="mb-2 text-[12.5px] font-semibold">銀行入金を記録する</div>
+      <div className="flex flex-wrap items-end gap-2.5">
+        <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+          日付
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="h-9 rounded-lg border border-border px-2.5 text-[12.5px]" />
+        </label>
+        <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+          入金額 (USD)
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            placeholder="0.00"
+            className="h-9 w-28 rounded-lg border border-border px-2.5 text-[12.5px]"
+          />
+        </label>
+        <input
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          placeholder="メモ (任意)"
+          className="h-9 flex-1 rounded-lg border border-border px-2.5 text-[12.5px]"
+        />
+        <button
+          onClick={submit}
+          disabled={!canSubmit}
+          className="h-9 rounded-lg bg-primary px-4 text-[12.5px] font-semibold text-primary-foreground disabled:opacity-40"
+        >
+          {submitting ? '登録中…' : '記録する'}
+        </button>
+      </div>
+      {error && <div className="mt-2 text-[11.5px] text-destructive">{error}</div>}
+      {done && !error && <div className="mt-2 text-[11.5px] text-emerald-600">記録しました。</div>}
+    </div>
+  );
+}
+
 function QuickEntryForm({
   vendors,
   categories,
@@ -147,6 +311,9 @@ function QuickEntryForm({
   const [vendorOther, setVendorOther] = useState('');
   const [note, setNote] = useState('');
   const [paymentStatus, setPaymentStatus] = useState<ExpensePaymentStatus>('paid');
+  // 支払い元 (2026-09-02 追加)。レジの現金から払った経費は現金残高から自動で引かれるため、
+  // 誤って残高が減らないよう既定値は「その他」にしている (実際にレジ現金を使った時だけ選ぶ)。
+  const [paidFrom, setPaidFrom] = useState<ExpensePaidFrom>('other');
   const [photo, setPhoto] = useState<File | null>(null);
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -182,6 +349,7 @@ function QuickEntryForm({
         vendor: resolvedVendor || undefined,
         note: note.trim() || undefined,
         paymentStatus,
+        paidFrom: paymentStatus === 'paid' ? paidFrom : undefined,
       });
       // 写真アップロードが失敗しても経費の記録自体は成功しているので、警告表示のみに留める
       // (記録全体を失敗扱いにして再入力させると二重登録の原因になる)。
@@ -194,6 +362,7 @@ function QuickEntryForm({
       }
       setAmount('');
       setNote('');
+      setPaidFrom('other');
       setPhoto(null);
       setPhotoPreviewUrl((prev) => {
         if (prev) URL.revokeObjectURL(prev);
@@ -284,6 +453,20 @@ function QuickEntryForm({
           </label>
         </div>
 
+        {paymentStatus === 'paid' && (
+          <div className="flex items-center gap-4">
+            <span className="text-[11.5px] text-muted-foreground">支払い元:</span>
+            <label className="flex items-center gap-1.5 text-[12.5px]">
+              <input type="radio" checked={paidFrom === 'register_cash'} onChange={() => setPaidFrom('register_cash')} />
+              レジの現金
+            </label>
+            <label className="flex items-center gap-1.5 text-[12.5px]">
+              <input type="radio" checked={paidFrom === 'other'} onChange={() => setPaidFrom('other')} />
+              その他 (銀行振込・立て替え等)
+            </label>
+          </div>
+        )}
+
         <div className="flex items-center gap-3">
           <label className="flex h-10 w-fit cursor-pointer items-center gap-1.5 rounded-lg border border-border px-3 text-[12.5px] font-semibold">
             📷 レシート写真 (任意)
@@ -334,9 +517,13 @@ function ExpenseReport({ refreshKey, onChanged }: { refreshKey: number; onChange
   const total = useMemo(() => (rows ?? []).reduce((sum, r) => sum + r.amountUsd, 0), [rows]);
   const unpaidTotal = useMemo(() => (rows ?? []).filter((r) => r.paymentStatus === 'unpaid').reduce((sum, r) => sum + r.amountUsd, 0), [rows]);
 
+  // 精算時に初めて現金 (または他の方法) が動くため、支払い元をここで選ばせる
+  // (2026-09-02 追加。現金残高計算のため — 行ごとに選択を保持する)。
+  const [settlePaidFrom, setSettlePaidFrom] = useState<Record<string, ExpensePaidFrom>>({});
+
   async function handleSettle(id: string) {
     try {
-      await settleExpense(id);
+      await settleExpense(id, settlePaidFrom[id] ?? 'other');
       load();
       onChanged();
     } catch (err) {
@@ -359,8 +546,17 @@ function ExpenseReport({ refreshKey, onChanged }: { refreshKey: number; onChange
     if (!rows || rows.length === 0) return;
     downloadCsv(
       `経費レポート_${from}_${to}`,
-      ['日付', '金額(USD)', '費目', '仕入れ先', 'メモ', '支払い状況', '精算日'],
-      rows.map((r) => [r.date, r.amountUsd.toFixed(2), r.category, r.vendor ?? '', r.note ?? '', r.paymentStatus === 'paid' ? '支払い済み' : '買掛', r.paidAt ? r.paidAt.slice(0, 10) : '']),
+      ['日付', '金額(USD)', '費目', '仕入れ先', 'メモ', '支払い状況', '精算日', '支払い元'],
+      rows.map((r) => [
+        r.date,
+        r.amountUsd.toFixed(2),
+        r.category,
+        r.vendor ?? '',
+        r.note ?? '',
+        r.paymentStatus === 'paid' ? '支払い済み' : '買掛',
+        r.paidAt ? r.paidAt.slice(0, 10) : '',
+        r.paymentStatus === 'paid' ? (r.paidFrom === 'register_cash' ? 'レジの現金' : 'その他') : '',
+      ]),
     );
   }
 
@@ -443,13 +639,26 @@ function ExpenseReport({ refreshKey, onChanged }: { refreshKey: number; onChange
                   ) : (
                     <span className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 text-[10.5px] font-semibold text-emerald-700 print:hidden">支払い済み</span>
                   )}
+                  {r.paymentStatus === 'paid' && r.paidFrom === 'register_cash' && (
+                    <span className="ml-2 rounded-full bg-secondary px-2 py-0.5 text-[10.5px] font-semibold text-muted-foreground print:hidden">レジ現金</span>
+                  )}
                 </span>
               </div>
               <div className="flex items-center gap-2 print:hidden">
                 {r.paymentStatus === 'unpaid' && (
-                  <button onClick={() => handleSettle(r.id)} className="rounded-md border border-emerald-600 px-2 py-1 text-[11.5px] font-semibold text-emerald-700">
-                    精算する
-                  </button>
+                  <>
+                    <select
+                      value={settlePaidFrom[r.id] ?? 'other'}
+                      onChange={(e) => setSettlePaidFrom((prev) => ({ ...prev, [r.id]: e.target.value as ExpensePaidFrom }))}
+                      className="h-7 rounded-md border border-border px-1.5 text-[11px]"
+                    >
+                      <option value="other">その他で精算</option>
+                      <option value="register_cash">レジ現金で精算</option>
+                    </select>
+                    <button onClick={() => handleSettle(r.id)} className="rounded-md border border-emerald-600 px-2 py-1 text-[11.5px] font-semibold text-emerald-700">
+                      精算する
+                    </button>
+                  </>
                 )}
                 <button onClick={() => setEditingId((v) => (v === r.id ? null : r.id))} className="rounded-md border border-border px-2 py-1 text-[11.5px] font-semibold">
                   編集
@@ -484,6 +693,7 @@ function ExpenseEditForm({ record, onDone, onCancel }: { record: ExpenseRecord; 
   const [category, setCategory] = useState(record.category);
   const [vendor, setVendor] = useState(record.vendor ?? '');
   const [note, setNote] = useState(record.note ?? '');
+  const [paidFrom, setPaidFrom] = useState<ExpensePaidFrom>(record.paidFrom);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [receiptUrl, setReceiptUrl] = useState(record.receiptImageUrl);
@@ -501,6 +711,7 @@ function ExpenseEditForm({ record, onDone, onCancel }: { record: ExpenseRecord; 
         category: category.trim(),
         vendor: vendor.trim() || null,
         note: note.trim() || null,
+        paidFrom: record.paymentStatus === 'paid' ? paidFrom : undefined,
       });
       onDone();
     } catch (err) {
@@ -533,6 +744,19 @@ function ExpenseEditForm({ record, onDone, onCancel }: { record: ExpenseRecord; 
         <input value={vendor} onChange={(e) => setVendor(e.target.value)} placeholder="仕入れ先 (任意)" className="h-9 w-36 rounded-lg border border-border px-2.5 text-[12.5px]" />
       </div>
       <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="メモ (任意)" className="h-9 rounded-lg border border-border px-2.5 text-[12.5px]" />
+      {record.paymentStatus === 'paid' && (
+        <div className="flex items-center gap-4">
+          <span className="text-[11px] text-muted-foreground">支払い元:</span>
+          <label className="flex items-center gap-1.5 text-[12px]">
+            <input type="radio" checked={paidFrom === 'register_cash'} onChange={() => setPaidFrom('register_cash')} />
+            レジの現金
+          </label>
+          <label className="flex items-center gap-1.5 text-[12px]">
+            <input type="radio" checked={paidFrom === 'other'} onChange={() => setPaidFrom('other')} />
+            その他
+          </label>
+        </div>
+      )}
       {receiptUrl && (
         <div className="flex items-center gap-2.5">
           {/* eslint-disable-next-line @next/next/no-img-element */}

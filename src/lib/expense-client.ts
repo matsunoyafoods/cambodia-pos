@@ -10,7 +10,7 @@
  *   マスタ管理は manager 以上のみ。
  */
 
-import type { ExpenseCategory, ExpensePaymentStatus, ExpenseRecord, ExpenseVendor } from '@/lib/pos-types';
+import type { ExpenseCategory, ExpensePaidFrom, ExpensePaymentStatus, ExpenseRecord, ExpenseVendor } from '@/lib/pos-types';
 
 export class PosExpenseApiError extends Error {
   constructor(
@@ -108,6 +108,8 @@ export type CreateExpenseInput = {
   vendor?: string;
   note?: string;
   paymentStatus?: ExpensePaymentStatus; // 未指定なら 'paid' (API 側デフォルト)
+  /** 支払い元 (2026-09-02 追加)。未指定なら 'other' (API側デフォルト。現金残高からは引かれない) */
+  paidFrom?: ExpensePaidFrom;
 };
 
 export async function createExpense(input: CreateExpenseInput): Promise<ExpenseRecord> {
@@ -135,6 +137,7 @@ export type UpdateExpenseInput = Partial<{
   vendor: string | null;
   note: string | null;
   paymentStatus: ExpensePaymentStatus;
+  paidFrom: ExpensePaidFrom;
 }>;
 
 export async function updateExpense(id: string, patch: UpdateExpenseInput): Promise<ExpenseRecord> {
@@ -146,8 +149,10 @@ export async function updateExpense(id: string, patch: UpdateExpenseInput): Prom
 }
 
 // 買掛の決済 (未払い → 支払い済みにする)。updateExpense の薄いラッパー。
-export function settleExpense(id: string): Promise<ExpenseRecord> {
-  return updateExpense(id, { paymentStatus: 'paid' });
+// 精算した瞬間に初めて現金 (または他の方法) が動くため、paidFrom もここで確定させる
+// (2026-09-02 追加。現金残高計算のため — レジの現金で精算した買掛も残高から引く)。
+export function settleExpense(id: string, paidFrom: ExpensePaidFrom): Promise<ExpenseRecord> {
+  return updateExpense(id, { paymentStatus: 'paid', paidFrom });
 }
 
 export async function deleteExpense(id: string): Promise<void> {

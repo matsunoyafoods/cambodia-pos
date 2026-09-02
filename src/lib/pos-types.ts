@@ -234,6 +234,10 @@ export type ExpenseCategory = { id: string; name: string; sortOrder: number };
 
 export type ExpensePaymentStatus = 'paid' | 'unpaid';
 
+/** 支払い元 (2026-09-02 追加)。'register_cash' はレジの現金から支払った経費 — 現金残高から
+ *  自動で差し引かれる。'other' はそれ以外 (銀行振込・個人の財布からの立て替え等)。 */
+export type ExpensePaidFrom = 'register_cash' | 'other';
+
 export type ExpenseRecord = {
   id: string;
   date: string; // 'YYYY-MM-DD'
@@ -246,6 +250,8 @@ export type ExpenseRecord = {
   /** 'unpaid' = 買掛 (まだ支払っていない)。paidAt を入れて 'paid' に精算できる。 */
   paymentStatus: ExpensePaymentStatus;
   paidAt: string | null;
+  /** 'unpaid' の間は意味を持たない (まだ現金が動いていないため)。精算・登録時に確定する。 */
+  paidFrom: ExpensePaidFrom;
   receiptImageUrl: string | null;
   createdBy: string | null;
   createdAt: string;
