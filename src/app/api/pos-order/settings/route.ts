@@ -34,6 +34,7 @@ export async function GET() {
       stored.menuImageStyle === 'compact' || stored.menuImageStyle === 'full'
         ? stored.menuImageStyle
         : DEFAULT_SETTINGS.menuImageStyle,
+    themeColor: typeof stored.themeColor === 'string' ? stored.themeColor : DEFAULT_SETTINGS.themeColor,
   };
   return NextResponse.json(settings);
 }

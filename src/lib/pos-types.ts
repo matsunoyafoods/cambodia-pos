@@ -141,6 +141,10 @@ export type PosSettings = {
   happyHourEnd: string; // 'HH:MM'
   /** レジ画面のメニュー写真の見せ方 (2026-08-31 追加。未設定 = 'compact') */
   menuImageStyle: MenuImageStyle;
+  /** 画面のテーマカラー (2026-09-02 追加。Tom「画面イメージ色もカスタムできるように」への対応)。
+   * '#rrggbb' 形式のHEX。未設定 (null) = デフォルトの配色のまま。/pos/* 全体のボタン・アクセント色
+   * (--primary, --brand の各CSS変数) に反映される (theme-color-injector.tsx 参照)。 */
+  themeColor: string | null;
 };
 
 // プリンター実装 (2026-08-31 追加)。レジ画面 (Vercel/クラウド) から店舗LAN内のプリンターへ
@@ -222,6 +226,7 @@ export const DEFAULT_SETTINGS: PosSettings = {
   happyHourStart: '17:00',
   happyHourEnd: '19:00',
   menuImageStyle: 'compact',
+  themeColor: null,
 };
 
 // ---------- 経費管理 (2026-08-31 追加。データ収集・AI分析機能 第一弾) ----------

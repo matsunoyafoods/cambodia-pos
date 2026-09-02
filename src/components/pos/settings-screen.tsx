@@ -1094,6 +1094,7 @@ export function SettingsScreen() {
           happyHourStart,
           happyHourEnd,
           menuImageStyle,
+          themeColor,
         } = settings;
         const s = await updateGeneralSettings({
           vatRate,
@@ -1107,6 +1108,7 @@ export function SettingsScreen() {
           happyHourStart,
           happyHourEnd,
           menuImageStyle,
+          themeColor,
         });
         setSettings((prev) => ({ ...prev, ...s }));
       } else {
@@ -1268,6 +1270,34 @@ export function SettingsScreen() {
                   </div>
                   <div className="mt-1.5 text-[11px] text-muted-foreground">
                     小さめ: 従来通りコンパクトに表示 (商品を切り取って詰めるため画像が見切れることがあります)。商品全体を表示: 写真を切り取らず全体が見えるように大きめに表示します (商品数が多いと縦スクロールが増えます)。
+                  </div>
+                </Field>
+              )}
+
+              {isPosNative && (
+                <Field label="テーマカラー">
+                  <div className="flex items-center gap-2.5">
+                    <input
+                      type="color"
+                      value={settings.themeColor ?? '#e11d3d'}
+                      disabled={!canManageSettings}
+                      onChange={(e) => update('themeColor', e.target.value)}
+                      className="h-10 w-14 cursor-pointer rounded-lg border border-border p-1 disabled:opacity-60"
+                    />
+                    <span className="text-[12.5px] text-muted-foreground">{settings.themeColor ?? 'デフォルト (未設定)'}</span>
+                    {settings.themeColor && (
+                      <button
+                        type="button"
+                        disabled={!canManageSettings}
+                        onClick={() => update('themeColor', null)}
+                        className="h-8 rounded-lg border border-border px-3 text-[11.5px] font-semibold disabled:opacity-60"
+                      >
+                        デフォルトに戻す
+                      </button>
+                    )}
+                  </div>
+                  <div className="mt-1.5 text-[11px] text-muted-foreground">
+                    レジ画面・設定画面・経費/勤怠/売上レポート等、/pos 配下のボタンやアクセント色をこの1色に変更します。保存後、画面を再読み込みすると反映されます。
                   </div>
                 </Field>
               )}
