@@ -22,6 +22,8 @@ import { effectiveBasePrice, isHappyHourNow } from '@/lib/happy-hour';
 import { cartLineNetTotal } from '@/lib/cart';
 import { HandyOrderScreen } from './handy-order-screen';
 import { OptionModal, type ModalSelection } from './option-modal';
+import { LanguageProvider, useLanguage, GUEST_LANGUAGE_STORAGE_KEY } from './language-context';
+import { LanguagePickerScreen } from './language-picker-screen';
 
 // QRセルフオーダー画面 (2026-08-31 追加。「QRコードを読み込んでセルフオーダーもできるし、
 // スタッフがさわればハンディー機能としても使えるようにしたい」への対応)。
@@ -42,7 +44,28 @@ import { OptionModal, type ModalSelection } from './option-modal';
 // なった (会計時にレジが別途記録する)。そのため QR から直接卓を開いても客層記録の入力を
 // 求める必要がない。
 
+// 多言語化 (2026-09-02 追加)。QRセルフオーダーは客側画面なので、専用の言語コンテキスト
+// (GUEST_LANGUAGE_STORAGE_KEY) でラップする。初回アクセス時だけ言語選択画面を挟み、
+// 選択後はこのブラウザでは以降スキップされる (Tom確認済みの仕様)。
 export function QrOrderApp({ tableCode }: { tableCode: string }) {
+  return (
+    <LanguageProvider storageKey={GUEST_LANGUAGE_STORAGE_KEY} defaultLang="ja">
+      <QrOrderAppInner tableCode={tableCode} />
+    </LanguageProvider>
+  );
+}
+
+function QrOrderAppInner({ tableCode }: { tableCode: string }) {
+  const { t, setLang, menuText } = useLanguage();
+  const [languageChosen, setLanguageChosen] = useState<boolean | null>(null);
+  useEffect(() => {
+    try {
+      setLanguageChosen(!!window.localStorage.getItem(GUEST_LANGUAGE_STORAGE_KEY));
+    } catch {
+      setLanguageChosen(false);
+    }
+  }, []);
+
   const [menu, setMenu] = useState<MenuItem[]>([]);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [layoutItems, setLayoutItems] = useState<TableLayoutItemRecord[]>([]);
@@ -122,10 +145,9 @@ export function QrOrderApp({ tableCode }: { tableCode: string }) {
         setConfirmedItems(confirmed);
       } catch (err) {
         if (cancelled) return;
-        const message =
-          err instanceof PosApiError || err instanceof PosOrderApiError
-            ? err.message
-            : 'メニュー・設定の取得に失敗しました。通信環境を確認してください。';
+        // API由来のメッセージ (日本語固定、稀にしか出ない) はそのまま表示し、それ以外の
+        // 汎用エラーは 'generic' マーカーにして render 側で t('qr.loadError') に翻訳する。
+        const message = err instanceof PosApiError || err instanceof PosOrderApiError ? err.message : 'generic';
         setDataError(message);
       } finally {
         if (!cancelled) setDataLoading(false);
@@ -221,7 +243,7 @@ export function QrOrderApp({ tableCode }: { tableCode: string }) {
     setCart((prev) => {
       const existing = prev.find((l) => l.id === item.id);
       if (existing) return prev.map((l) => (l.id === item.id ? { ...l, qty: l.qty + 1 } : l));
-      return [...prev, { id: item.id, menuId: item.id, name: item.name, unitPrice, qty: 1, selectedOptions: [] }];
+      return [...prev, { id: item.id, menuId: item.id, name: menuText(item.name, item.translations), unitPrice, qty: 1, selectedOptions: [] }];
     });
   }
 
@@ -270,7 +292,7 @@ export function QrOrderApp({ tableCode }: { tableCode: string }) {
         setCurrentOrder(order);
         proceedAddItem(item);
       } catch (err) {
-        window.alert(err instanceof PosOrderOrdersApiError ? err.message : '注文を開始できませんでした。スタッフにお声がけください。');
+        window.alert(err instanceof PosOrderOrdersApiError ? err.message : t('qr.startOrderError'));
       }
       return;
     }
@@ -315,44 +337,70 @@ export function QrOrderApp({ tableCode }: { tableCode: string }) {
       const choice = g.choices.find((c) => c.id === optionSelection[g.key]);
       return sum + (choice ? choice.priceDelta : 0);
     }, 0);
-    const optionLabel = groups.map((g) => g.choices.find((c) => c.id === optionSelection[g.key])?.label ?? '').join('・');
+    const optionLabel = groups
+      .map((g) => {
+        const choice = g.choices.find((c) => c.id === optionSelection[g.key]);
+        return choice ? menuText(choice.label, choice.translations) : '';
+      })
+      .join('・');
     const lineId = optionModalItem.id + ':' + groups.map((g) => optionSelection[g.key]).join(',');
     const unitPrice = effectiveBasePrice(optionModalItem, happyHourActive) + priceDeltaTotal;
     const selectedOptions = groups.map((g) => {
       const choice = g.choices.find((c) => c.id === optionSelection[g.key])!;
       return { groupKey: g.key, groupLabel: g.label, choiceId: choice.id, choiceLabel: choice.label, priceDelta: choice.priceDelta };
     });
+    const itemDisplayName = menuText(optionModalItem.name, optionModalItem.translations);
 
     setCart((prev) => {
       const existing = prev.find((l) => l.id === lineId);
       if (existing) return prev.map((l) => (l.id === lineId ? { ...l, qty: l.qty + 1 } : l));
-      return [...prev, { id: lineId, menuId: optionModalItem.id, name: `${optionModalItem.name}(${optionLabel})`, unitPrice, qty: 1, selectedOptions }];
+      return [...prev, { id: lineId, menuId: optionModalItem.id, name: `${itemDisplayName}(${optionLabel})`, unitPrice, qty: 1, selectedOptions }];
     });
     setOptionModalItem(null);
     setOptionSelection({});
   }
 
+  // 初回アクセス時のみ言語選択画面を挟む (Tom確認済み)。まだ判定中 (null) の間はここで
+  // データ読み込み中と同じ表示にしておく (言語未確定でも表示が崩れないように)。
+  if (languageChosen === null) {
+    return (
+      <div className="flex h-dvh w-full flex-col items-center justify-center gap-3 bg-background text-muted-foreground">
+        <div className="text-sm">{t('loading.menu')}</div>
+      </div>
+    );
+  }
+  if (languageChosen === false) {
+    return (
+      <LanguagePickerScreen
+        onSelect={(l) => {
+          setLang(l);
+          setLanguageChosen(true);
+        }}
+      />
+    );
+  }
+
   if (dataLoading) {
     return (
       <div className="flex h-dvh w-full flex-col items-center justify-center gap-3 bg-background text-muted-foreground">
-        <div className="text-sm">メニューを読み込み中…</div>
+        <div className="text-sm">{t('loading.menu')}</div>
       </div>
     );
   }
   if (tableInvalid) {
     return (
       <div className="flex h-dvh w-full flex-col items-center justify-center gap-3 bg-background px-8 text-center">
-        <div className="text-base font-semibold">このテーブルは見つかりませんでした</div>
-        <div className="text-[12.5px] text-muted-foreground">恐れ入りますが、スタッフにお声がけください。</div>
+        <div className="text-base font-semibold">{t('table.notFoundTitle')}</div>
+        <div className="text-[12.5px] text-muted-foreground">{t('table.notFoundBody')}</div>
       </div>
     );
   }
   if (dataError) {
     return (
       <div className="flex h-dvh w-full flex-col items-center justify-center gap-4 bg-background px-8 text-center">
-        <div className="text-sm font-semibold text-destructive">{dataError}</div>
-        <button onClick={() => setLoadToken((t) => t + 1)} className="h-10 rounded-lg bg-primary px-5 text-[13.5px] font-bold text-primary-foreground">
-          再読み込み
+        <div className="text-sm font-semibold text-destructive">{dataError === 'generic' ? t('qr.loadError') : dataError}</div>
+        <button onClick={() => setLoadToken((n) => n + 1)} className="h-10 rounded-lg bg-primary px-5 text-[13.5px] font-bold text-primary-foreground">
+          {t('common.reload')}
         </button>
       </div>
     );
@@ -362,7 +410,7 @@ export function QrOrderApp({ tableCode }: { tableCode: string }) {
     <div className="relative flex h-dvh w-full flex-col overflow-hidden bg-background">
       <div className="flex h-14 flex-shrink-0 items-center gap-2 border-b border-border px-3.5">
         <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand text-[13px] font-bold text-brand-foreground">住</div>
-        <div className="text-[14px] font-bold tracking-tight">セルフオーダー</div>
+        <div className="text-[14px] font-bold tracking-tight">{t('qr.headerTitle')}</div>
       </div>
 
       <HandyOrderScreen
@@ -413,13 +461,13 @@ export function QrOrderApp({ tableCode }: { tableCode: string }) {
       {submitted && (
         <div className="absolute inset-0 z-[60] flex flex-col items-center justify-center gap-5 bg-background px-8 text-center">
           <div className="flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100 text-3xl text-emerald-700">✓</div>
-          <div className="text-lg font-bold">注文を送信しました</div>
-          <div className="text-[12.5px] text-muted-foreground">まもなくお料理をお持ちします。追加のご注文もこちらからどうぞ。</div>
+          <div className="text-lg font-bold">{t('qr.submittedTitle')}</div>
+          <div className="text-[12.5px] text-muted-foreground">{t('qr.submittedBody')}</div>
           <button
             onClick={() => setSubmitted(false)}
             className="h-12 rounded-lg bg-primary px-6 text-[14px] font-bold text-primary-foreground"
           >
-            追加注文へ戻る
+            {t('qr.submittedBack')}
           </button>
         </div>
       )}

@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { money } from '@/lib/money';
+import { useLanguage } from './language-context';
 
 export function ReceiptScreen({
   selectedTable,
@@ -28,6 +29,7 @@ export function ReceiptScreen({
   invoiceError: string | null;
   invoiceIssued: boolean;
 }) {
+  const { t } = useLanguage();
   const [invoiceFormOpen, setInvoiceFormOpen] = useState(false);
   const [recipientName, setRecipientName] = useState('');
   const [description, setDescription] = useState('');
@@ -42,24 +44,24 @@ export function ReceiptScreen({
         <div className="flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100 text-2xl text-emerald-600">
           ✓
         </div>
-        <div className="text-lg font-bold">会計が完了しました</div>
+        <div className="text-lg font-bold">{t('receipt.completedTitle')}</div>
         <div className="text-[13px] text-muted-foreground">
-          テーブル {selectedTable} ・ 合計 ${money(total)}
+          {t('receipt.summary', { table: selectedTable ?? '', total: `$${money(total)}` })}
           <br />
-          レシートを印刷しています…
+          {t('receipt.printingNote')}
         </div>
         <button
           onClick={onNewOrder}
           className="mt-2 h-12 w-full rounded-lg bg-primary text-sm font-semibold text-primary-foreground"
         >
-          テーブルマップへ戻る
+          {t('receipt.backToTableMap')}
         </button>
         <button
           onClick={onReprintReceipt}
           disabled={reprintBusy}
           className="h-11 w-full rounded-lg border border-border bg-card text-[13.5px] font-semibold disabled:opacity-60"
         >
-          {reprintBusy ? '送信中…' : '顧客控えを再印刷'}
+          {reprintBusy ? t('cart.submitting') : t('receipt.reprintButton')}
         </button>
 
         {canIssueInvoice && !invoiceFormOpen && !invoiceIssued && (
@@ -67,34 +69,34 @@ export function ReceiptScreen({
             onClick={() => setInvoiceFormOpen(true)}
             className="h-11 w-full rounded-lg border border-border bg-card text-[13.5px] font-semibold"
           >
-            領収書を発行
+            {t('receipt.issueInvoiceButton')}
           </button>
         )}
 
         {invoiceIssued && (
           <div className="w-full rounded-lg bg-emerald-50 px-3 py-2.5 text-[12.5px] font-semibold text-emerald-700">
-            領収書を印刷キューに送信しました ✓
+            {t('receipt.invoiceQueuedNote')}
           </div>
         )}
 
         {canIssueInvoice && invoiceFormOpen && !invoiceIssued && (
           <div className="flex w-full flex-col gap-2 rounded-lg border border-border p-3 text-left">
-            <div className="text-[12.5px] font-semibold">領収書の発行</div>
+            <div className="text-[12.5px] font-semibold">{t('receipt.invoiceFormTitle')}</div>
             <div>
-              <div className="mb-1 text-[11px] text-muted-foreground">宛名 (空欄なら「上様」)</div>
+              <div className="mb-1 text-[11px] text-muted-foreground">{t('receipt.recipientLabel')}</div>
               <input
                 value={recipientName}
                 onChange={(e) => setRecipientName(e.target.value)}
-                placeholder="上様"
+                placeholder={t('receipt.recipientPlaceholder')}
                 className="h-9 w-full rounded-md border border-border px-2.5 text-[12.5px]"
               />
             </div>
             <div>
-              <div className="mb-1 text-[11px] text-muted-foreground">但し書き (空欄なら「お食事代として」)</div>
+              <div className="mb-1 text-[11px] text-muted-foreground">{t('receipt.descriptionLabel')}</div>
               <input
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="お食事代として"
+                placeholder={t('receipt.descriptionPlaceholder')}
                 className="h-9 w-full rounded-md border border-border px-2.5 text-[12.5px]"
               />
             </div>
@@ -105,14 +107,14 @@ export function ReceiptScreen({
                 disabled={invoiceBusy}
                 className="h-9 flex-1 rounded-md bg-primary text-[12.5px] font-semibold text-primary-foreground disabled:opacity-60"
               >
-                {invoiceBusy ? '発行中…' : '発行する'}
+                {invoiceBusy ? t('receipt.issuing') : t('receipt.issueButton')}
               </button>
               <button
                 onClick={() => setInvoiceFormOpen(false)}
                 disabled={invoiceBusy}
                 className="h-9 rounded-md border border-border px-3 text-[12.5px] font-semibold text-muted-foreground disabled:opacity-60"
               >
-                キャンセル
+                {t('common.cancel')}
               </button>
             </div>
           </div>

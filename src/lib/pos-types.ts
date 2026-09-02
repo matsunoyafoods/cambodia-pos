@@ -2,10 +2,16 @@
 // メニュー・オプションは matsunoya-dine (public スキーマ) が Master、
 // それ以外 (orders, payments, settings, ...) は pos スキーマ。
 
+// 多言語化 (2026-09-02) で追加。日本語 (ja) は既存の name/label 列そのものなので
+// translations には含めない。値が無いキー (未翻訳) はUI側で日本語にフォールバックする。
+export type MenuLang = 'en' | 'km' | 'zh' | 'ko';
+export type TranslationMap = Partial<Record<MenuLang, string>>;
+
 export type OptionChoice = {
   id: string; // choice_key
   label: string;
   priceDelta: number;
+  translations?: TranslationMap;
 };
 
 export type OptionGroup = {
@@ -13,17 +19,26 @@ export type OptionGroup = {
   label: string;
   required: boolean;
   choices: OptionChoice[];
+  translations?: TranslationMap;
 };
 
 export type MenuItem = {
   id: string;
   /** 大カテゴリー名 (レジ画面上部のタブに表示される単位)。旧フラット構成の店舗ではこれがそのままカテゴリ名になる */
   category: string;
+  /** 大カテゴリーのID (翻訳・並び替え用)。未設定 = 未分類 */
+  categoryId?: string;
+  categoryTranslations?: TranslationMap;
   /** 中カテゴリー名 (未設定 = 中カテゴリーなし。大カテゴリータブの中で商品をグループ化する見出しに使う) */
   middleCategory?: string;
+  middleCategoryId?: string;
+  middleCategoryTranslations?: TranslationMap;
   /** 小カテゴリー名 (中カテゴリーが無い場合は大カテゴリー直下の分類名。旧フラット構成では category と同じ値になる) */
   minorCategory: string;
+  minorCategoryId?: string;
+  minorCategoryTranslations?: TranslationMap;
   name: string;
+  translations?: TranslationMap;
   price: number;
   optionGroups?: OptionGroup[];
   /** ハッピーアワー中のみ使う基準価格 (未設定 = ハッピーアワー対象外の商品) */

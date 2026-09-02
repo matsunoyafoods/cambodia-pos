@@ -260,3 +260,32 @@ export function applyMenuOptionTemplate(itemId: string, templateId: string): Pro
     body: JSON.stringify({ templateId }),
   });
 }
+
+// ---------- 多言語化 (2026-09-02 追加): カテゴリー・商品・オプション名の翻訳管理 ----------
+
+export type MenuTranslationLang = 'en' | 'km' | 'zh' | 'ko';
+export type MenuTranslationEntryType = 'category' | 'item' | 'option_group' | 'option_choice';
+
+export type MenuTranslationEntry = {
+  type: MenuTranslationEntryType;
+  id: string;
+  ja: string;
+  context: string | null;
+  translations: Partial<Record<MenuTranslationLang, string>>;
+};
+
+export function listMenuTranslations(): Promise<{ entries: MenuTranslationEntry[] }> {
+  return request('/api/menu/translations');
+}
+
+export function saveMenuTranslation(
+  type: MenuTranslationEntryType,
+  id: string,
+  translations: Partial<Record<MenuTranslationLang, string>>,
+): Promise<{ ok: boolean }> {
+  return request('/api/menu/translations', { method: 'PATCH', body: JSON.stringify({ type, id, translations }) });
+}
+
+export function generateMenuTranslationDrafts(): Promise<{ updated: number; total: number }> {
+  return request('/api/menu/translations/generate', { method: 'POST' });
+}

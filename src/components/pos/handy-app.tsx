@@ -34,6 +34,8 @@ import { useStaff } from './staff-context';
 import { HandyTableList } from './handy-table-list';
 import { HandyOrderScreen } from './handy-order-screen';
 import { OptionModal, type ModalSelection } from './option-modal';
+import { LanguageProvider, useLanguage, STAFF_LANGUAGE_STORAGE_KEY } from './language-context';
+import { LANGS, LANG_LABEL } from '@/lib/i18n/lang';
 
 // ハンディ (タブレット・スマホ) 向けの注文専用アプリ (2026-08-31 追加。「ハンディ注文機能」)。
 // レジ画面本体 (pos-app.tsx) と同じ pos.orders/pos.table_sessions 等のAPIをそのまま共有する
@@ -45,7 +47,19 @@ import { OptionModal, type ModalSelection } from './option-modal';
 // スコープ: 卓選択 → 注文入力 (厨房送信) まで。会計・レシート・領収書はレジでのみ行う。
 type Screen = 'tablelist' | 'order';
 
+// 多言語化 (2026-09-02 追加)。スタッフ向け画面はデフォルト日本語のまま、ハンバーガーメニューの
+// 「表示言語」から切り替える (お客様のQRセルフオーダーとは別の localStorage キーを使うため、
+// 同じ端末を後でお客様がQRから使っても言語が引き継がれない)。
 export function HandyApp() {
+  return (
+    <LanguageProvider storageKey={STAFF_LANGUAGE_STORAGE_KEY} defaultLang="ja">
+      <HandyAppInner />
+    </LanguageProvider>
+  );
+}
+
+function HandyAppInner() {
+  const { t, lang, setLang, menuText } = useLanguage();
   const router = useRouter();
   const me = useStaff();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -136,10 +150,7 @@ export function HandyApp() {
         }
       } catch (err) {
         if (cancelled) return;
-        const message =
-          err instanceof PosApiError || err instanceof PosOrderApiError
-            ? err.message
-            : 'メニュー・設定の取得に失敗しました。通信環境を確認してください。';
+        const message = err instanceof PosApiError || err instanceof PosOrderApiError ? err.message : 'generic';
         setDataError(message);
       } finally {
         if (!cancelled) setDataLoading(false);
@@ -258,7 +269,7 @@ export function HandyApp() {
     setCart((prev) => {
       const existing = prev.find((l) => l.id === item.id);
       if (existing) return prev.map((l) => (l.id === item.id ? { ...l, qty: l.qty + 1 } : l));
-      return [...prev, { id: item.id, menuId: item.id, name: item.name, unitPrice, qty: 1, selectedOptions: [] }];
+      return [...prev, { id: item.id, menuId: item.id, name: menuText(item.name, item.translations), unitPrice, qty: 1, selectedOptions: [] }];
     });
   }
 
@@ -309,7 +320,7 @@ export function HandyApp() {
         setCurrentOrder(order);
         proceedAddItem(item);
       } catch (err) {
-        window.alert(err instanceof PosOrderOrdersApiError ? err.message : '卓を開けませんでした');
+        window.alert(err instanceof PosOrderOrdersApiError ? err.message : t('handyApp.openTableError'));
       }
       return;
     }
@@ -332,7 +343,7 @@ export function HandyApp() {
       }).catch(() => {});
       return true;
     } catch (err) {
-      setConfirmError(err instanceof PosOrderOrdersApiError ? err.message : '注文の確定に失敗しました');
+      setConfirmError(err instanceof PosOrderOrdersApiError ? err.message : t('handyApp.confirmError'));
       return false;
     } finally {
       setConfirming(false);
@@ -349,18 +360,24 @@ export function HandyApp() {
       const choice = g.choices.find((c) => c.id === optionSelection[g.key]);
       return sum + (choice ? choice.priceDelta : 0);
     }, 0);
-    const optionLabel = groups.map((g) => g.choices.find((c) => c.id === optionSelection[g.key])?.label ?? '').join('・');
+    const optionLabel = groups
+      .map((g) => {
+        const choice = g.choices.find((c) => c.id === optionSelection[g.key]);
+        return choice ? menuText(choice.label, choice.translations) : '';
+      })
+      .join('・');
     const lineId = optionModalItem.id + ':' + groups.map((g) => optionSelection[g.key]).join(',');
     const unitPrice = effectiveBasePrice(optionModalItem, happyHourActive) + priceDeltaTotal;
     const selectedOptions = groups.map((g) => {
       const choice = g.choices.find((c) => c.id === optionSelection[g.key])!;
       return { groupKey: g.key, groupLabel: g.label, choiceId: choice.id, choiceLabel: choice.label, priceDelta: choice.priceDelta };
     });
+    const itemDisplayName = menuText(optionModalItem.name, optionModalItem.translations);
 
     setCart((prev) => {
       const existing = prev.find((l) => l.id === lineId);
       if (existing) return prev.map((l) => (l.id === lineId ? { ...l, qty: l.qty + 1 } : l));
-      return [...prev, { id: lineId, menuId: optionModalItem.id, name: `${optionModalItem.name}(${optionLabel})`, unitPrice, qty: 1, selectedOptions }];
+      return [...prev, { id: lineId, menuId: optionModalItem.id, name: `${itemDisplayName}(${optionLabel})`, unitPrice, qty: 1, selectedOptions }];
     });
     setOptionModalItem(null);
     setOptionSelection({});
@@ -368,11 +385,11 @@ export function HandyApp() {
 
   async function resetCurrentTable() {
     if (!selectedTable) return;
-    if (!window.confirm(`テーブル ${selectedTable} をリセットしますか？\n入力した注文はすべて破棄され、会計は行われません。この操作は取り消せません。`)) return;
+    if (!window.confirm(t('handyApp.resetConfirm', { table: selectedTable }))) return;
     try {
       await resetTable(selectedTable);
     } catch (err) {
-      window.alert(err instanceof PosOrderOrdersApiError ? err.message : 'テーブルのリセットに失敗しました');
+      window.alert(err instanceof PosOrderOrdersApiError ? err.message : t('handyApp.resetError'));
       return;
     }
     setTableSessions((prev) => prev.filter((s) => s.table_code !== selectedTable));
@@ -396,32 +413,34 @@ export function HandyApp() {
   if (dataLoading) {
     return (
       <div className="flex h-dvh w-full flex-col items-center justify-center gap-3 bg-background text-muted-foreground">
-        <div className="text-sm">メニュー・設定を読み込み中…</div>
+        <div className="text-sm">{t('loading.menu')}</div>
       </div>
     );
   }
   if (dataError) {
     return (
       <div className="flex h-dvh w-full flex-col items-center justify-center gap-4 bg-background px-8 text-center">
-        <div className="text-sm font-semibold text-destructive">{dataError}</div>
-        <button onClick={() => setLoadToken((t) => t + 1)} className="h-10 rounded-lg bg-primary px-5 text-[13.5px] font-bold text-primary-foreground">
-          再読み込み
+        <div className="text-sm font-semibold text-destructive">{dataError === 'generic' ? t('qr.loadError') : dataError}</div>
+        <button onClick={() => setLoadToken((n) => n + 1)} className="h-10 rounded-lg bg-primary px-5 text-[13.5px] font-bold text-primary-foreground">
+          {t('common.reload')}
         </button>
       </div>
     );
   }
+
+  const ROLE_LABEL_KEY = { owner: 'role.owner', manager: 'role.manager', staff: 'role.staff' } as const;
 
   return (
     <div className="relative flex h-dvh w-full flex-col overflow-hidden bg-background">
       <div className="flex h-14 flex-shrink-0 items-center justify-between border-b border-border px-3.5">
         <div className="flex items-center gap-2">
           <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand text-[13px] font-bold text-brand-foreground">住</div>
-          <div className="text-[14px] font-bold tracking-tight">ハンディ注文</div>
+          <div className="text-[14px] font-bold tracking-tight">{t('handyApp.title')}</div>
         </div>
         <div className="relative">
           <button
             onClick={() => setMenuOpen((v) => !v)}
-            aria-label="メニュー"
+            aria-label={t('handyApp.menuAriaLabel')}
             className="flex h-8 w-8 flex-col items-center justify-center gap-[3px] rounded-full bg-secondary"
           >
             <span className="h-[2px] w-3.5 rounded-full bg-foreground" />
@@ -434,10 +453,27 @@ export function HandyApp() {
               <div className="absolute right-0 top-[calc(100%+8px)] z-20 w-52 rounded-xl border border-border bg-card py-1.5 shadow-lg">
                 <div className="border-b border-border px-3.5 py-2.5">
                   <div className="text-[13px] font-semibold">{me.display_name}</div>
-                  <div className="text-[11px] text-muted-foreground">{{ owner: 'オーナー', manager: 'マネージャー', staff: 'スタッフ' }[me.role]}</div>
+                  <div className="text-[11px] text-muted-foreground">{t(ROLE_LABEL_KEY[me.role])}</div>
+                </div>
+                <div className="border-b border-border px-3.5 py-2.5">
+                  <div className="mb-1.5 text-[10.5px] font-semibold text-muted-foreground">{t('handyApp.language')}</div>
+                  <div className="flex flex-wrap gap-1">
+                    {LANGS.map((l) => (
+                      <button
+                        key={l}
+                        onClick={() => setLang(l)}
+                        className={
+                          'rounded-md border px-2 py-1 text-[11px] font-semibold ' +
+                          (lang === l ? 'border-primary bg-primary text-primary-foreground' : 'border-border text-muted-foreground')
+                        }
+                      >
+                        {LANG_LABEL[l]}
+                      </button>
+                    ))}
+                  </div>
                 </div>
                 <button onClick={() => router.push('/pos')} className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary">
-                  レジ画面へ
+                  {t('handyApp.goToRegister')}
                 </button>
                 {me.authMode === 'pos_native' && (
                   <button
@@ -446,7 +482,7 @@ export function HandyApp() {
                     }}
                     className="block w-full border-t border-border px-3.5 py-2 text-left text-[12.5px] text-destructive hover:bg-secondary"
                   >
-                    ログアウト
+                    {t('handyApp.logout')}
                   </button>
                 )}
               </div>

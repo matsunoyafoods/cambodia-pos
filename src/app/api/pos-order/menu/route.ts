@@ -16,15 +16,26 @@ type Row = {
   image_url: string | null;
   sort_order: number;
   category_id: string | null;
+  translations: Record<string, string> | null;
   menu_option_groups: {
     id: string;
     key: string;
     label: string;
     required: boolean;
     sort_order: number;
-    menu_option_choices: { id: string; choice_key: string; label: string; price_delta: number; sort_order: number }[];
+    translations: Record<string, string> | null;
+    menu_option_choices: {
+      id: string;
+      choice_key: string;
+      label: string;
+      price_delta: number;
+      sort_order: number;
+      translations: Record<string, string> | null;
+    }[];
   }[];
 };
+
+type CategoryRow = { id: string; name: string; sort_order: number; parent_id: string | null; translations: Record<string, string> | null };
 
 export async function GET() {
   const supabase = createPosAdminClient();
@@ -34,15 +45,18 @@ export async function GET() {
     supabase
       .from('menu_items')
       .select(
-        `id, name, price, happy_hour_price, image_url, sort_order, category_id,
-         menu_option_groups ( id, key, label, required, sort_order,
-           menu_option_choices ( id, choice_key, label, price_delta, sort_order )
+        `id, name, price, happy_hour_price, image_url, sort_order, category_id, translations,
+         menu_option_groups ( id, key, label, required, sort_order, translations,
+           menu_option_choices ( id, choice_key, label, price_delta, sort_order, translations )
          )`,
       )
       .eq('store_id', storeId)
       .eq('active', true)
       .order('sort_order'),
-    supabase.from('menu_categories').select('id, name, sort_order, parent_id').eq('store_id', storeId),
+    supabase
+      .from('menu_categories')
+      .select('id, name, sort_order, parent_id, translations')
+      .eq('store_id', storeId),
   ]);
 
   if (error) {
@@ -53,6 +67,9 @@ export async function GET() {
   }
 
   const byId = indexCategories((categoryRows ?? []) as CategoryNode[]);
+  const categoryTranslationsById = new Map<string, Record<string, string>>(
+    ((categoryRows ?? []) as CategoryRow[]).map((c) => [c.id, c.translations ?? {}]),
+  );
 
   // レジ画面タブの並び順は大カテゴリーの sort_order に従う (設定画面「メニュー・商品
   // オプション」から自由に並び替えできる)。sort_order が同じ場合は名前順でタイブレークする。
@@ -69,9 +86,16 @@ export async function GET() {
     return {
       id: row.id,
       category: resolved?.majorName ?? '未分類',
+      categoryId: resolved?.majorId,
+      categoryTranslations: resolved ? categoryTranslationsById.get(resolved.majorId) : undefined,
       middleCategory: resolved?.middleName ?? undefined,
+      middleCategoryId: resolved?.middleId ?? undefined,
+      middleCategoryTranslations: resolved?.middleId ? categoryTranslationsById.get(resolved.middleId) : undefined,
       minorCategory: resolved?.minorName ?? '未分類',
+      minorCategoryId: resolved?.minorId,
+      minorCategoryTranslations: resolved ? categoryTranslationsById.get(resolved.minorId) : undefined,
       name: row.name,
+      translations: row.translations ?? undefined,
       price: Number(row.price),
       happyHourPrice: row.happy_hour_price != null ? Number(row.happy_hour_price) : undefined,
       imageUrl: row.image_url ?? undefined,
@@ -82,6 +106,7 @@ export async function GET() {
           key: g.key,
           label: g.label,
           required: g.required,
+          translations: g.translations ?? undefined,
           choices: (g.menu_option_choices ?? [])
             .slice()
             .sort((a, b) => a.sort_order - b.sort_order)
@@ -89,6 +114,7 @@ export async function GET() {
               id: c.choice_key,
               label: c.label,
               priceDelta: Number(c.price_delta),
+              translations: c.translations ?? undefined,
             })),
         })),
     };

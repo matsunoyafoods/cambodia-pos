@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { CartLine, MenuImageStyle, MenuItem } from '@/lib/pos-types';
 import { money } from '@/lib/money';
 import type { TableSessionRecord } from '@/lib/table-session-client';
@@ -15,6 +15,7 @@ import {
   parseOrderItemDiscount,
   stripDiscountLabel,
 } from '@/lib/cart';
+import { useLanguage } from './language-context';
 
 // 中カテゴリー名があればそれ、無ければ (大カテゴリーと違う名前の) 小カテゴリー名をグループ見出しに使う。
 // どちらも大カテゴリー名と同じ (=旧フラット構成、未整理) ならグループ化せず先頭にまとめて表示する。
@@ -24,9 +25,19 @@ function groupLabel(m: MenuItem): string | null {
   return null;
 }
 
+// 多言語化 (2026-09-02): グループ見出しの翻訳は、そのグループに属する商品の
+// middleCategoryTranslations (中カテゴリーがあれば) / minorCategoryTranslations (無ければ) から取る。
+function groupLabelTranslations(m: MenuItem): MenuItem['middleCategoryTranslations'] {
+  if (m.middleCategory) return m.middleCategoryTranslations;
+  if (m.minorCategory !== m.category) return m.minorCategoryTranslations;
+  return undefined;
+}
+
 // 表示中カテゴリーの商品を、中カテゴリー(無ければ小カテゴリー)ごとにグループ化する。
 // 見出し無しグループ (旧フラット構成の商品) を先頭に、それ以降は初出順。
-function groupItemsByMiddle(items: MenuItem[]): { label: string | null; items: MenuItem[] }[] {
+function groupItemsByMiddle(
+  items: MenuItem[],
+): { label: string | null; translations?: MenuItem['middleCategoryTranslations']; items: MenuItem[] }[] {
   const order: (string | null)[] = [];
   const map = new Map<string | null, MenuItem[]>();
   for (const m of items) {
@@ -38,14 +49,18 @@ function groupItemsByMiddle(items: MenuItem[]): { label: string | null; items: M
     map.get(label)!.push(m);
   }
   order.sort((a, b) => (a === null ? -1 : b === null ? 1 : 0));
-  return order.map((label) => ({ label, items: map.get(label)! }));
+  return order.map((label) => {
+    const groupItems = map.get(label)!;
+    return { label, translations: groupLabelTranslations(groupItems[0]), items: groupItems };
+  });
 }
 
 function OrderHeaderTimers({ session }: { session: TableSessionRecord | null }) {
+  const { t } = useLanguage();
   const [, tick] = useState(0);
   useEffect(() => {
     if (!session) return;
-    const id = setInterval(() => tick((t) => t + 1), 1000);
+    const id = setInterval(() => tick((n) => n + 1), 1000);
     return () => clearInterval(id);
   }, [session]);
 
@@ -57,7 +72,7 @@ function OrderHeaderTimers({ session }: { session: TableSessionRecord | null }) 
   return (
     <div className="flex items-center gap-2">
       <span className="rounded-full bg-secondary px-2.5 py-1 text-[11px] font-semibold text-muted-foreground">
-        滞在 {stay}
+        {t('timer.stay', { duration: stay })}
       </span>
       {drink && (
         <span
@@ -70,7 +85,10 @@ function OrderHeaderTimers({ session }: { session: TableSessionRecord | null }) 
                 : 'bg-emerald-100 text-emerald-800')
           }
         >
-          🍺 {drink.isExpired ? `飲み放題終了 (${formatDuration(-drink.remainingMinutes)}超過・延長は追加注文で)` : `残り${formatDuration(drink.remainingMinutes)}`}
+          🍺{' '}
+          {drink.isExpired
+            ? t('orderScreen.drinkExpired', { duration: formatDuration(-drink.remainingMinutes) })
+            : t('timer.drinkRemaining', { duration: formatDuration(drink.remainingMinutes) })}
         </span>
       )}
     </div>
@@ -91,6 +109,7 @@ function CartLineRow({
   onDec: (id: string) => void;
   onSetDiscount: (id: string, discount: { type: 'percent' | 'fixed'; value: number } | null) => void;
 }) {
+  const { t } = useLanguage();
   const [editing, setEditing] = useState(false);
   const [mode, setMode] = useState<'percent' | 'fixed'>(line.discountType ?? 'percent');
   const [value, setValue] = useState(line.discountValue != null ? String(line.discountValue) : '');
@@ -143,13 +162,13 @@ function CartLineRow({
           </button>
           <button
             onClick={() => setEditing((v) => !v)}
-            title="値引き"
+            title={t('discount.title')}
             className={
               'flex h-[26px] items-center justify-center rounded-md border px-1.5 text-[10.5px] font-semibold ' +
               (label ? 'border-brand text-brand' : 'border-border text-muted-foreground')
             }
           >
-            値引
+            {t('discount.button')}
           </button>
         </div>
       </div>
@@ -164,7 +183,7 @@ function CartLineRow({
                 (mode === 'percent' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground')
               }
             >
-              ％引き
+              {t('discount.percentMode')}
             </button>
             <button
               type="button"
@@ -174,7 +193,7 @@ function CartLineRow({
                 (mode === 'fixed' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground')
               }
             >
-              ＄引き
+              {t('discount.fixedMode')}
             </button>
           </div>
           <input
@@ -196,7 +215,7 @@ function CartLineRow({
             disabled={!value.trim()}
             className="h-7 rounded-md bg-primary px-2.5 text-[11px] font-semibold text-primary-foreground disabled:opacity-50"
           >
-            適用
+            {t('discount.apply')}
           </button>
           {label && (
             <button
@@ -204,7 +223,7 @@ function CartLineRow({
               onClick={clear}
               className="h-7 rounded-md border border-border px-2.5 text-[11px] font-semibold text-destructive"
             >
-              解除
+              {t('discount.clear')}
             </button>
           )}
         </div>
@@ -239,6 +258,7 @@ function ConfirmedItemRow({
   onDec: (itemId: string) => Promise<void>;
   onRemove: (itemId: string) => Promise<void>;
 }) {
+  const { t } = useLanguage();
   const parsed = parseOrderItemDiscount(item.menu_name);
   const [editing, setEditing] = useState(false);
   const [mode, setMode] = useState<'percent' | 'fixed'>(parsed?.type ?? 'percent');
@@ -259,7 +279,7 @@ function ConfirmedItemRow({
       await onSetDiscount(item.id, { type: mode, value: v });
       setEditing(false);
     } catch {
-      setError('値引きの保存に失敗しました');
+      setError(t('discount.saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -272,7 +292,7 @@ function ConfirmedItemRow({
       setValue('');
       setEditing(false);
     } catch {
-      setError('解除に失敗しました');
+      setError(t('discount.clearFailed'));
     } finally {
       setSaving(false);
     }
@@ -283,7 +303,7 @@ function ConfirmedItemRow({
     try {
       await onInc(item.id);
     } catch {
-      setError('数量の変更に失敗しました');
+      setError(t('discount.qtyChangeFailed'));
     } finally {
       setSaving(false);
     }
@@ -295,19 +315,19 @@ function ConfirmedItemRow({
     try {
       await onDec(item.id);
     } catch {
-      setError('数量の変更に失敗しました');
+      setError(t('discount.qtyChangeFailed'));
     } finally {
       setSaving(false);
     }
   }
   async function remove() {
-    if (!window.confirm(`「${baseName}」を削除しますか？(厨房へ送信済みの品目です)`)) return;
+    if (!window.confirm(t('cart.deleteConfirm', { name: baseName }))) return;
     setSaving(true);
     setError(null);
     try {
       await onRemove(item.id);
     } catch {
-      setError('削除に失敗しました');
+      setError(t('discount.deleteFailed'));
       setSaving(false);
     }
     // 成功時はこの行自体が親から消えるので setSaving(false) は不要
@@ -348,18 +368,18 @@ function ConfirmedItemRow({
           <button
             onClick={() => setEditing((v) => !v)}
             disabled={saving}
-            title="値引き"
+            title={t('discount.title')}
             className={
               'flex h-[26px] items-center justify-center rounded-md border px-1.5 text-[10.5px] font-semibold disabled:opacity-50 ' +
               (label ? 'border-brand text-brand' : 'border-border text-muted-foreground')
             }
           >
-            値引
+            {t('discount.button')}
           </button>
           <button
             onClick={remove}
             disabled={saving}
-            title="削除"
+            title={t('discount.deleteTitle')}
             className="flex h-[26px] w-[26px] items-center justify-center rounded-md border border-border text-destructive disabled:opacity-50"
           >
             🗑
@@ -377,7 +397,7 @@ function ConfirmedItemRow({
                 (mode === 'percent' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground')
               }
             >
-              ％引き
+              {t('discount.percentMode')}
             </button>
             <button
               type="button"
@@ -387,7 +407,7 @@ function ConfirmedItemRow({
                 (mode === 'fixed' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground')
               }
             >
-              ＄引き
+              {t('discount.fixedMode')}
             </button>
           </div>
           <input
@@ -409,7 +429,7 @@ function ConfirmedItemRow({
             disabled={saving || !value.trim()}
             className="h-7 rounded-md bg-primary px-2.5 text-[11px] font-semibold text-primary-foreground disabled:opacity-50"
           >
-            {saving ? '…' : '適用'}
+            {saving ? '…' : t('discount.apply')}
           </button>
           {label && (
             <button
@@ -418,7 +438,7 @@ function ConfirmedItemRow({
               disabled={saving}
               className="h-7 rounded-md border border-border px-2.5 text-[11px] font-semibold text-destructive disabled:opacity-50"
             >
-              解除
+              {t('discount.clear')}
             </button>
           )}
         </div>
@@ -498,10 +518,18 @@ export function OrderScreen({
   /** 会計せずに、間違えて選択・注文した卓を空席に戻す (2026-08-31 追加) */
   onResetTable: () => void;
 }) {
+  const { t, menuText } = useLanguage();
   const items = menu.filter((m) => m.category === activeCategory);
   const groups = groupItemsByMiddle(items);
   const cartCount = cart.reduce((a, l) => a + l.qty, 0);
   const imageFull = menuImageStyle === 'full';
+  const categoryTranslations = useMemo(() => {
+    const map = new Map<string, MenuItem['categoryTranslations']>();
+    for (const m of menu) {
+      if (!map.has(m.category)) map.set(m.category, m.categoryTranslations);
+    }
+    return map;
+  }, [menu]);
 
   return (
     <div className="flex flex-1 overflow-hidden">
@@ -515,18 +543,18 @@ export function OrderScreen({
               ←
             </button>
             <div>
-              <div className="text-base font-bold">テーブル {selectedTable}</div>
-              <div className="text-xs text-muted-foreground">注文入力</div>
+              <div className="text-base font-bold">{t('table.label', { table: selectedTable ?? '' })}</div>
+              <div className="text-xs text-muted-foreground">{t('orderScreen.subtitle')}</div>
             </div>
           </div>
           <div className="flex items-center gap-2.5">
             <OrderHeaderTimers session={session} />
             <button
               onClick={onResetTable}
-              title="会計せずにこの卓を空席へ戻す (間違えて選択・注文した場合)"
+              title={t('handy.resetTableTitle')}
               className="rounded-lg border border-destructive/40 px-2.5 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/10"
             >
-              卓をリセット
+              {t('handy.resetTable')}
             </button>
           </div>
         </div>
@@ -547,7 +575,7 @@ export function OrderScreen({
                   : 'border-border bg-card text-foreground')
               }
             >
-              {c}
+              {menuText(c, categoryTranslations.get(c))}
             </button>
           ))}
         </div>
@@ -555,7 +583,9 @@ export function OrderScreen({
         <div className="flex-1 overflow-auto p-5">
           {groups.map((g, gi) => (
             <div key={g.label ?? `_flat_${gi}`} className={gi > 0 ? 'mt-5' : ''}>
-              {g.label && <div className="mb-2.5 text-[12px] font-bold text-muted-foreground">{g.label}</div>}
+              {g.label && (
+                <div className="mb-2.5 text-[12px] font-bold text-muted-foreground">{menuText(g.label, g.translations)}</div>
+              )}
               <div className={'grid auto-rows-min gap-3 ' + (imageFull ? 'grid-cols-2' : 'grid-cols-3')}>
                 {g.items.map((m) => {
                   const hasOptions = !!(m.optionGroups && m.optionGroups.length);
@@ -604,14 +634,14 @@ export function OrderScreen({
                       </div>
                       <div>
                         <div className="flex items-end justify-between">
-                          <div className="text-[13.5px] font-semibold leading-tight">{m.name}</div>
+                          <div className="text-[13.5px] font-semibold leading-tight">{menuText(m.name, m.translations)}</div>
                           <div className="ml-2 whitespace-nowrap text-[13.5px] font-bold text-brand">
                             ${priceLabel}
                           </div>
                         </div>
-                        {hasOptions && <div className="text-[10px] text-muted-foreground">オプションあり</div>}
+                        {hasOptions && <div className="text-[10px] text-muted-foreground">{t('orderScreen.hasOptions')}</div>}
                         {isHappyHourItem && (
-                          <div className="text-[10px] font-semibold text-amber-700">🍻 ハッピーアワー価格</div>
+                          <div className="text-[10px] font-semibold text-amber-700">🍻 {t('orderScreen.happyHourPrice')}</div>
                         )}
                       </div>
                     </button>
@@ -624,11 +654,11 @@ export function OrderScreen({
       </div>
 
       <div className="flex w-[340px] flex-col border-l border-border bg-secondary/40">
-        <div className="px-4.5 pb-2.5 pt-4 text-sm font-bold">カート ({cartCount})</div>
+        <div className="px-4.5 pb-2.5 pt-4 text-sm font-bold">{t('orderScreen.cartHeader', { count: cartCount })}</div>
         <div className="flex flex-1 flex-col gap-3.5 overflow-auto px-4.5">
           {confirmedItems.length > 0 && (
             <div className="flex flex-col gap-1.5">
-              <div className="text-[11px] font-bold text-muted-foreground">注文済み (厨房送信済み)</div>
+              <div className="text-[11px] font-bold text-muted-foreground">{t('cart.confirmedSection')}</div>
               {confirmedItems.map((line) => (
                 <ConfirmedItemRow
                   key={line.id}
@@ -643,13 +673,13 @@ export function OrderScreen({
           )}
 
           {cart.length === 0 && confirmedItems.length === 0 && (
-            <div className="py-5 text-center text-[13px] text-muted-foreground">
-              メニューをタップして追加してください
-            </div>
+            <div className="py-5 text-center text-[13px] text-muted-foreground">{t('cart.empty')}</div>
           )}
           {cart.length > 0 && (
             <div className="flex flex-col gap-1.5">
-              {confirmedItems.length > 0 && <div className="text-[11px] font-bold text-muted-foreground">未確定</div>}
+              {confirmedItems.length > 0 && (
+                <div className="text-[11px] font-bold text-muted-foreground">{t('cart.pendingSection')}</div>
+              )}
               {cart.map((line) => (
                 <CartLineRow key={line.id} line={line} onInc={onInc} onDec={onDec} onSetDiscount={onSetDiscount} />
               ))}
@@ -664,34 +694,35 @@ export function OrderScreen({
               disabled={confirming}
               className="h-10 w-full rounded-lg border border-brand text-[13px] font-bold text-brand disabled:opacity-60"
             >
-              {confirming ? '送信中…' : `注文確定 (${cartCount}点を厨房へ送信)`}
+              {confirming ? t('cart.submitting') : t('cart.confirmButton', { count: cartCount })}
             </button>
           </div>
         )}
         <div className="flex flex-col gap-1.5 border-t border-border px-4.5 py-3.5">
           <div className="flex justify-between text-xs text-muted-foreground">
-            <span>小計</span>
+            <span>{t('totals.subtotal')}</span>
             <span>${money(subtotal)}</span>
           </div>
           {vatRate > 0 && (
             <div className="flex justify-between text-xs text-muted-foreground">
-              <span>VAT {vatRate}%{vatInclusive ? ' (税込み)' : ''}</span>
+              <span>
+                {t('totals.vat', { rate: vatRate })}
+                {vatInclusive ? t('totals.vatInclusive') : ''}
+              </span>
               <span>${money(vat)}</span>
             </div>
           )}
           {serviceRate > 0 && (
             <div className="flex justify-between text-xs text-muted-foreground">
-              <span>サービス料 {serviceRate}%</span>
+              <span>{t('totals.service', { rate: serviceRate })}</span>
               <span>${money(service)}</span>
             </div>
           )}
           <div className="mt-1 flex justify-between text-[15px] font-bold">
-            <span>合計</span>
+            <span>{t('totals.total')}</span>
             <span>${money(total)}</span>
           </div>
-          <div className="mt-0.5 text-[10.5px] text-muted-foreground">
-            確定時に厨房プリンターへ自動送信されます
-          </div>
+          <div className="mt-0.5 text-[10.5px] text-muted-foreground">{t('orderScreen.autoSendNote')}</div>
           <button
             onClick={onCheckout}
             disabled={cart.length === 0 && confirmedItems.length === 0}
@@ -702,7 +733,7 @@ export function OrderScreen({
                 : 'bg-brand text-brand-foreground')
             }
           >
-            会計へ進む
+            {t('checkout.proceedButton')}
           </button>
         </div>
       </div>

@@ -59,6 +59,11 @@ import {
   type PosMenuOptionGroup,
   type PosMenuOptionGroupTemplate,
   type PosMenuOptionChoiceTemplate,
+  listMenuTranslations,
+  saveMenuTranslation,
+  generateMenuTranslationDrafts,
+  type MenuTranslationEntry,
+  type MenuTranslationLang,
 } from '@/lib/menu-client';
 import { indexCategories, resolveCategoryChain, type CategoryNode } from '@/lib/category-tree';
 import {
@@ -83,7 +88,7 @@ import {
 } from '@/lib/printer-client';
 import type { HandyTableGroup, PaymentMethodConfig, PrinterConfig } from '@/lib/pos-types';
 
-type Tab = 'general' | 'printer' | 'payment' | 'staff' | 'menu' | 'layout' | 'handy' | 'integration';
+type Tab = 'general' | 'printer' | 'payment' | 'staff' | 'menu' | 'translations' | 'layout' | 'handy' | 'integration';
 
 const NAV: { key: Tab; label: string }[] = [
   { key: 'general', label: '一般設定' },
@@ -91,6 +96,7 @@ const NAV: { key: Tab; label: string }[] = [
   { key: 'payment', label: '決済設定' },
   { key: 'staff', label: 'スタッフ管理' },
   { key: 'menu', label: 'メニュー・商品オプション' },
+  { key: 'translations', label: '翻訳' },
   { key: 'layout', label: 'テーブルレイアウト' },
   { key: 'handy', label: 'ハンディ表示' },
   { key: 'integration', label: '連携設定' },
@@ -1469,6 +1475,8 @@ export function SettingsScreen() {
           {tab === 'staff' && <StaffTab />}
 
           {tab === 'menu' && <MenuTab />}
+
+          {tab === 'translations' && <TranslationTab />}
 
           {tab === 'layout' && (
             <InfoNote
@@ -3734,6 +3742,170 @@ function InfoNote({ title, body, cta, onCta }: { title: string; body: string; ct
         >
           {cta}
         </button>
+      </div>
+    </div>
+  );
+}
+
+// 翻訳タブ (2026-09-02 追加)。Tom「多言語化しましょう！日本語、英語、カンボジア語、
+// 中国語、韓国語が必要です」への対応。カテゴリー・商品・オプショングループ・オプション選択肢の
+// 日本語名に対する英語/クメール語/中国語/韓国語の翻訳を一覧編集する。
+// 「AI下書きを生成」で Gemini API による下書きを一括生成 (既存の入力済みの言語は上書きしない)、
+// その後この画面で1件ずつ内容を確認・修正して保存する。
+const TRANSLATION_LANG_LABEL: Record<MenuTranslationLang, string> = { en: '英語', km: 'クメール語', zh: '中国語', ko: '韓国語' };
+const TRANSLATION_TYPE_LABEL: Record<MenuTranslationEntry['type'], string> = {
+  category: 'カテゴリー',
+  item: '商品',
+  option_group: 'オプション (グループ名)',
+  option_choice: 'オプション (選択肢)',
+};
+const TRANSLATION_TYPE_ORDER: MenuTranslationEntry['type'][] = ['category', 'item', 'option_group', 'option_choice'];
+
+function TranslationTab() {
+  const me = useStaff();
+  const isPosNative = me.authMode === 'pos_native';
+  const canManage = isPosNative && (me.role === 'owner' || me.role === 'manager');
+
+  const [entries, setEntries] = useState<MenuTranslationEntry[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [generating, setGenerating] = useState(false);
+  const [generateResult, setGenerateResult] = useState<string | null>(null);
+  const [savingKey, setSavingKey] = useState<string | null>(null);
+  const [filterType, setFilterType] = useState<'all' | MenuTranslationEntry['type']>('all');
+
+  const load = useCallback(() => {
+    setLoadError(null);
+    listMenuTranslations()
+      .then((r) => setEntries(r.entries))
+      .catch(() => setLoadError('翻訳データの取得に失敗しました'));
+  }, []);
+
+  useEffect(() => {
+    if (canManage) load();
+  }, [canManage, load]);
+
+  if (!isPosNative) {
+    return (
+      <div className="flex max-w-[560px] flex-col gap-3.5">
+        <div className="text-[15px] font-bold">翻訳</div>
+        <PinLoginRequiredNote />
+      </div>
+    );
+  }
+
+  if (!canManage) {
+    return (
+      <div className="flex max-w-[560px] flex-col gap-3.5">
+        <div className="text-[15px] font-bold">翻訳</div>
+        <div className="rounded-xl border border-border p-4 text-[13px] text-muted-foreground">翻訳の管理には manager 以上の権限が必要です。</div>
+      </div>
+    );
+  }
+
+  async function handleGenerate() {
+    setGenerating(true);
+    setGenerateResult(null);
+    setLoadError(null);
+    try {
+      const r = await generateMenuTranslationDrafts();
+      setGenerateResult(r.updated > 0 ? `${r.updated}/${r.total}件の下書きを生成しました。内容を確認してください。` : '未翻訳の項目はありませんでした。');
+      load();
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'AI翻訳の生成に失敗しました');
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  async function handleFieldSave(entry: MenuTranslationEntry, lang: MenuTranslationLang, value: string) {
+    const key = `${entry.type}:${entry.id}`;
+    setSavingKey(key);
+    const nextTranslations = { ...entry.translations, [lang]: value };
+    try {
+      await saveMenuTranslation(entry.type, entry.id, nextTranslations);
+      setEntries((prev) => (prev ? prev.map((e) => (e.type === entry.type && e.id === entry.id ? { ...e, translations: nextTranslations } : e)) : prev));
+    } catch {
+      setLoadError('保存に失敗しました。もう一度お試しください。');
+    } finally {
+      setSavingKey((k) => (k === key ? null : k));
+    }
+  }
+
+  const visibleEntries = (entries ?? []).filter((e) => filterType === 'all' || e.type === filterType);
+  const untranslatedCount = (entries ?? []).filter((e) => (['en', 'km', 'zh', 'ko'] as MenuTranslationLang[]).some((l) => !e.translations[l]?.trim())).length;
+
+  return (
+    <div className="flex max-w-[960px] flex-col gap-3.5">
+      <div className="text-[15px] font-bold">翻訳</div>
+      <div className="rounded-xl border border-border p-3.5 text-[12px] text-muted-foreground">
+        カテゴリー・商品・オプション名の英語・クメール語・中国語・韓国語への翻訳を管理します。「AI下書きを生成」を押すと、まだ翻訳が無い項目だけ
+        Gemini AI が下書きを作成します(すでに入力済みの内容は上書きされません)。生成後は下の一覧で内容を確認し、必要に応じて修正してください。
+        QRセルフオーダー画面・レジ画面はここで保存した翻訳を使って表示されます。
+      </div>
+
+      {loadError && <div className="rounded-lg bg-destructive/10 p-2.5 text-[12.5px] text-destructive">{loadError}</div>}
+      {generateResult && <div className="rounded-lg bg-primary/10 p-2.5 text-[12.5px] text-primary">{generateResult}</div>}
+
+      <div className="flex flex-wrap items-center gap-2.5">
+        <button
+          type="button"
+          onClick={handleGenerate}
+          disabled={generating}
+          className="h-[38px] rounded-lg bg-primary px-4 text-[12.5px] font-semibold text-primary-foreground disabled:opacity-60"
+        >
+          {generating ? 'AI翻訳を生成中...' : 'AI下書きを生成'}
+        </button>
+        {entries && <span className="text-[12px] text-muted-foreground">未翻訳(いずれかの言語が空欄): {untranslatedCount}件 / 全{entries.length}件</span>}
+      </div>
+
+      <div className="flex flex-wrap gap-1.5">
+        {(['all', ...TRANSLATION_TYPE_ORDER] as const).map((t) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => setFilterType(t)}
+            className={`h-8 rounded-full border px-3 text-[12px] font-semibold ${
+              filterType === t ? 'border-primary bg-primary text-primary-foreground' : 'border-border text-muted-foreground'
+            }`}
+          >
+            {t === 'all' ? 'すべて' : TRANSLATION_TYPE_LABEL[t]}
+          </button>
+        ))}
+      </div>
+
+      {!entries && !loadError && <div className="text-[12.5px] text-muted-foreground">読み込み中...</div>}
+
+      {entries && visibleEntries.length === 0 && <div className="text-[12.5px] text-muted-foreground">対象の項目がありません。</div>}
+
+      <div className="flex flex-col gap-2.5">
+        {visibleEntries.map((entry) => {
+          const key = `${entry.type}:${entry.id}`;
+          return (
+            <div key={key} className="rounded-xl border border-border p-3">
+              <div className="mb-2 flex flex-wrap items-baseline gap-2">
+                <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">{TRANSLATION_TYPE_LABEL[entry.type]}</span>
+                <span className="text-[13.5px] font-bold">{entry.ja}</span>
+                {entry.context && <span className="text-[11.5px] text-muted-foreground">({entry.context})</span>}
+                {savingKey === key && <span className="text-[11px] text-muted-foreground">保存中...</span>}
+              </div>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                {(['en', 'km', 'zh', 'ko'] as MenuTranslationLang[]).map((lang) => (
+                  <label key={lang} className="flex flex-col gap-1">
+                    <span className="text-[11px] text-muted-foreground">{TRANSLATION_LANG_LABEL[lang]}</span>
+                    <input
+                      defaultValue={entry.translations[lang] ?? ''}
+                      onBlur={(e) => {
+                        const value = e.target.value;
+                        if (value !== (entry.translations[lang] ?? '')) handleFieldSave(entry, lang, value);
+                      }}
+                      className="h-9 rounded-lg border border-border px-2.5 text-[12.5px]"
+                    />
+                  </label>
+                ))}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

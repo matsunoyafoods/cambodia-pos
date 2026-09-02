@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import type { DiscountType, PaymentLineInput, PaymentMethodConfig } from '@/lib/pos-types';
 import type { OrderItemRecord } from '@/lib/pos-order-orders-client';
 import { computeChange, money } from '@/lib/money';
+import { useLanguage } from './language-context';
 
 type Totals = {
   subtotal: number;
@@ -25,6 +26,7 @@ function OrderDiscountEditor({
   amount: number;
   onSet: (discount: { type: DiscountType; value: number } | null) => void;
 }) {
+  const { t } = useLanguage();
   const [editing, setEditing] = useState(false);
   const [mode, setMode] = useState<DiscountType>(discount?.type ?? 'percent');
   const [value, setValue] = useState(discount ? String(discount.value) : '');
@@ -49,7 +51,12 @@ function OrderDiscountEditor({
           onClick={() => setEditing((v) => !v)}
           className={'text-left font-semibold ' + (discount ? 'text-brand' : 'text-muted-foreground underline decoration-dotted')}
         >
-          {discount ? `割引 (${discount.type === 'percent' ? discount.value + '%' : '$' + discount.value.toFixed(2)})` : '割引を追加'}
+          {discount
+            ? t(
+                discount.type === 'percent' ? 'checkout.discountAppliedPercent' : 'checkout.discountAppliedFixed',
+                { value: discount.type === 'percent' ? discount.value : discount.value.toFixed(2) },
+              )
+            : t('checkout.addDiscount')}
         </button>
         {discount && <span className="text-brand">-${money(amount)}</span>}
       </div>
@@ -64,7 +71,7 @@ function OrderDiscountEditor({
                 (mode === 'percent' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground')
               }
             >
-              ％引き
+              {t('discount.percentMode')}
             </button>
             <button
               type="button"
@@ -74,7 +81,7 @@ function OrderDiscountEditor({
                 (mode === 'fixed' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground')
               }
             >
-              ＄引き
+              {t('discount.fixedMode')}
             </button>
           </div>
           <input
@@ -96,7 +103,7 @@ function OrderDiscountEditor({
             disabled={!value.trim()}
             className="h-7 rounded-md bg-primary px-2.5 text-[11px] font-semibold text-primary-foreground disabled:opacity-50"
           >
-            適用
+            {t('discount.apply')}
           </button>
           {discount && (
             <button
@@ -104,7 +111,7 @@ function OrderDiscountEditor({
               onClick={clear}
               className="h-7 rounded-md border border-border px-2.5 text-[11px] font-semibold text-destructive"
             >
-              解除
+              {t('discount.clear')}
             </button>
           )}
         </div>
@@ -159,6 +166,7 @@ export function CheckoutScreen({
   completing: boolean;
   completeError: string | null;
 }) {
+  const { t } = useLanguage();
   // 分割払い・割り勘: 「残り」= 合計 - すでに追加された支払いラインの合計。0 (端数誤差込み) に
   // なったら会計を完了できる (2026-08-31 多分割対応で全面書き換え)。
   const paidSoFar = paymentLines.reduce((s, l) => s + l.amount, 0);
@@ -251,7 +259,7 @@ export function CheckoutScreen({
           >
             ←
           </button>
-          <div className="text-sm font-bold">テーブル {selectedTable} の会計</div>
+          <div className="text-sm font-bold">{t('checkout.title', { table: selectedTable ?? '' })}</div>
         </div>
         <div className="flex flex-1 flex-col gap-2 overflow-auto px-4.5 py-3.5">
           {confirmedItems.map((line) => (
@@ -265,24 +273,27 @@ export function CheckoutScreen({
         </div>
         <div className="flex flex-col gap-1.5 border-t border-border px-4.5 py-3.5">
           <div className="flex justify-between text-[12.5px]">
-            <span>小計</span>
+            <span>{t('totals.subtotal')}</span>
             <span>${money(totals.subtotal)}</span>
           </div>
           {vatRate > 0 && (
             <div className="flex justify-between text-[12.5px]">
-              <span>VAT {vatRate}%{vatInclusive ? ' (税込み)' : ''}</span>
+              <span>
+                {t('totals.vat', { rate: vatRate })}
+                {vatInclusive ? t('totals.vatInclusive') : ''}
+              </span>
               <span>${money(totals.vat)}</span>
             </div>
           )}
           {serviceRate > 0 && (
             <div className="flex justify-between text-[12.5px]">
-              <span>サービス料 {serviceRate}%</span>
+              <span>{t('totals.service', { rate: serviceRate })}</span>
               <span>${money(totals.service)}</span>
             </div>
           )}
           {couponApplied && (
             <div className="flex justify-between text-[12.5px] text-brand">
-              <span>クーポン割引</span>
+              <span>{t('checkout.couponDiscount')}</span>
               <span>-${money(totals.couponDiscount)}</span>
             </div>
           )}
@@ -290,7 +301,7 @@ export function CheckoutScreen({
             <OrderDiscountEditor discount={orderDiscount} amount={totals.orderDiscount} onSet={onSetOrderDiscount} />
           </div>
           <div className="mt-1 flex justify-between border-t border-dashed border-border pt-2 text-[17px] font-bold">
-            <span>合計</span>
+            <span>{t('totals.total')}</span>
             <span>${money(totals.total)}</span>
           </div>
         </div>
@@ -305,18 +316,18 @@ export function CheckoutScreen({
                   SD
                 </div>
                 <div>
-                  <div className="text-[13.5px] font-bold">Sok Dara 様</div>
-                  <div className="text-[11.5px] text-muted-foreground">スタンプ 12個保有 ・ クーポン1枚あり</div>
+                  <div className="text-[13.5px] font-bold">{t('checkout.demoCustomerName')}</div>
+                  <div className="text-[11.5px] text-muted-foreground">{t('checkout.demoStampInfo')}</div>
                 </div>
               </div>
               {couponApplied ? (
-                <div className="text-xs font-semibold text-brand">クーポン適用済み ✓</div>
+                <div className="text-xs font-semibold text-brand">{t('checkout.couponApplied')}</div>
               ) : (
                 <button
                   onClick={onApplyCoupon}
                   className="h-8 rounded-lg border border-brand px-3 text-xs font-semibold text-brand"
                 >
-                  $5クーポンを適用
+                  {t('checkout.applyCoupon5')}
                 </button>
               )}
             </div>
@@ -324,8 +335,8 @@ export function CheckoutScreen({
             <button onClick={onLinkCustomer} className="flex w-full items-center gap-2.5 text-left">
               <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-secondary">▦</div>
               <div>
-                <div className="text-[13.5px] font-semibold">Telegram QRをスキャンして顧客紐付け</div>
-                <div className="text-[11.5px] text-muted-foreground">スタンプ自動付与・クーポン適用に必要です</div>
+                <div className="text-[13.5px] font-semibold">{t('checkout.linkCustomerPrompt')}</div>
+                <div className="text-[11.5px] text-muted-foreground">{t('checkout.linkCustomerNote')}</div>
               </div>
             </button>
           )}
@@ -334,13 +345,13 @@ export function CheckoutScreen({
         {/* 分割払い・割り勘: 追加済みの支払いラインの一覧 + 残額 (2026-08-31 追加) */}
         <div className="rounded-xl border border-border p-3.5">
           <div className="mb-2 flex items-center justify-between">
-            <div className="text-xs font-semibold text-muted-foreground">支払い内訳</div>
+            <div className="text-xs font-semibold text-muted-foreground">{t('checkout.paymentBreakdown')}</div>
             <div className={'text-[12.5px] font-bold ' + (remainingSettled ? 'text-emerald-600' : 'text-destructive')}>
-              残り ${money(remaining)}
+              {t('checkout.remaining')} ${money(remaining)}
             </div>
           </div>
           {paymentLines.length === 0 ? (
-            <div className="py-1 text-[12px] text-muted-foreground">まだ支払いが追加されていません</div>
+            <div className="py-1 text-[12px] text-muted-foreground">{t('checkout.noPaymentsYet')}</div>
           ) : (
             <div className="flex flex-col gap-1.5">
               {paymentLines.map((l) => (
@@ -350,8 +361,8 @@ export function CheckoutScreen({
                     <span>${money(l.amount)}</span>
                     {l.cashReceivedUsd != null && (
                       <span className="text-[11px] text-muted-foreground">
-                        (預り ${money(l.cashReceivedUsd)}
-                        {l.cashReceivedKhr ? ` + ${l.cashReceivedKhr.toLocaleString()}៛` : ''} / お釣り ${(l.changeUsd ?? 0).toFixed(0)}+{(l.changeKhr ?? 0).toLocaleString()}៛)
+                        ({t('checkout.received')} ${money(l.cashReceivedUsd)}
+                        {l.cashReceivedKhr ? ` + ${l.cashReceivedKhr.toLocaleString()}៛` : ''} / {t('checkout.change')} ${(l.changeUsd ?? 0).toFixed(0)}+{(l.changeKhr ?? 0).toLocaleString()}៛)
                       </span>
                     )}
                   </div>
@@ -359,7 +370,7 @@ export function CheckoutScreen({
                     onClick={() => onRemovePaymentLine(l.id)}
                     className="rounded-md px-2 py-0.5 text-[11px] font-semibold text-destructive hover:bg-destructive/10"
                   >
-                    削除
+                    {t('discount.deleteTitle')}
                   </button>
                 </div>
               ))}
@@ -369,7 +380,7 @@ export function CheckoutScreen({
 
         {!remainingSettled && paymentMethods.length === 0 && (
           <div className="rounded-xl border border-dashed border-border p-4.5 text-[12.5px] text-muted-foreground">
-            決済方法が1つも設定されていません。設定画面の「決済設定」タブから追加してください。
+            {t('checkout.noPaymentMethods')}
           </div>
         )}
 
@@ -392,7 +403,7 @@ export function CheckoutScreen({
               </div>
               {/* 割り勘: 残額を人数で均等割りして、この支払いラインの金額に自動入力する */}
               <div className="flex items-center gap-1.5">
-                <span className="text-[11px] text-muted-foreground">均等割り</span>
+                <span className="text-[11px] text-muted-foreground">{t('checkout.splitEvenly')}</span>
                 {splitPresets.map((n) => (
                   <button
                     key={n}
@@ -402,14 +413,14 @@ export function CheckoutScreen({
                     }}
                     className="h-7 rounded-md border border-border px-2 text-[11px]"
                   >
-                    {n}人
+                    {t('checkout.peopleCount', { n })}
                   </button>
                 ))}
               </div>
             </div>
 
             <div>
-              <div className="mb-1 text-[11px] text-muted-foreground">このラインの金額 (USD)</div>
+              <div className="mb-1 text-[11px] text-muted-foreground">{t('checkout.lineAmountLabel')}</div>
               <input
                 value={amountStr}
                 onChange={(e) => {
@@ -425,7 +436,7 @@ export function CheckoutScreen({
               <>
                 <div>
                   <div className="mb-2 text-xs font-semibold text-muted-foreground">
-                    お預かり金額（ドル・リエル混在可）
+                    {t('checkout.cashReceivedLabel')}
                   </div>
                   <div className="flex gap-3.5">
                     <div className="flex-1">
@@ -463,14 +474,14 @@ export function CheckoutScreen({
                             onClick={() => setCashKhrReceivedStr(String(n))}
                             className="h-7 rounded-md border border-border px-2 text-[11px]"
                           >
-                            {n === 0 ? 'なし' : n.toLocaleString() + '៛'}
+                            {n === 0 ? t('checkout.none') : n.toLocaleString() + '៛'}
                           </button>
                         ))}
                       </div>
                     </div>
                   </div>
                   <div className="mt-2 text-[11.5px] text-muted-foreground">
-                    合計受取額 ≈ ${money(change.totalReceivedUsdEquiv)}
+                    {t('checkout.totalReceivedApprox', { amount: `$${money(change.totalReceivedUsdEquiv)}` })}
                   </div>
                 </div>
 
@@ -480,7 +491,7 @@ export function CheckoutScreen({
                   }
                 >
                   <div>
-                    <div className="text-xs text-muted-foreground">お釣り</div>
+                    <div className="text-xs text-muted-foreground">{t('checkout.change')}</div>
                     <div className={'text-lg font-bold ' + (change.ok ? 'text-emerald-600' : 'text-destructive')}>
                       ${change.changeUsd.toFixed(0)} + {change.changeKhr.toLocaleString()}៛
                     </div>
@@ -506,7 +517,7 @@ export function CheckoutScreen({
 
             {!isCashMethod && selectedMethod && (
               <div className="text-[13px] text-muted-foreground">
-                「{selectedMethod.name}」で ${money(lineAmount)} を受け取り・決済後、下のボタンで記録してください
+                {t('checkout.nonCashInstruction', { method: selectedMethod.name, amount: `$${money(lineAmount)}` })}
               </div>
             )}
 
@@ -518,7 +529,7 @@ export function CheckoutScreen({
                 (canAddLine ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground')
               }
             >
-              この内容で支払いを追加
+              {t('checkout.addPaymentLine')}
             </button>
           </div>
         )}
@@ -532,7 +543,7 @@ export function CheckoutScreen({
             (remainingSettled && !completing ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground')
           }
         >
-          {completing ? '処理中…' : '会計を完了する'}
+          {completing ? t('common.processing') : t('checkout.completeButton')}
         </button>
       </div>
     </div>

@@ -1,7 +1,19 @@
 'use client';
 
 import { useState } from 'react';
-import { ETHNICITY_KEYS, ETHNICITY_LABELS, type GuestEthnicity } from '@/lib/pos-types';
+import { ETHNICITY_KEYS, type EthnicityKey, type GuestEthnicity } from '@/lib/pos-types';
+import { useLanguage } from './language-context';
+
+// 多言語化 (2026-09-02 追加): 民族区分の表示名は pos-types.ts の ETHNICITY_LABELS (日本語固定、
+// 売上レポートAPI等でも使われる共有定数) をそのまま使わず、この画面だけ t() 経由の翻訳に置き換える。
+const ETHNICITY_LABEL_KEY: Record<EthnicityKey, string> = {
+  khmer: 'guestDemo.ethnicityKhmer',
+  japanese: 'guestDemo.ethnicityJapanese',
+  chinese: 'guestDemo.ethnicityChinese',
+  korean: 'guestDemo.ethnicityKorean',
+  western: 'guestDemo.ethnicityWestern',
+  other: 'guestDemo.ethnicityOther',
+};
 
 // レジ画面が「会計へ進む」を押した時 (まだ客層記録が済んでいない注文の場合) に必ず挟む
 // 客層記録モーダル (2026-08-31 変更: 以前はファースト注文時だったが、「あとで人数が増えた
@@ -19,6 +31,7 @@ export function GuestDemographicsModal({
   submitting: boolean;
   error: string | null;
 }) {
+  const { t } = useLanguage();
   const [counts, setCounts] = useState<GuestEthnicity>({});
   const [kids, setKids] = useState(0);
 
@@ -33,16 +46,14 @@ export function GuestDemographicsModal({
     <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/45">
       <div className="flex max-h-[90vh] w-[440px] max-w-[92vw] flex-col gap-4 rounded-2xl bg-card p-5 shadow-2xl">
         <div>
-          <div className="text-base font-bold">来店客の客層を記録してください</div>
-          <div className="mt-1 text-[11.5px] text-muted-foreground">
-            会計へ進む前に、人種構成・子供人数の入力が必須です。最終的な来店人数で記録してください。
-          </div>
+          <div className="text-base font-bold">{t('guestDemo.title')}</div>
+          <div className="mt-1 text-[11.5px] text-muted-foreground">{t('guestDemo.subtitle')}</div>
         </div>
 
         <div className="flex flex-col gap-2 overflow-auto">
           {ETHNICITY_KEYS.map((key) => (
             <div key={key} className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
-              <div className="text-[13px] font-semibold">{ETHNICITY_LABELS[key]}</div>
+              <div className="text-[13px] font-semibold">{t(ETHNICITY_LABEL_KEY[key])}</div>
               <div className="flex items-center gap-2.5">
                 <button
                   type="button"
@@ -64,7 +75,7 @@ export function GuestDemographicsModal({
           ))}
 
           <div className="flex items-center justify-between rounded-lg border border-dashed border-border px-3 py-2">
-            <div className="text-[13px] font-semibold">子供人数</div>
+            <div className="text-[13px] font-semibold">{t('guestDemo.kidsCount')}</div>
             <div className="flex items-center gap-2.5">
               <button
                 type="button"
@@ -86,10 +97,10 @@ export function GuestDemographicsModal({
         </div>
 
         <div className="flex items-center justify-between border-t border-dashed border-border pt-2 text-[12px] text-muted-foreground">
-          <span>合計人数 (子供を除く)</span>
-          <span className="font-bold text-foreground">{total}人</span>
+          <span>{t('guestDemo.totalLabel')}</span>
+          <span className="font-bold text-foreground">{t('guestDemo.totalCount', { count: total })}</span>
         </div>
-        {total === 0 && <div className="text-[11px] text-destructive">1人以上を選択してください</div>}
+        {total === 0 && <div className="text-[11px] text-destructive">{t('guestDemo.selectAtLeastOne')}</div>}
         {error && <div className="text-[11px] text-destructive">{error}</div>}
 
         <div className="flex gap-2">
@@ -98,7 +109,7 @@ export function GuestDemographicsModal({
             onClick={onCancel}
             className="h-11 flex-1 rounded-lg border border-border text-sm font-semibold"
           >
-            キャンセル
+            {t('common.cancel')}
           </button>
           <button
             type="button"
@@ -109,7 +120,7 @@ export function GuestDemographicsModal({
               (canSubmit ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground')
             }
           >
-            {submitting ? '保存中…' : '保存して会計へ進む'}
+            {submitting ? t('guestDemo.saving') : t('guestDemo.saveAndProceed')}
           </button>
         </div>
       </div>

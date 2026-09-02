@@ -61,6 +61,8 @@ import { CheckoutScreen } from './checkout-screen';
 import { ReceiptScreen } from './receipt-screen';
 import { OptionModal, type ModalSelection } from './option-modal';
 import { GuestDemographicsModal } from './guest-demographics-modal';
+import { LanguageProvider, useLanguage, STAFF_LANGUAGE_STORAGE_KEY } from './language-context';
+import { LANGS, LANG_LABEL } from '@/lib/i18n/lang';
 
 type Screen = 'tablemap' | 'order' | 'checkout' | 'receipt';
 
@@ -86,7 +88,21 @@ type CompletedOrderSnapshot = {
 // PosApp は旧 UI プロトタイプ (design canvas の Main.dc.html) の状態遷移を
 // そのまま React に移植したもの。本番接続 (Supabase / matsunoya-dine API) は
 // 各 on* ハンドラの中身を差し替えていく想定 (integration-spec.md 4章のエンドポイント対応)。
+// 多言語化 (2026-09-02 追加): レジ画面もハンディ画面と同じくスタッフ用の言語キー
+// (STAFF_LANGUAGE_STORAGE_KEY) で LanguageProvider を被せる。OptionModal 等の子コンポーネントが
+// 既に useLanguage() を呼んでいるため、この Provider が無いと ja 固定のフォールバックになる。
 export function PosApp() {
+  return (
+    <LanguageProvider storageKey={STAFF_LANGUAGE_STORAGE_KEY} defaultLang="ja">
+      <PosAppInner />
+    </LanguageProvider>
+  );
+}
+
+const ROLE_LABEL_KEY = { owner: 'role.owner', manager: 'role.manager', staff: 'role.staff' } as const;
+
+function PosAppInner() {
+  const { t, lang, setLang, menuText } = useLanguage();
   const router = useRouter();
   const me = useStaff();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -237,10 +253,7 @@ export function PosApp() {
         }
       } catch (err) {
         if (cancelled) return;
-        const message =
-          err instanceof PosApiError || err instanceof PosOrderApiError
-            ? err.message
-            : 'メニュー・設定の取得に失敗しました。通信環境を確認してください。';
+        const message = err instanceof PosApiError || err instanceof PosOrderApiError ? err.message : 'generic';
         setDataError(message);
       } finally {
         if (!cancelled) setDataLoading(false);
@@ -474,7 +487,7 @@ export function PosApp() {
     if (tableActionMode === 'move') {
       if (!moveSourceTable) {
         if ((tableStatus[code] ?? 'available') === 'available') {
-          setTableActionError('移動元は使用中のテーブルを選んでください');
+          setTableActionError(t('posApp.moveSourceMustBeOccupied'));
           return;
         }
         setMoveSourceTable(code);
@@ -485,7 +498,7 @@ export function PosApp() {
         return;
       }
       if ((tableStatus[code] ?? 'available') !== 'available') {
-        setTableActionError('移動先は空いているテーブルを選んでください');
+        setTableActionError(t('posApp.moveTargetMustBeAvailable'));
         return;
       }
       setTableActionBusy(true);
@@ -495,7 +508,7 @@ export function PosApp() {
         if (selectedTable === moveSourceTable) setSelectedTable(code);
         cancelTableAction();
       } catch (err) {
-        setTableActionError(err instanceof PosOrderOrdersApiError ? err.message : '席移動に失敗しました');
+        setTableActionError(err instanceof PosOrderOrdersApiError ? err.message : t('posApp.moveFailed'));
       } finally {
         setTableActionBusy(false);
       }
@@ -505,7 +518,7 @@ export function PosApp() {
     if (tableActionMode === 'merge') {
       if (!mergeTargetTable) {
         if ((tableStatus[code] ?? 'available') === 'available') {
-          setTableActionError('残すテーブル (合算先) は使用中のテーブルを選んでください');
+          setTableActionError(t('posApp.mergeTargetMustBeOccupied'));
           return;
         }
         setMergeTargetTable(code);
@@ -517,7 +530,7 @@ export function PosApp() {
         return;
       }
       if ((tableStatus[code] ?? 'available') === 'available') {
-        setTableActionError('合算するテーブルは使用中のテーブルを選んでください');
+        setTableActionError(t('posApp.mergeSourceMustBeOccupied'));
         return;
       }
       setMergeSourceTables((prev) => (prev.includes(code) ? prev.filter((c) => c !== code) : [...prev, code]));
@@ -533,7 +546,7 @@ export function PosApp() {
       refreshTableSessions();
       cancelTableAction();
     } catch (err) {
-      setTableActionError(err instanceof PosOrderOrdersApiError ? err.message : '会計合算に失敗しました');
+      setTableActionError(err instanceof PosOrderOrdersApiError ? err.message : t('posApp.mergeFailed'));
     } finally {
       setTableActionBusy(false);
     }
@@ -545,7 +558,10 @@ export function PosApp() {
     setCart((prev) => {
       const existing = prev.find((l) => l.id === item.id);
       if (existing) return prev.map((l) => (l.id === item.id ? { ...l, qty: l.qty + 1 } : l));
-      return [...prev, { id: item.id, menuId: item.id, name: item.name, unitPrice, qty: 1, selectedOptions: [] }];
+      return [
+        ...prev,
+        { id: item.id, menuId: item.id, name: menuText(item.name, item.translations), unitPrice, qty: 1, selectedOptions: [] },
+      ];
     });
   }
 
@@ -625,7 +641,7 @@ export function PosApp() {
         setCurrentOrder(order);
         proceedAddItem(item);
       } catch (err) {
-        window.alert(err instanceof PosOrderOrdersApiError ? err.message : '卓を開けませんでした');
+        window.alert(err instanceof PosOrderOrdersApiError ? err.message : t('handyApp.openTableError'));
       }
       return;
     }
@@ -648,7 +664,7 @@ export function PosApp() {
       setGuestModalOpen(false);
       setScreen('checkout');
     } catch (err) {
-      setGuestError(err instanceof PosOrderOrdersApiError ? err.message : '客層の保存に失敗しました');
+      setGuestError(err instanceof PosOrderOrdersApiError ? err.message : t('posApp.guestSaveFailed'));
     } finally {
       setGuestSaving(false);
     }
@@ -681,7 +697,7 @@ export function PosApp() {
       });
       return true;
     } catch (err) {
-      setConfirmError(err instanceof PosOrderOrdersApiError ? err.message : '注文の確定に失敗しました');
+      setConfirmError(err instanceof PosOrderOrdersApiError ? err.message : t('handyApp.confirmError'));
       return false;
     } finally {
       setConfirming(false);
@@ -717,7 +733,10 @@ export function PosApp() {
       return sum + (choice ? choice.priceDelta : 0);
     }, 0);
     const optionLabel = groups
-      .map((g) => g.choices.find((c) => c.id === optionSelection[g.key])?.label ?? '')
+      .map((g) => {
+        const choice = g.choices.find((c) => c.id === optionSelection[g.key]);
+        return choice ? menuText(choice.label, choice.translations) : '';
+      })
       .join('・');
     const lineId = optionModalItem.id + ':' + groups.map((g) => optionSelection[g.key]).join(',');
     const unitPrice = effectiveBasePrice(optionModalItem, happyHourActive) + priceDeltaTotal;
@@ -725,6 +744,7 @@ export function PosApp() {
       const choice = g.choices.find((c) => c.id === optionSelection[g.key])!;
       return { groupKey: g.key, groupLabel: g.label, choiceId: choice.id, choiceLabel: choice.label, priceDelta: choice.priceDelta };
     });
+    const itemDisplayName = menuText(optionModalItem.name, optionModalItem.translations);
 
     setCart((prev) => {
       const existing = prev.find((l) => l.id === lineId);
@@ -734,7 +754,7 @@ export function PosApp() {
         {
           id: lineId,
           menuId: optionModalItem.id,
-          name: `${optionModalItem.name}(${optionLabel})`,
+          name: `${itemDisplayName}(${optionLabel})`,
           unitPrice,
           qty: 1,
           selectedOptions,
@@ -832,7 +852,7 @@ export function PosApp() {
       setConfirmedItems([]);
       setScreen('receipt');
     } catch (err) {
-      setCompleteError(err instanceof PosOrderOrdersApiError ? err.message : '会計の確定に失敗しました');
+      setCompleteError(err instanceof PosOrderOrdersApiError ? err.message : t('posApp.completeFailed'));
     } finally {
       setCompleting(false);
     }
@@ -843,17 +863,13 @@ export function PosApp() {
   // 取り消せない操作なので window.confirm で必ず確認する (order-screen.tsx の削除確認と同じ方針)。
   async function resetCurrentTable() {
     if (!selectedTable) return;
-    if (
-      !window.confirm(
-        `テーブル ${selectedTable} をリセットしますか？\n入力した注文はすべて破棄され、会計は行われません。この操作は取り消せません。`,
-      )
-    ) {
+    if (!window.confirm(t('handyApp.resetConfirm', { table: selectedTable }))) {
       return;
     }
     try {
       await resetTable(selectedTable);
     } catch (err) {
-      window.alert(err instanceof PosOrderOrdersApiError ? err.message : 'テーブルのリセットに失敗しました');
+      window.alert(err instanceof PosOrderOrdersApiError ? err.message : t('handyApp.resetError'));
       return;
     }
     setTableSessions((prev) => prev.filter((s) => s.table_code !== selectedTable));
@@ -915,7 +931,7 @@ export function PosApp() {
       });
       setInvoiceIssued(true);
     } catch (err) {
-      setInvoiceError(err instanceof PosOrderOrdersApiError ? err.message : '領収書の発行に失敗しました');
+      setInvoiceError(err instanceof PosOrderOrdersApiError ? err.message : t('posApp.invoiceFailed'));
     } finally {
       setInvoiceBusy(false);
     }
@@ -933,7 +949,7 @@ export function PosApp() {
   if (dataLoading) {
     return (
       <div className="flex h-[800px] w-[1280px] flex-col items-center justify-center gap-3 bg-background text-muted-foreground">
-        <div className="text-sm">メニュー・設定を読み込み中…</div>
+        <div className="text-sm">{t('posApp.loadingData')}</div>
       </div>
     );
   }
@@ -941,12 +957,12 @@ export function PosApp() {
   if (dataError) {
     return (
       <div className="flex h-[800px] w-[1280px] flex-col items-center justify-center gap-4 bg-background px-10 text-center">
-        <div className="text-sm font-semibold text-destructive">{dataError}</div>
+        <div className="text-sm font-semibold text-destructive">{dataError === 'generic' ? t('qr.loadError') : dataError}</div>
         <button
-          onClick={() => setLoadToken((t) => t + 1)}
+          onClick={() => setLoadToken((n) => n + 1)}
           className="h-10 rounded-lg bg-primary px-5 text-[13.5px] font-bold text-primary-foreground"
         >
-          再読み込み
+          {t('common.reload')}
         </button>
       </div>
     );
@@ -964,12 +980,12 @@ export function PosApp() {
         <div className="flex items-center gap-3.5">
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
-            オンライン
+            {t('posApp.online')}
           </div>
           <div className="relative">
             <button
               onClick={() => setMenuOpen((v) => !v)}
-              aria-label="メニュー"
+              aria-label={t('handyApp.menuAriaLabel')}
               className="flex h-[34px] w-[34px] flex-col items-center justify-center gap-[3px] rounded-full bg-secondary"
             >
               <span className="h-[2px] w-4 rounded-full bg-foreground" />
@@ -986,69 +1002,84 @@ export function PosApp() {
                 <div className="absolute right-0 top-[calc(100%+8px)] z-20 w-56 rounded-xl border border-border bg-card py-1.5 shadow-lg">
                   <div className="border-b border-border px-3.5 py-2.5">
                     <div className="text-[13px] font-semibold">{me.display_name}</div>
-                    <div className="text-[11px] text-muted-foreground">
-                      {{ owner: 'オーナー', manager: 'マネージャー', staff: 'スタッフ' }[me.role]}
+                    <div className="text-[11px] text-muted-foreground">{t(ROLE_LABEL_KEY[me.role])}</div>
+                  </div>
+                  <div className="border-b border-border px-3.5 py-2.5">
+                    <div className="mb-1.5 text-[10.5px] font-semibold text-muted-foreground">{t('handyApp.language')}</div>
+                    <div className="flex flex-wrap gap-1">
+                      {LANGS.map((l) => (
+                        <button
+                          key={l}
+                          onClick={() => setLang(l)}
+                          className={
+                            'rounded-md border px-2 py-1 text-[11px] font-semibold ' +
+                            (lang === l ? 'border-primary bg-primary text-primary-foreground' : 'border-border text-muted-foreground')
+                          }
+                        >
+                          {LANG_LABEL[l]}
+                        </button>
+                      ))}
                     </div>
                   </div>
                   <button
                     onClick={() => router.push('/pos/settings')}
                     className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary"
                   >
-                    設定
+                    {t('posApp.menuSettings')}
                   </button>
                   <button
                     onClick={() => router.push('/pos/table-layout')}
                     className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary"
                   >
-                    テーブルレイアウト
+                    {t('posApp.menuTableLayout')}
                   </button>
                   <button
                     onClick={() => router.push('/pos/reservations')}
                     className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary"
                   >
-                    予約受付
+                    {t('posApp.menuReservations')}
                   </button>
                   <button
                     onClick={() => router.push('/pos/handy')}
                     className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary"
                   >
-                    ハンディ注文
+                    {t('handyApp.title')}
                   </button>
                   <button
                     onClick={() => router.push('/pos/qr-codes')}
                     className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary"
                   >
-                    QRコード印刷
+                    {t('posApp.menuQrCodes')}
                   </button>
                   <button
                     onClick={() => router.push('/pos/expenses')}
                     className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary"
                   >
-                    経費
+                    {t('posApp.menuExpenses')}
                   </button>
                   <button
                     onClick={() => router.push('/pos/timecard')}
                     className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary"
                   >
-                    勤怠
+                    {t('posApp.menuTimecard')}
                   </button>
                   <button
                     onClick={() => router.push('/pos/insights')}
                     className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary"
                   >
-                    AI分析
+                    {t('posApp.menuInsights')}
                   </button>
                   <button
                     onClick={() => router.push('/pos/sales-report')}
                     className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary"
                   >
-                    売上レポート
+                    {t('posApp.menuSalesReport')}
                   </button>
                   <button
                     onClick={() => router.push('/pos/register-closing')}
                     className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary"
                   >
-                    レジ締め
+                    {t('posApp.menuRegisterClosing')}
                   </button>
                   {me.authMode === 'pos_native' && (
                     <button
@@ -1057,7 +1088,7 @@ export function PosApp() {
                       }}
                       className="block w-full border-t border-border px-3.5 py-2 text-left text-[12.5px] text-destructive hover:bg-secondary"
                     >
-                      ログアウト
+                      {t('handyApp.logout')}
                     </button>
                   )}
                 </div>
