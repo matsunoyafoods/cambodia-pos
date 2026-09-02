@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createDineAdminClient, createPosAdminClient, getPosStoreId } from '@/lib/supabase/admin';
 import { withPosStaff } from '@/lib/pos-auth';
+import { notifyReservationCreated } from '@/lib/telegram-notify';
 
 // 予約受付機能。日々の電話予約はスタッフなら誰でも受け付けられる業務なので
 // (テーブルレイアウトのような構造変更とは違い) staff 以上で読み書きどちらも許可する。
@@ -229,5 +230,18 @@ export const POST = withPosStaff('staff', async (session, req) => {
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json(toApiFromPos(data as PosRow));
+
+  const created = toApiFromPos(data as PosRow);
+  notifyReservationCreated({
+    reservationType: created.reservationType,
+    customerName: created.customerName,
+    phone: created.phone,
+    partySize: created.partySize,
+    reservationDate: created.reservationDate,
+    reservationTime: created.reservationTime,
+    notes: created.notes,
+    createdByName: session.displayName,
+  }).catch(() => {});
+
+  return NextResponse.json(created);
 });
