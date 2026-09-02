@@ -991,6 +991,12 @@ export function PosApp() {
                     勤怠
                   </button>
                   <button
+                    onClick={() => router.push('/pos/insights')}
+                    className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary"
+                  >
+                    AI分析
+                  </button>
+                  <button
                     onClick={() => router.push('/pos/register-closing')}
                     className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary"
                   >

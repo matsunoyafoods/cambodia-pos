@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useStaff } from './staff-context';
 import {
@@ -8,15 +8,28 @@ import {
   clockOut,
   deleteTimecard,
   endBreak,
+  getTimecardRoundingSettings,
   getTimecardStatus,
   listTimecards,
   PosTimecardApiError,
   startBreak,
   updateTimecard,
+  updateTimecardRoundingSettings,
   type MyTimecardStatus,
 } from '@/lib/timecard-client';
 import { getStaffRoster, listStaff, type PosStaffMember, type PosStaffRosterEntry } from '@/lib/staff-client';
-import type { TimecardRecord } from '@/lib/pos-types';
+import { applyTimecardRounding } from '@/lib/timecard-rounding';
+import { downloadCsv } from '@/lib/csv-export';
+import { DEFAULT_TIMECARD_ROUNDING, type TimecardRecord, type TimecardRoundingSettings } from '@/lib/pos-types';
+
+// スタッフ別タイムカード画像出力 (2026-09-01 追加。「明細をスタッフのテレグラムに送れるように」)。
+// サーバー側でPDF/画像を生成する仕組みは追加せず、ブラウザ上のDOMを直接PNG画像化するライブラリ
+// (html2canvas、クライアント専用・ビルド構成への影響なし) を使う。動的importでこのファイルが
+// SSR/ビルド時に評価されないようにする。
+async function loadHtml2Canvas() {
+  const mod = await import('html2canvas');
+  return mod.default;
+}
 
 // 勤怠打刻画面 (2026-08-31 追加。「人件費に関しては出勤、休憩、退勤は記録できるように」)。
 // シフト作成機能は無し。誰でも自分の打刻ができ (staff 権限含む)、manager 以上には
@@ -252,6 +265,7 @@ function TimecardReport() {
   const [staffList, setStaffList] = useState<PosStaffMember[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [rounding, setRounding] = useState<TimecardRoundingSettings>(DEFAULT_TIMECARD_ROUNDING);
 
   const load = useCallback(() => {
     setError(null);
@@ -268,20 +282,57 @@ function TimecardReport() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    getTimecardRoundingSettings()
+      .then(setRounding)
+      .catch(() => {
+        /* 取得失敗時はデフォルト (丸めなし) のまま。丸め設定パネル側で再取得できる */
+      });
+  }, []);
+
   const wageById = useMemo(() => new Map(staffList.map((s) => [s.id, s.hourly_wage_usd ?? null])), [staffList]);
+
+  // 実働分数 (丸め設定適用後)。打刻の生記録自体は変更しない — 集計・表示にのみ使う。
+  const roundedMinutes = useCallback((r: TimecardRecord) => applyTimecardRounding(workedMinutes(r), rounding), [rounding]);
 
   const totals = useMemo(() => {
     if (!rows) return { minutes: 0, cost: 0 };
     let minutes = 0;
     let cost = 0;
     for (const r of rows) {
-      const m = workedMinutes(r);
+      const m = roundedMinutes(r);
       minutes += m;
       const wage = wageById.get(r.staffId);
       if (wage) cost += (m / 60) * wage;
     }
     return { minutes, cost };
-  }, [rows, wageById]);
+  }, [rows, wageById, roundedMinutes]);
+
+  // 日別の概算人件費 (可視化グラフ用)。
+  const dailyCost = useMemo(() => {
+    if (!rows) return [] as { date: string; cost: number }[];
+    const map = new Map<string, number>();
+    for (const r of rows) {
+      const date = r.clockIn.slice(0, 10);
+      const wage = wageById.get(r.staffId);
+      const cost = wage ? (roundedMinutes(r) / 60) * wage : 0;
+      map.set(date, (map.get(date) ?? 0) + cost);
+    }
+    return Array.from(map.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, cost]) => ({ date, cost }));
+  }, [rows, wageById, roundedMinutes]);
+
+  // スタッフ別グループ (スタッフ別画像出力用)。
+  const byStaff = useMemo(() => {
+    if (!rows) return [] as { staffId: string; staffName: string; records: TimecardRecord[] }[];
+    const map = new Map<string, { staffId: string; staffName: string; records: TimecardRecord[] }>();
+    for (const r of rows) {
+      if (!map.has(r.staffId)) map.set(r.staffId, { staffId: r.staffId, staffName: r.staffName, records: [] });
+      map.get(r.staffId)!.records.push(r);
+    }
+    return Array.from(map.values()).sort((a, b) => a.staffName.localeCompare(b.staffName, 'ja'));
+  }, [rows]);
 
   async function handleDelete(id: string) {
     if (!confirm('この勤怠記録を削除しますか？')) return;
@@ -291,6 +342,27 @@ function TimecardReport() {
     } catch (err) {
       setError(err instanceof PosTimecardApiError ? err.message : '削除に失敗しました');
     }
+  }
+
+  function handleCsvExport() {
+    if (!rows || rows.length === 0) return;
+    downloadCsv(
+      `勤怠レポート_${from}_${to}`,
+      ['スタッフ', '出勤', '退勤', '休憩回数', `実働時間(h)${rounding.enabled ? '(丸め後)' : ''}`, '概算人件費(USD)', '修正'],
+      rows.map((r) => {
+        const wage = wageById.get(r.staffId);
+        const m = roundedMinutes(r);
+        return [
+          r.staffName,
+          fmtTime(r.clockIn),
+          r.clockOut ? fmtTime(r.clockOut) : '',
+          r.breaks.length,
+          (m / 60).toFixed(2),
+          wage ? ((m / 60) * wage).toFixed(2) : '',
+          r.editedAt ? '修正済み' : '',
+        ];
+      }),
+    );
   }
 
   return (
@@ -303,6 +375,13 @@ function TimecardReport() {
           <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-9 rounded-lg border border-border px-2.5 text-[12.5px]" />
           <button onClick={load} className="h-9 rounded-lg border border-border px-3 text-[12.5px] font-semibold">
             更新
+          </button>
+          <button
+            onClick={handleCsvExport}
+            disabled={!rows || rows.length === 0}
+            className="h-9 rounded-lg border border-border px-3 text-[12.5px] font-semibold disabled:opacity-50"
+          >
+            CSV出力
           </button>
           <button
             onClick={() => printReport(`勤怠レポート_${from}_${to}`)}
@@ -319,8 +398,11 @@ function TimecardReport() {
         <div className="text-[16px] font-bold">勤怠レポート (人件費){me.store_name ? ` — ${me.store_name}` : ''}</div>
         <div className="text-[12px] text-muted-foreground">
           対象期間: {from} 〜 {to} ・ 出力日時: {new Date().toLocaleString('ja-JP')}
+          {rounding.enabled && ` ・ 丸め設定: ${rounding.unitMinutes}分単位 (${ROUNDING_DIRECTION_LABEL[rounding.direction]})`}
         </div>
       </div>
+
+      <RoundingSettingsPanel rounding={rounding} onSaved={setRounding} />
 
       {error && <div className="mb-2 text-[12.5px] text-destructive print:hidden">{error}</div>}
 
@@ -328,6 +410,7 @@ function TimecardReport() {
         <div className="mb-3 flex gap-5 rounded-lg bg-secondary/40 px-4 py-2.5 text-[12.5px] print:rounded-none print:bg-transparent print:px-0">
           <div>
             合計実働時間: <span className="font-semibold">{fmtHours(totals.minutes)} 時間</span>
+            {rounding.enabled && <span className="ml-1 text-[11px] text-muted-foreground">(丸め後)</span>}
           </div>
           <div>
             概算人件費: <span className="font-semibold">${totals.cost.toFixed(2)}</span>
@@ -335,6 +418,10 @@ function TimecardReport() {
           </div>
         </div>
       )}
+
+      <LaborCostChart data={dailyCost} />
+
+      <StaffImageExportSection groups={byStaff} wageById={wageById} rounding={rounding} storeName={me.store_name} from={from} to={to} />
 
       {!rows && <div className="text-[12.5px] text-muted-foreground">読み込み中…</div>}
       {rows?.length === 0 && <div className="text-[12.5px] text-muted-foreground">この期間の勤怠記録はありません。</div>}
@@ -351,7 +438,7 @@ function TimecardReport() {
                 {!r.clockOut && <span className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 text-[10.5px] font-semibold text-emerald-700 print:hidden">勤務中</span>}
               </div>
               <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
-                <span>実働 {fmtHours(workedMinutes(r))}h</span>
+                <span>実働 {fmtHours(roundedMinutes(r))}h</span>
                 {r.breaks.length > 0 && <span>休憩{r.breaks.length}回</span>}
                 {r.editedAt && <span className="text-amber-600">修正済み</span>}
                 <button onClick={() => setEditingId((v) => (v === r.id ? null : r.id))} className="rounded-md border border-border px-2 py-1 text-[11.5px] font-semibold print:hidden">
@@ -375,6 +462,240 @@ function TimecardReport() {
             {r.note && <div className="mt-1.5 text-[11.5px] text-muted-foreground">メモ: {r.note}</div>}
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+const ROUNDING_DIRECTION_LABEL: Record<TimecardRoundingSettings['direction'], string> = {
+  up: '切り上げ',
+  down: '切り捨て',
+  nearest: '四捨五入',
+};
+
+function RoundingSettingsPanel({ rounding, onSaved }: { rounding: TimecardRoundingSettings; onSaved: (s: TimecardRoundingSettings) => void }) {
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState(rounding);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) setDraft(rounding);
+  }, [rounding, open]);
+
+  async function save() {
+    setSaving(true);
+    setError(null);
+    try {
+      const saved = await updateTimecardRoundingSettings(draft);
+      onSaved(saved);
+      setOpen(false);
+    } catch (err) {
+      setError(err instanceof PosTimecardApiError ? err.message : '保存に失敗しました');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="mb-3 rounded-lg border border-border bg-secondary/20 print:hidden">
+      <button onClick={() => setOpen((v) => !v)} className="flex w-full items-center justify-between px-4 py-2.5 text-left text-[12.5px] font-semibold">
+        <span>
+          丸め設定{rounding.enabled ? ` (${rounding.unitMinutes}分単位・${ROUNDING_DIRECTION_LABEL[rounding.direction]})` : ' (無効)'}
+        </span>
+        <span className="text-muted-foreground">{open ? '閉じる' : '設定'}</span>
+      </button>
+      {open && (
+        <div className="flex flex-col gap-2.5 border-t border-border px-4 py-3">
+          <p className="text-[11.5px] text-muted-foreground">
+            打刻の記録自体は変更されません。実働時間・概算人件費・CSV・PDF・スタッフ別画像・AI分析の集計にだけ適用されます。
+          </p>
+          <label className="flex items-center gap-1.5 text-[12.5px]">
+            <input type="checkbox" checked={draft.enabled} onChange={(e) => setDraft((d) => ({ ...d, enabled: e.target.checked }))} />
+            丸めを有効にする
+          </label>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <label className="flex flex-col gap-1 text-[11.5px] text-muted-foreground">
+              単位
+              <select
+                value={draft.unitMinutes}
+                disabled={!draft.enabled}
+                onChange={(e) => setDraft((d) => ({ ...d, unitMinutes: Number(e.target.value) as TimecardRoundingSettings['unitMinutes'] }))}
+                className="h-9 rounded-lg border border-border px-2 text-[12.5px] disabled:opacity-50"
+              >
+                <option value={5}>5分</option>
+                <option value={10}>10分</option>
+                <option value={15}>15分</option>
+                <option value={30}>30分</option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-[11.5px] text-muted-foreground">
+              方向
+              <select
+                value={draft.direction}
+                disabled={!draft.enabled}
+                onChange={(e) => setDraft((d) => ({ ...d, direction: e.target.value as TimecardRoundingSettings['direction'] }))}
+                className="h-9 rounded-lg border border-border px-2 text-[12.5px] disabled:opacity-50"
+              >
+                <option value="nearest">四捨五入</option>
+                <option value="up">切り上げ</option>
+                <option value="down">切り捨て</option>
+              </select>
+            </label>
+          </div>
+          {error && <div className="text-[11.5px] text-destructive">{error}</div>}
+          <div className="flex gap-2">
+            <button onClick={save} disabled={saving} className="h-9 w-fit rounded-lg bg-primary px-4 text-[12.5px] font-semibold text-primary-foreground disabled:opacity-60">
+              {saving ? '保存中…' : '保存'}
+            </button>
+            <button onClick={() => setOpen(false)} className="h-9 w-fit rounded-lg border border-border px-4 text-[12.5px] font-semibold">
+              キャンセル
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// 日別の概算人件費の簡易棒グラフ (2026-09-01 追加。新規ライブラリは使わずSVGを手描き)。
+function LaborCostChart({ data }: { data: { date: string; cost: number }[] }) {
+  if (data.length === 0 || data.every((d) => d.cost === 0)) return null;
+  const max = Math.max(...data.map((d) => d.cost));
+  const width = 640;
+  const height = 140;
+  const barGap = 4;
+  const barWidth = Math.max(4, width / data.length - barGap);
+
+  return (
+    <div className="mb-3 rounded-lg border border-border p-3.5 print:hidden">
+      <div className="mb-2 text-[12px] font-semibold text-muted-foreground">日別 概算人件費</div>
+      <svg viewBox={`0 0 ${width} ${height + 20}`} className="h-[120px] w-full" role="img" aria-label="日別の概算人件費の棒グラフ">
+        {data.map((d, i) => {
+          const barHeight = max > 0 ? (d.cost / max) * height : 0;
+          const x = i * (barWidth + barGap);
+          return (
+            <g key={d.date}>
+              <rect x={x} y={height - barHeight} width={barWidth} height={barHeight} fill="var(--primary, #2563eb)" rx={2}>
+                <title>
+                  {d.date}: ${d.cost.toFixed(2)}
+                </title>
+              </rect>
+              {(data.length <= 15 || i % Math.ceil(data.length / 15) === 0) && (
+                <text x={x + barWidth / 2} y={height + 14} textAnchor="middle" fontSize="9" fill="currentColor" className="text-muted-foreground">
+                  {d.date.slice(5)}
+                </text>
+              )}
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
+// スタッフ別タイムカード画像出力 (2026-09-01 追加。Tom「明細をスタッフのテレグラムに送れるように」)。
+// スタッフごとの明細を1枚のPNG画像として書き出す。html2canvasでDOMをそのまま画像化するため、
+// 画面には出さないオフスクリーンのカードを用意しておき、ボタン押下時にそのDOM要素を撮影する。
+function StaffImageExportSection({
+  groups,
+  wageById,
+  rounding,
+  storeName,
+  from,
+  to,
+}: {
+  groups: { staffId: string; staffName: string; records: TimecardRecord[] }[];
+  wageById: Map<string, number | null>;
+  rounding: TimecardRoundingSettings;
+  storeName?: string;
+  from: string;
+  to: string;
+}) {
+  const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function saveImage(staffId: string, staffName: string) {
+    const node = cardRefs.current[staffId];
+    if (!node) return;
+    setSavingId(staffId);
+    setError(null);
+    try {
+      const html2canvas = await loadHtml2Canvas();
+      const canvas = await html2canvas(node, { scale: 2, backgroundColor: '#ffffff' });
+      const blob: Blob | null = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+      if (!blob) throw new Error('画像の生成に失敗しました');
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `勤怠明細_${staffName}_${from}_${to}.png`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      setError('画像の生成に失敗しました。もう一度お試しください。');
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  if (groups.length === 0) return null;
+
+  return (
+    <div className="mb-3 rounded-lg border border-border p-3.5 print:hidden">
+      <div className="mb-1 text-[12px] font-semibold text-muted-foreground">スタッフ別 画像出力 (Telegramで個別に送るのに使えます)</div>
+      {error && <div className="mb-1.5 text-[11.5px] text-destructive">{error}</div>}
+      <div className="flex flex-wrap gap-2">
+        {groups.map((g) => (
+          <button
+            key={g.staffId}
+            onClick={() => saveImage(g.staffId, g.staffName)}
+            disabled={savingId !== null}
+            className="h-9 rounded-lg border border-border px-3 text-[12.5px] font-semibold disabled:opacity-50"
+          >
+            {savingId === g.staffId ? '作成中…' : `${g.staffName} を画像で保存`}
+          </button>
+        ))}
+      </div>
+
+      {/* オフスクリーンの撮影用カード (画面には表示しない。display:none だと html2canvas が撮影できないため left: -9999px で退避する) */}
+      <div style={{ position: 'absolute', left: -9999, top: 0 }} aria-hidden="true">
+        {groups.map((g) => {
+          const wage = wageById.get(g.staffId);
+          let totalMinutes = 0;
+          for (const r of g.records) totalMinutes += applyTimecardRounding(workedMinutes(r), rounding);
+          const cost = wage ? (totalMinutes / 60) * wage : null;
+          return (
+            <div
+              key={g.staffId}
+              ref={(el) => {
+                cardRefs.current[g.staffId] = el;
+              }}
+              style={{ width: 480, padding: 28, background: '#ffffff', color: '#111827', fontFamily: 'sans-serif' }}
+            >
+              <div style={{ fontSize: 18, fontWeight: 700 }}>勤怠明細 — {g.staffName}</div>
+              <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
+                {storeName ? `${storeName} ・ ` : ''}
+                {from} 〜 {to}
+              </div>
+              <div style={{ marginTop: 16, borderTop: '1px solid #e5e7eb' }}>
+                {g.records.map((r) => (
+                  <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #f3f4f6', fontSize: 13 }}>
+                    <span>{fmtTime(r.clockIn)} 〜 {r.clockOut ? fmtTime(r.clockOut) : '(勤務中)'}</span>
+                    <span>{fmtHours(applyTimecardRounding(workedMinutes(r), rounding))}h</span>
+                  </div>
+                ))}
+              </div>
+              <div style={{ marginTop: 16, fontSize: 14, fontWeight: 700 }}>
+                合計実働: {fmtHours(totalMinutes)} 時間
+                {cost !== null && ` ・ 概算人件費: $${cost.toFixed(2)}`}
+              </div>
+              <div style={{ marginTop: 10, fontSize: 10, color: '#9ca3af' }}>出力日時: {new Date().toLocaleString('ja-JP')}</div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

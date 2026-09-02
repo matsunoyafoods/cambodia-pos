@@ -271,3 +271,23 @@ export type TimecardRecord = {
 
 /** 打刻の現在状態 (自分の勤怠画面のボタン出し分け用)。 */
 export type TimecardStatus = 'not_clocked_in' | 'working' | 'on_break' | 'clocked_out';
+
+// ---------- 勤怠の丸め設定 (2026-09-01 追加。Tom「タイムカードのところに丸め設定を」) ----------
+// 打刻の生記録 (clockIn/clockOut) 自体は一切変更しない。人件費レポート・CSV・スタッフ別画像・
+// AI分析に使う「実働時間」の集計時にのみ、この設定に従って1回の勤務ごとの実働分数を丸める。
+// pos.stores.settings.timecardRounding (jsonb) に保存する (既存の設定と同じパターン)。
+
+export type TimecardRoundingUnit = 5 | 10 | 15 | 30;
+export type TimecardRoundingDirection = 'up' | 'down' | 'nearest';
+
+export type TimecardRoundingSettings = {
+  enabled: boolean;
+  unitMinutes: TimecardRoundingUnit;
+  direction: TimecardRoundingDirection;
+};
+
+export const DEFAULT_TIMECARD_ROUNDING: TimecardRoundingSettings = {
+  enabled: false,
+  unitMinutes: 15,
+  direction: 'nearest',
+};

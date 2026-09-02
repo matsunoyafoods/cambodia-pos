@@ -38,6 +38,19 @@ function toRecord(row: {
   };
 }
 
+const RECEIPT_BUCKET = 'expense-receipts';
+
+// receipt_image_url には Storage 上のパス (storeId/expenseId.ext) を保存している (非公開バケット)。
+// 一覧表示のたびに、写真が付いている行だけまとめて signed URL に差し替える。
+async function withSignedReceiptUrls(supabase: ReturnType<typeof createPosAdminClient>, records: ExpenseRecord[]): Promise<ExpenseRecord[]> {
+  const paths = records.map((r) => r.receiptImageUrl).filter((p): p is string => !!p);
+  if (paths.length === 0) return records;
+  const { data, error } = await supabase.storage.from(RECEIPT_BUCKET).createSignedUrls(paths, 3600);
+  if (error || !data) return records.map((r) => ({ ...r, receiptImageUrl: null }));
+  const urlByPath = new Map(data.map((d) => [d.path, d.signedUrl]));
+  return records.map((r) => (r.receiptImageUrl ? { ...r, receiptImageUrl: urlByPath.get(r.receiptImageUrl) ?? null } : r));
+}
+
 // 一覧 (期間・支払い状況で絞り込み可)。manager 以上のみ。
 export const GET = withPosStaff('manager', async (_session, req) => {
   const url = new URL(req.url);
@@ -54,7 +67,8 @@ export const GET = withPosStaff('manager', async (_session, req) => {
 
   const { data, error } = await query;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ expenses: (data ?? []).map(toRecord) });
+  const records = await withSignedReceiptUrls(supabase, (data ?? []).map(toRecord));
+  return NextResponse.json({ expenses: records });
 });
 
 const postSchema = z.object({

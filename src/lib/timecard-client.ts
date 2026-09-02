@@ -7,7 +7,7 @@
  * manager 以上のみ (人件費 = 給与に関わる情報のため)。
  */
 
-import type { TimecardRecord, TimecardStatus, TimecardBreak } from '@/lib/pos-types';
+import type { TimecardRecord, TimecardStatus, TimecardBreak, TimecardRoundingSettings } from '@/lib/pos-types';
 
 export class PosTimecardApiError extends Error {
   constructor(
@@ -105,4 +105,14 @@ export async function updateTimecard(id: string, patch: UpdateTimecardInput): Pr
 
 export async function deleteTimecard(id: string): Promise<void> {
   await request(`/api/timecards/${id}`, { method: 'DELETE' });
+}
+
+// ---------- 丸め設定 (2026-09-01 追加。manager 以上) ----------
+
+export function getTimecardRoundingSettings(): Promise<TimecardRoundingSettings> {
+  return request('/api/settings/timecard-rounding');
+}
+
+export function updateTimecardRoundingSettings(settings: TimecardRoundingSettings): Promise<TimecardRoundingSettings> {
+  return request('/api/settings/timecard-rounding', { method: 'PATCH', body: JSON.stringify(settings) });
 }

@@ -153,3 +153,27 @@ export function settleExpense(id: string): Promise<ExpenseRecord> {
 export async function deleteExpense(id: string): Promise<void> {
   await request(`/api/expenses/${id}`, { method: 'DELETE' });
 }
+
+// ---------- レシート写真 (2026-09-01 追加) ----------
+// JSONではなく multipart/form-data で送るため、共通 request() は使わずここだけ個別に fetch する。
+
+export async function uploadExpenseReceipt(expenseId: string, file: File): Promise<{ receiptImageUrl: string }> {
+  const form = new FormData();
+  form.append('file', file);
+  const res = await fetch(`/api/expenses/${expenseId}/receipt`, { method: 'POST', body: form });
+  if (!res.ok) {
+    let message = `Request failed (${res.status})`;
+    try {
+      const body = (await res.json()) as { error?: string };
+      if (body?.error) message = body.error;
+    } catch {
+      // ignore
+    }
+    throw new PosExpenseApiError(message, res.status);
+  }
+  return res.json() as Promise<{ receiptImageUrl: string }>;
+}
+
+export async function deleteExpenseReceipt(expenseId: string): Promise<void> {
+  await request(`/api/expenses/${expenseId}/receipt`, { method: 'DELETE' });
+}

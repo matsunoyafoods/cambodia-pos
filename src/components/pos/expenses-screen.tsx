@@ -9,6 +9,7 @@ import {
   createExpenseVendor,
   deleteExpense,
   deleteExpenseCategory,
+  deleteExpenseReceipt,
   deleteExpenseVendor,
   listExpenseCategories,
   listExpenseVendors,
@@ -16,7 +17,9 @@ import {
   PosExpenseApiError,
   settleExpense,
   updateExpense,
+  uploadExpenseReceipt,
 } from '@/lib/expense-client';
+import { downloadCsv } from '@/lib/csv-export';
 import type { ExpenseCategory, ExpensePaymentStatus, ExpenseRecord, ExpenseVendor } from '@/lib/pos-types';
 
 // 経費管理画面 (2026-08-31 追加)。
@@ -144,8 +147,11 @@ function QuickEntryForm({
   const [vendorOther, setVendorOther] = useState('');
   const [note, setNote] = useState('');
   const [paymentStatus, setPaymentStatus] = useState<ExpensePaymentStatus>('paid');
+  const [photo, setPhoto] = useState<File | null>(null);
+  const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [photoWarning, setPhotoWarning] = useState<string | null>(null);
   const [done, setDone] = useState(false);
 
   const resolvedCategory = category === '__other__' ? categoryOther.trim() : category;
@@ -153,13 +159,23 @@ function QuickEntryForm({
   const amountNum = Number(amount);
   const canSubmit = date && amountNum > 0 && resolvedCategory.length > 0 && !submitting;
 
+  function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0] ?? null;
+    setPhoto(file);
+    setPhotoPreviewUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return file ? URL.createObjectURL(file) : null;
+    });
+  }
+
   async function submit() {
     if (!canSubmit) return;
     setSubmitting(true);
     setError(null);
+    setPhotoWarning(null);
     setDone(false);
     try {
-      await createExpense({
+      const created = await createExpense({
         date,
         amountUsd: amountNum,
         category: resolvedCategory,
@@ -167,8 +183,22 @@ function QuickEntryForm({
         note: note.trim() || undefined,
         paymentStatus,
       });
+      // 写真アップロードが失敗しても経費の記録自体は成功しているので、警告表示のみに留める
+      // (記録全体を失敗扱いにして再入力させると二重登録の原因になる)。
+      if (photo) {
+        try {
+          await uploadExpenseReceipt(created.id, photo);
+        } catch {
+          setPhotoWarning('経費は記録されましたが、写真のアップロードに失敗しました。経費レポートの編集から後で添付できます。');
+        }
+      }
       setAmount('');
       setNote('');
+      setPhoto(null);
+      setPhotoPreviewUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return null;
+      });
       setDone(true);
       onCreated();
     } catch (err) {
@@ -254,7 +284,19 @@ function QuickEntryForm({
           </label>
         </div>
 
+        <div className="flex items-center gap-3">
+          <label className="flex h-10 w-fit cursor-pointer items-center gap-1.5 rounded-lg border border-border px-3 text-[12.5px] font-semibold">
+            📷 レシート写真 (任意)
+            <input type="file" accept="image/*" capture="environment" onChange={handlePhotoChange} className="hidden" />
+          </label>
+          {photoPreviewUrl && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={photoPreviewUrl} alt="レシートプレビュー" className="h-10 w-10 rounded-md border border-border object-cover" />
+          )}
+        </div>
+
         {error && <div className="text-[12.5px] text-destructive">{error}</div>}
+        {photoWarning && <div className="text-[12.5px] text-amber-600">{photoWarning}</div>}
         {done && !error && <div className="text-[12.5px] text-emerald-600">登録しました。</div>}
 
         <button
@@ -313,6 +355,15 @@ function ExpenseReport({ refreshKey, onChanged }: { refreshKey: number; onChange
     }
   }
 
+  function handleCsvExport() {
+    if (!rows || rows.length === 0) return;
+    downloadCsv(
+      `経費レポート_${from}_${to}`,
+      ['日付', '金額(USD)', '費目', '仕入れ先', 'メモ', '支払い状況', '精算日'],
+      rows.map((r) => [r.date, r.amountUsd.toFixed(2), r.category, r.vendor ?? '', r.note ?? '', r.paymentStatus === 'paid' ? '支払い済み' : '買掛', r.paidAt ? r.paidAt.slice(0, 10) : '']),
+    );
+  }
+
   return (
     <div className="rounded-xl border border-border bg-card p-5 print:border-0 print:p-0">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2.5 print:hidden">
@@ -328,6 +379,13 @@ function ExpenseReport({ refreshKey, onChanged }: { refreshKey: number; onChange
           </select>
           <button onClick={load} className="h-9 rounded-lg border border-border px-3 text-[12.5px] font-semibold">
             更新
+          </button>
+          <button
+            onClick={handleCsvExport}
+            disabled={!rows || rows.length === 0}
+            className="h-9 rounded-lg border border-border px-3 text-[12.5px] font-semibold disabled:opacity-50"
+          >
+            CSV出力
           </button>
           <button
             onClick={() => printReport(`経費レポート_${from}_${to}`)}
@@ -367,17 +425,25 @@ function ExpenseReport({ refreshKey, onChanged }: { refreshKey: number; onChange
         {rows?.map((r) => (
           <div key={r.id} className="rounded-lg border border-border px-3.5 py-2.5 print:rounded-none print:border-0 print:border-b print:px-0 print:py-1.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="text-[13px]">
-                <span className="font-semibold">${r.amountUsd.toFixed(2)}</span>
-                <span className="ml-2 text-muted-foreground">
-                  {r.date} ・ {r.category}
-                  {r.vendor && ` ・ ${r.vendor}`}
-                </span>
-                {r.paymentStatus === 'unpaid' ? (
-                  <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-[10.5px] font-semibold text-amber-700">買掛</span>
-                ) : (
-                  <span className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 text-[10.5px] font-semibold text-emerald-700 print:hidden">支払い済み</span>
+              <div className="flex items-center gap-2.5 text-[13px]">
+                {r.receiptImageUrl && (
+                  <a href={r.receiptImageUrl} target="_blank" rel="noopener noreferrer" className="print:hidden">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={r.receiptImageUrl} alt="レシート" className="h-9 w-9 rounded-md border border-border object-cover" />
+                  </a>
                 )}
+                <span>
+                  <span className="font-semibold">${r.amountUsd.toFixed(2)}</span>
+                  <span className="ml-2 text-muted-foreground">
+                    {r.date} ・ {r.category}
+                    {r.vendor && ` ・ ${r.vendor}`}
+                  </span>
+                  {r.paymentStatus === 'unpaid' ? (
+                    <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-[10.5px] font-semibold text-amber-700">買掛</span>
+                  ) : (
+                    <span className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 text-[10.5px] font-semibold text-emerald-700 print:hidden">支払い済み</span>
+                  )}
+                </span>
               </div>
               <div className="flex items-center gap-2 print:hidden">
                 {r.paymentStatus === 'unpaid' && (
@@ -420,6 +486,8 @@ function ExpenseEditForm({ record, onDone, onCancel }: { record: ExpenseRecord; 
   const [note, setNote] = useState(record.note ?? '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [receiptUrl, setReceiptUrl] = useState(record.receiptImageUrl);
+  const [deletingPhoto, setDeletingPhoto] = useState(false);
 
   async function save() {
     const amountNum = Number(amount);
@@ -442,6 +510,20 @@ function ExpenseEditForm({ record, onDone, onCancel }: { record: ExpenseRecord; 
     }
   }
 
+  async function removePhoto() {
+    if (!confirm('レシート写真を削除しますか？')) return;
+    setDeletingPhoto(true);
+    setError(null);
+    try {
+      await deleteExpenseReceipt(record.id);
+      setReceiptUrl(null);
+    } catch (err) {
+      setError(err instanceof PosExpenseApiError ? err.message : '写真の削除に失敗しました');
+    } finally {
+      setDeletingPhoto(false);
+    }
+  }
+
   return (
     <div className="mt-2.5 flex flex-col gap-2 border-t border-border pt-2.5 print:hidden">
       <div className="flex flex-wrap gap-2.5">
@@ -451,6 +533,15 @@ function ExpenseEditForm({ record, onDone, onCancel }: { record: ExpenseRecord; 
         <input value={vendor} onChange={(e) => setVendor(e.target.value)} placeholder="仕入れ先 (任意)" className="h-9 w-36 rounded-lg border border-border px-2.5 text-[12.5px]" />
       </div>
       <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="メモ (任意)" className="h-9 rounded-lg border border-border px-2.5 text-[12.5px]" />
+      {receiptUrl && (
+        <div className="flex items-center gap-2.5">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={receiptUrl} alt="レシート" className="h-16 w-16 rounded-md border border-border object-cover" />
+          <button onClick={removePhoto} disabled={deletingPhoto} className="rounded-md border border-border px-2.5 py-1 text-[11.5px] font-semibold text-destructive disabled:opacity-60">
+            {deletingPhoto ? '削除中…' : '写真を削除'}
+          </button>
+        </div>
+      )}
       {error && <div className="text-[11.5px] text-destructive">{error}</div>}
       <div className="flex gap-2">
         <button onClick={save} disabled={saving} className="h-9 rounded-lg bg-primary px-3.5 text-[12px] font-semibold text-primary-foreground disabled:opacity-60">

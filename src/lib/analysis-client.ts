@@ -1,0 +1,53 @@
+/**
+ * AI分析・課題提案 (2026-09-01 追加) の同一オリジン API クライアント。
+ * ボタン押下のたびに /api/analysis/insights を呼び出し、Gemini APIによる分析結果を取得する
+ * (自動実行・保存はしない。呼び出しごとにAPI利用料が発生するため常にユーザー操作起点)。
+ */
+
+export class PosAnalysisApiError extends Error {
+  constructor(
+    message: string,
+    public status: number,
+  ) {
+    super(message);
+    this.name = 'PosAnalysisApiError';
+  }
+}
+
+export type PeriodSummary = {
+  from: string;
+  to: string;
+  expenseTotal: number;
+  expenseByCategory: { category: string; total: number }[];
+  unpaidTotal: number;
+  laborCostTotal: number;
+  laborHoursTotal: number;
+  laborByStaff: { staffName: string; hours: number; cost: number }[];
+};
+
+export type InsightsResult = {
+  summary: string;
+  findings: string[];
+  suggestions: string[];
+  current: PeriodSummary;
+  previous: PeriodSummary;
+};
+
+export async function generateInsights(from: string, to: string): Promise<InsightsResult> {
+  const res = await fetch('/api/analysis/insights', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ from, to }),
+  });
+  if (!res.ok) {
+    let message = `Request failed (${res.status})`;
+    try {
+      const body = (await res.json()) as { error?: string };
+      if (body?.error) message = body.error;
+    } catch {
+      // ignore
+    }
+    throw new PosAnalysisApiError(message, res.status);
+  }
+  return res.json() as Promise<InsightsResult>;
+}
