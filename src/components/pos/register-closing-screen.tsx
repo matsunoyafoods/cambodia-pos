@@ -13,6 +13,7 @@ import {
 } from '@/lib/register-closing-client';
 import { getPosOrderSettings } from '@/lib/pos-order-client';
 import { DEFAULT_SETTINGS } from '@/lib/pos-types';
+import { LanguageProvider, useLanguage, STAFF_LANGUAGE_STORAGE_KEY } from './language-context';
 
 // レジ締め (2026-09-02 実データ連携)。
 // 従来はシステム合計・現金過不足のすべてが固定のデモ値で、「レジ締めを確定」ボタンも DB には
@@ -29,21 +30,28 @@ function todayIso() {
 }
 
 function PosNativeOnlyNotice() {
+  const { t } = useLanguage();
   return (
     <div className="rounded-xl border-2 border-amber-300 bg-amber-50 p-5 text-amber-900">
-      <p className="mb-2 font-bold">POS PINログインが必要です</p>
-      <p className="mb-3 text-[13px] leading-relaxed">
-        レジ締めは現在、POS PINログイン (スタッフ選択 + PINでのログイン) をした端末専用です。matsunoya-dine
-        (Telegram) のログインだけではこの画面のデータは扱えません。
-      </p>
+      <p className="mb-2 font-bold">{t('common.posNativeOnlyTitle')}</p>
+      <p className="mb-3 text-[13px] leading-relaxed">{t('common.posNativeOnlyBody')}</p>
       <a href="/login" className="inline-flex h-10 items-center rounded-full bg-primary px-5 text-[13px] font-bold text-primary-foreground shadow-md">
-        PINでログインする
+        {t('common.posNativeOnlyLoginLink')}
       </a>
     </div>
   );
 }
 
 export function RegisterClosingScreen() {
+  return (
+    <LanguageProvider storageKey={STAFF_LANGUAGE_STORAGE_KEY} defaultLang="ja">
+      <RegisterClosingScreenInner />
+    </LanguageProvider>
+  );
+}
+
+function RegisterClosingScreenInner() {
+  const { t } = useLanguage();
   const router = useRouter();
   const me = useStaff();
   const isPosNative = me.authMode === 'pos_native';
@@ -70,7 +78,7 @@ export function RegisterClosingScreen() {
     setLoadError(null);
     getRegisterClosingStatus(date)
       .then(setStatus)
-      .catch((err) => setLoadError(err instanceof PosRegisterClosingApiError ? err.message : '取得に失敗しました'))
+      .catch((err) => setLoadError(err instanceof PosRegisterClosingApiError ? err.message : t('registerClosing.loadError')))
       .finally(() => setLoading(false));
   }
 
@@ -83,9 +91,9 @@ export function RegisterClosingScreen() {
     <div className="flex h-dvh w-full flex-col overflow-hidden bg-background">
       <div className="flex flex-shrink-0 items-center gap-3 border-b border-border px-5 py-3">
         <button onClick={() => router.push('/pos')} className="flex h-9 items-center rounded-lg border border-border bg-card px-3 text-[13px] font-semibold">
-          ← レジ画面へ
+          ← {t('common.backToRegister')}
         </button>
-        <div className="text-[15px] font-bold">レジ締め</div>
+        <div className="text-[15px] font-bold">{t('registerClosing.title')}</div>
         {isPosNative && (
           <input
             type="date"
@@ -100,7 +108,7 @@ export function RegisterClosingScreen() {
           {!isPosNative ? (
             <PosNativeOnlyNotice />
           ) : loading ? (
-            <div className="text-[13px] text-muted-foreground">読み込み中…</div>
+            <div className="text-[13px] text-muted-foreground">{t('common.loadingEllipsis')}</div>
           ) : loadError ? (
             <div className="text-[13px] text-destructive">{loadError}</div>
           ) : status?.confirmed ? (
@@ -115,19 +123,20 @@ export function RegisterClosingScreen() {
 }
 
 function ConfirmedClosingView({ closing, canManage, onReopen }: { closing: RegisterClosingRecord; canManage: boolean; onReopen: () => void }) {
+  const { t } = useLanguage();
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const diffOk = Math.abs(closing.differenceUsd) < 0.005;
 
   async function handleReopen() {
-    if (!confirm(`${closing.date} のレジ締め記録を削除してやり直しますか？`)) return;
+    if (!confirm(t('registerClosing.reopenConfirm', { date: closing.date }))) return;
     setDeleting(true);
     setError(null);
     try {
       await deleteRegisterClosing(closing.id);
       onReopen();
     } catch (err) {
-      setError(err instanceof PosRegisterClosingApiError ? err.message : '削除に失敗しました');
+      setError(err instanceof PosRegisterClosingApiError ? err.message : t('registerClosing.deleteError'));
     } finally {
       setDeleting(false);
     }
@@ -136,35 +145,35 @@ function ConfirmedClosingView({ closing, canManage, onReopen }: { closing: Regis
   return (
     <div className="rounded-xl border border-emerald-300 bg-emerald-50 p-5">
       <div className="mb-3 flex items-center justify-between">
-        <div className="text-[14px] font-bold text-emerald-800">{closing.date} は確定済みです ✓</div>
+        <div className="text-[14px] font-bold text-emerald-800">{t('registerClosing.confirmedTitle', { date: closing.date })}</div>
         {canManage && (
           <button
             onClick={handleReopen}
             disabled={deleting}
             className="h-9 rounded-lg border border-destructive px-3.5 text-[12px] font-semibold text-destructive disabled:opacity-50"
           >
-            {deleting ? '削除中…' : 'この記録を削除してやり直す'}
+            {deleting ? t('registerClosing.deleting') : t('registerClosing.deleteAndRedo')}
           </button>
         )}
       </div>
       {error && <div className="mb-2 text-[12.5px] text-destructive">{error}</div>}
       <div className="grid grid-cols-2 gap-4 text-[13px] sm:grid-cols-4">
-        <Stat label="システム現金" value={`$${closing.systemCashTotal.toFixed(2)}`} />
-        <Stat label="実査合計" value={`$${closing.countedTotalUsd.toFixed(2)}`} />
+        <Stat label={t('registerClosing.systemCashLabel')} value={`$${closing.systemCashTotal.toFixed(2)}`} />
+        <Stat label={t('registerClosing.countedTotalLabel')} value={`$${closing.countedTotalUsd.toFixed(2)}`} />
         <Stat
-          label="過不足"
+          label={t('registerClosing.differenceLabel')}
           value={`${closing.differenceUsd >= 0 ? '+' : '-'}$${Math.abs(closing.differenceUsd).toFixed(2)}`}
           tone={diffOk ? 'ok' : closing.differenceUsd > 0 ? 'info' : 'bad'}
         />
-        <Stat label="確定者" value={closing.confirmedByName ?? '-'} />
+        <Stat label={t('registerClosing.confirmedByLabel')} value={closing.confirmedByName ?? '-'} />
       </div>
       {Object.keys(closing.systemTotalsByMethod).length > 0 && (
         <div className="mt-3 text-[12px] text-muted-foreground">
-          決済方法別: {Object.entries(closing.systemTotalsByMethod).map(([m, v]) => `${m} $${v.toFixed(2)}`).join(' ・ ')}
+          {t('registerClosing.byMethodLabel')}: {Object.entries(closing.systemTotalsByMethod).map(([m, v]) => `${m} $${v.toFixed(2)}`).join(' ・ ')}
         </div>
       )}
       <div className="mt-3 text-[11.5px] text-muted-foreground">
-        確定日時: {new Date(closing.confirmedAt).toLocaleString('ja-JP')}
+        {t('registerClosing.confirmedAtLabel')}: {new Date(closing.confirmedAt).toLocaleString('ja-JP')}
       </div>
     </div>
   );
@@ -193,6 +202,7 @@ function ClosingForm({
   khrRate: number;
   onConfirmed: () => void;
 }) {
+  const { t } = useLanguage();
   const [usd, setUsd] = useState<Record<number, number>>(Object.fromEntries(USD_DENOMS.map((d) => [d, 0])));
   const [khr, setKhr] = useState<Record<number, number>>(Object.fromEntries(KHR_DENOMS.map((d) => [d, 0])));
   const [submitting, setSubmitting] = useState(false);
@@ -227,7 +237,7 @@ function ClosingForm({
       await confirmRegisterClosing({ date, countedUsdBills: usd, countedKhrBills: khr });
       onConfirmed();
     } catch (err) {
-      setError(err instanceof PosRegisterClosingApiError ? err.message : 'レジ締めの確定に失敗しました');
+      setError(err instanceof PosRegisterClosingApiError ? err.message : t('registerClosing.confirmError'));
     } finally {
       setSubmitting(false);
     }
@@ -236,7 +246,7 @@ function ClosingForm({
   return (
     <div className="flex flex-col gap-5 sm:flex-row">
       <div className="flex w-full flex-col gap-3.5 sm:w-[280px]">
-        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">システム合計 ({date}、POS記録)</div>
+        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('registerClosing.systemTotalLabel', { date })}</div>
         <div className="flex flex-col gap-2.5 rounded-xl border border-border bg-card p-3.5">
           {Object.entries(systemTotalsByMethod).map(([method, amount]) => (
             <div key={method} className="flex justify-between text-[13.5px]">
@@ -244,26 +254,25 @@ function ClosingForm({
               <span className="font-semibold">${amount.toFixed(2)}</span>
             </div>
           ))}
-          {Object.keys(systemTotalsByMethod).length === 0 && <div className="text-[12.5px] text-muted-foreground">この日の会計記録はまだありません。</div>}
+          {Object.keys(systemTotalsByMethod).length === 0 && <div className="text-[12.5px] text-muted-foreground">{t('registerClosing.noRecordsToday')}</div>}
           <div className="flex justify-between border-t border-dashed border-border pt-2.5 text-[15px] font-bold">
-            <span>売上合計</span>
+            <span>{t('registerClosing.salesTotalLabel')}</span>
             <span>${salesTotal.toFixed(2)}</span>
           </div>
         </div>
 
         <div className={'rounded-xl p-3.5 ' + (diffOk ? 'bg-emerald-50' : diff > 0 ? 'bg-sky-50' : 'bg-red-50')}>
-          <div className="mb-1 text-xs text-muted-foreground">現金の過不足</div>
+          <div className="mb-1 text-xs text-muted-foreground">{t('registerClosing.cashDiffLabel')}</div>
           <div className={'text-[22px] font-bold ' + (diffOk ? 'text-emerald-600' : diff > 0 ? 'text-sky-600' : 'text-destructive')}>
             {diff >= 0 ? '+$' : '-$'}
             {Math.abs(diff).toFixed(2)}
           </div>
           <div className="mt-1 text-[11.5px] text-muted-foreground">
-            実査 ${countedTotal.toFixed(2)} − システム現金 ${systemCashTotal.toFixed(2)}
+            {t('registerClosing.countedMinusSystem', { counted: countedTotal.toFixed(2), system: systemCashTotal.toFixed(2) })}
           </div>
         </div>
         <div className="text-[11px] leading-relaxed text-muted-foreground">
-          硬貨は流通していないため、USD・KHRとも紙幣のみ対応。KHR→USD換算は参考レート（1USD={khrRate.toLocaleString()}riel、設定画面で編集可能）。
-          確定すると、システム現金 ${systemCashTotal.toFixed(2)} が現金残高 (経費画面) に加算されます。
+          {t('registerClosing.billsNote', { rate: khrRate.toLocaleString() })} {t('registerClosing.confirmEffectNote', { total: systemCashTotal.toFixed(2) })}
         </div>
         {error && <div className="text-[12.5px] text-destructive">{error}</div>}
         <button
@@ -271,28 +280,30 @@ function ClosingForm({
           disabled={submitting}
           className="h-11 rounded-lg bg-primary px-4.5 text-[13.5px] font-bold text-primary-foreground disabled:opacity-60"
         >
-          {submitting ? '確定中…' : 'レジ締めを確定'}
+          {submitting ? t('registerClosing.confirming') : t('registerClosing.confirmButton')}
         </button>
       </div>
 
       <div className="flex flex-1 gap-6 overflow-auto">
         <DenomColumn
-          title="USD 紙幣"
+          title={t('registerClosing.usdBillsTitle')}
           denoms={USD_DENOMS}
           values={usd}
           onChange={(d, v) => setDenom('usd', d, v)}
           fmtDenom={(d) => `$${d}`}
           fmtLine={(d, q) => `$${(d * q).toFixed(2)}`}
           subtotalLabel={`$${usdSubtotal.toFixed(2)}`}
+          subtotalCaption={t('registerClosing.subtotalLabel')}
         />
         <DenomColumn
-          title="KHR 紙幣"
+          title={t('registerClosing.khrBillsTitle')}
           denoms={KHR_DENOMS}
           values={khr}
           onChange={(d, v) => setDenom('khr', d, v)}
           fmtDenom={(d) => `${d.toLocaleString()}៛`}
           fmtLine={(d, q) => `${(d * q).toLocaleString()}៛`}
           subtotalLabel={`${khrSubtotal.toLocaleString()}៛ (≈$${khrInUsd.toFixed(2)})`}
+          subtotalCaption={t('registerClosing.subtotalLabel')}
         />
       </div>
     </div>
@@ -307,6 +318,7 @@ function DenomColumn({
   fmtDenom,
   fmtLine,
   subtotalLabel,
+  subtotalCaption,
 }: {
   title: string;
   denoms: number[];
@@ -315,6 +327,7 @@ function DenomColumn({
   fmtDenom: (d: number) => string;
   fmtLine: (d: number, q: number) => string;
   subtotalLabel: string;
+  subtotalCaption: string;
 }) {
   return (
     <div className="flex-1">
@@ -340,7 +353,7 @@ function DenomColumn({
         ))}
       </div>
       <div className="mt-2.5 flex justify-between border-t border-dashed border-border pt-2.5 text-[13.5px] font-bold">
-        <span>小計</span>
+        <span>{subtotalCaption}</span>
         <span>{subtotalLabel}</span>
       </div>
     </div>

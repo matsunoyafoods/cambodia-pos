@@ -13,20 +13,19 @@ import {
 } from '@/lib/reservation-client';
 import { listTableLayout } from '@/lib/table-layout-client';
 import { DEMO_TABLES } from '@/lib/demo-data';
+import { LanguageProvider, useLanguage, STAFF_LANGUAGE_STORAGE_KEY } from './language-context';
 
-const TYPE_LABEL: Record<ReservationType, string> = {
-  normal: '通常予約',
-  tenderloin_block: '誕生日テンダーロインブロック予約',
-  birthday_room: '個室予約(バースデー等)',
-  group: '団体予約',
-};
+type TFunc = ReturnType<typeof useLanguage>['t'];
 
-const TYPE_DESC: Record<ReservationType, string> = {
-  normal: 'いつも通りのご来店予約',
-  tenderloin_block: 'ブロック肉のご注文(前日までの予約制)',
-  birthday_room: '無料特典の個室利用(1日前までの予約制)',
-  group: '人数ベースの会食・宴会(事前予約制・当日不可)',
-};
+function typeLabel(type: ReservationType, t: TFunc): string {
+  return t(`reservation.typeLabel.${type}`);
+}
+
+function typeDesc(type: ReservationType, t: TFunc): string {
+  return t(`reservation.typeDesc.${type}`);
+}
+
+const RESERVATION_TYPES: ReservationType[] = ['normal', 'tenderloin_block', 'birthday_room', 'group'];
 
 type StepField =
   | { kind: 'text'; key: string; placeholder?: string; required?: boolean }
@@ -52,67 +51,68 @@ type Step = {
 // 共通の基本情報。電話を取った直後、まだ予約の種類がわからない段階で聞ける質問だけをここに
 // 置く (お名前・電話番号・人数・来店日・時間・備考)。種類ごとに文言を出し分けていた来店日の
 // 「前日までの予約制です」等の案内は、種類がわかった後 (typeSpecificSteps) に移動した。
-const COMMON_STEPS: Step[] = [
-  {
-    id: 'customerName',
-    script: 'お電話ありがとうございます。I\'mHungryでございます。ご予約のお名前を頂戴できますでしょうか？',
-    field: { kind: 'text', key: 'customerName', placeholder: '例: 田中様', required: true },
-  },
-  {
-    id: 'phone',
-    script: 'ありがとうございます。念のため、当日ご連絡が取れるお電話番号を教えていただけますか？',
-    field: { kind: 'tel', key: 'phone', placeholder: '例: 012-345-678' },
-  },
-  {
-    id: 'partySize',
-    script: 'ご来店の人数は何名様でしょうか？',
-    field: { kind: 'number', key: 'partySize', min: 1, max: 500, required: true },
-  },
-  {
-    id: 'reservationDate',
-    script: 'ご来店希望の日付を教えてください。',
-    field: { kind: 'date', key: 'reservationDate', required: true },
-  },
-  {
-    id: 'reservationTime',
-    script: 'ご来店のお時間は何時頃をご希望でしょうか？',
-    field: { kind: 'time', key: 'reservationTime' },
-  },
-  {
-    id: 'notes',
-    script: '最後に、アレルギーやその他ご要望がございましたら教えてください。',
-    field: { kind: 'textarea', key: 'notes' },
-  },
-];
+function buildCommonSteps(t: TFunc): Step[] {
+  return [
+    {
+      id: 'customerName',
+      script: t('reservation.step.customerName.script'),
+      field: { kind: 'text', key: 'customerName', placeholder: t('reservation.step.customerName.placeholder'), required: true },
+    },
+    {
+      id: 'phone',
+      script: t('reservation.step.phone.script'),
+      field: { kind: 'tel', key: 'phone', placeholder: t('reservation.step.phone.placeholder') },
+    },
+    {
+      id: 'partySize',
+      script: t('reservation.step.partySize.script'),
+      field: { kind: 'number', key: 'partySize', min: 1, max: 500, required: true },
+    },
+    {
+      id: 'reservationDate',
+      script: t('reservation.step.reservationDate.script'),
+      field: { kind: 'date', key: 'reservationDate', required: true },
+    },
+    {
+      id: 'reservationTime',
+      script: t('reservation.step.reservationTime.script'),
+      field: { kind: 'time', key: 'reservationTime' },
+    },
+    {
+      id: 'notes',
+      script: t('reservation.step.notes.script'),
+      field: { kind: 'textarea', key: 'notes' },
+    },
+  ];
+}
 
 const TYPE_SELECT_STEP: Step = { id: 'reservationType', field: { kind: 'type-select' } };
 
 // 予約の種類がわかった後だけ聞く追加質問。前日までの予約制などの案内は、既に伺った来店日
 // (reservationDate) を踏まえてこの時点で確認する形にした (以前は来店日を聞く時点で種類ごとに
 // 文言を出し分けていたが、種類選択がその質問より後になったため)。
-function typeSpecificSteps(type: ReservationType, reservationDate: string): Step[] {
-  const dateLabel = reservationDate || '(未入力)';
+function typeSpecificSteps(type: ReservationType, reservationDate: string, t: TFunc): Step[] {
+  const dateLabel = reservationDate || t('reservation.notEntered');
   switch (type) {
     case 'tenderloin_block':
       return [
         {
           id: 'cut',
-          script:
-            'テンダーロインブロックは、テンダーロインステーキ(オーストラリア産)と、USプレミアムテンダーロインの2種類がございます。どちらになさいますか？',
-          note: `⚠ こちらの商品は前日までのご予約が必要です。伺った来店日(${dateLabel})が前日以前かご確認ください。間に合わない場合はお客様にその旨をお伝えください。`,
+          script: t('reservation.step.tenderloin.cutScript'),
+          note: t('reservation.step.tenderloin.cutNote', { date: dateLabel }),
           field: {
             kind: 'select',
             key: 'cut',
             required: true,
             options: [
-              { value: 'AU', label: 'テンダーロインステーキ(オーストラリア産)' },
-              { value: 'US', label: 'US プレミアムテンダーロイン' },
+              { value: 'AU', label: t('reservation.option.cutAu') },
+              { value: 'US', label: t('reservation.option.cutUs') },
             ],
           },
         },
         {
           id: 'weight',
-          script: 'グラム数は1000gと1500gからお選びいただけます。どちらになさいますか？',
+          script: t('reservation.step.tenderloin.weightScript'),
           field: {
             kind: 'select',
             key: 'weight',
@@ -128,37 +128,36 @@ function typeSpecificSteps(type: ReservationType, reservationDate: string): Step
       return [
         {
           id: 'occasion',
-          script: '本日はどのようなお祝い事でのご利用でしょうか？(お誕生日など)',
-          note: `⚠ 個室特典は1日前までのご予約制です。伺った来店日(${dateLabel})で間に合うかご確認ください。`,
-          field: { kind: 'text', key: 'occasion', placeholder: '例: 奥様のお誕生日' },
+          script: t('reservation.step.birthday.occasionScript'),
+          note: t('reservation.step.birthday.occasionNote', { date: dateLabel }),
+          field: { kind: 'text', key: 'occasion', placeholder: t('reservation.step.birthday.occasionPlaceholder') },
         },
         {
           id: 'decoration_request',
-          script: 'お部屋の飾り付けにご希望はございますか？ご予算に応じて対応させていただきます。',
-          field: { kind: 'text', key: 'decoration_request', placeholder: '例: 風船・お花など' },
+          script: t('reservation.step.birthday.decorationScript'),
+          field: { kind: 'text', key: 'decoration_request', placeholder: t('reservation.step.birthday.decorationPlaceholder') },
         },
       ];
     case 'group':
       return [
         {
           id: 'budget_per_person',
-          script:
-            'お一人様あたりのご予算はおいくらくらいでお考えでしょうか？1名様$20〜のプランをご用意しております。',
-          note: `⚠ 団体でのご予約は当日のお申し込みはお受けできません。伺った来店日(${dateLabel})が前日以前かご確認ください。`,
+          script: t('reservation.step.group.budgetScript'),
+          note: t('reservation.step.group.budgetNote', { date: dateLabel }),
           field: { kind: 'number', key: 'budget_per_person', min: 1, max: 1000 },
         },
         {
           id: 'purpose',
-          script: 'どのようなお集まりでのご利用でしょうか？(歓送迎会・宴会など)',
-          field: { kind: 'text', key: 'purpose', placeholder: '例: 会社の歓送迎会' },
+          script: t('reservation.step.group.purposeScript'),
+          field: { kind: 'text', key: 'purpose', placeholder: t('reservation.step.group.purposePlaceholder') },
         },
       ];
     default:
       return [
         {
           id: 'seating_request',
-          script: 'お座席のご希望はございますか？(お座敷・テーブル席など)',
-          field: { kind: 'text', key: 'seating_request', placeholder: '任意' },
+          script: t('reservation.step.default.seatingScript'),
+          field: { kind: 'text', key: 'seating_request', placeholder: t('reservation.step.default.seatingPlaceholder') },
         },
       ];
   }
@@ -166,24 +165,28 @@ function typeSpecificSteps(type: ReservationType, reservationDate: string): Step
 
 // ウィザード全体のステップ列。type がまだ null (種類未選択) の間は「基本情報 + 種類選択」まで、
 // 種類が決まったら種類別の追加質問が続く (buildSteps 呼び出し側で type を都度渡す)。
-function buildSteps(type: ReservationType | null, reservationDate: string): Step[] {
-  if (!type) return [...COMMON_STEPS, TYPE_SELECT_STEP];
-  return [...COMMON_STEPS, TYPE_SELECT_STEP, ...typeSpecificSteps(type, reservationDate)];
+function buildSteps(type: ReservationType | null, reservationDate: string, t: TFunc): Step[] {
+  const common = buildCommonSteps(t);
+  if (!type) return [...common, TYPE_SELECT_STEP];
+  return [...common, TYPE_SELECT_STEP, ...typeSpecificSteps(type, reservationDate, t)];
 }
 
 const DETAIL_KEYS = ['cut', 'weight', 'occasion', 'decoration_request', 'budget_per_person', 'purpose', 'seating_request'];
 
-const DETAIL_LABELS: Record<string, string> = {
-  cut: 'カット',
-  weight: 'グラム数',
-  occasion: 'ご利用の機会',
-  decoration_request: '装飾のご希望',
-  budget_per_person: 'お一人様予算',
-  purpose: 'ご利用目的',
-  seating_request: 'お席のご希望',
-};
+function detailLabel(key: string, t: TFunc): string {
+  return t(`reservation.detailLabel.${key}`);
+}
 
 export function ReservationScreen() {
+  return (
+    <LanguageProvider storageKey={STAFF_LANGUAGE_STORAGE_KEY} defaultLang="ja">
+      <ReservationScreenInner />
+    </LanguageProvider>
+  );
+}
+
+function ReservationScreenInner() {
+  const { t } = useLanguage();
   const router = useRouter();
   const [mode, setMode] = useState<'list' | 'wizard' | 'done'>('list');
   const [reservations, setReservations] = useState<ReservationRecord[]>([]);
@@ -202,10 +205,10 @@ export function ReservationScreen() {
   useEffect(() => {
     listTableLayout()
       .then(({ items }) => {
-        const tables = items.filter((t) => t.kind === 'table').map((t) => ({ code: t.table_code, seats: t.seats }));
-        setTableOptions(tables.length > 0 ? tables : DEMO_TABLES.map((t) => ({ code: t.code, seats: t.seats })));
+        const tables = items.filter((tbl) => tbl.kind === 'table').map((tbl) => ({ code: tbl.table_code, seats: tbl.seats }));
+        setTableOptions(tables.length > 0 ? tables : DEMO_TABLES.map((tbl) => ({ code: tbl.code, seats: tbl.seats })));
       })
-      .catch(() => setTableOptions(DEMO_TABLES.map((t) => ({ code: t.code, seats: t.seats }))));
+      .catch(() => setTableOptions(DEMO_TABLES.map((tbl) => ({ code: tbl.code, seats: tbl.seats }))));
   }, []);
 
   // 電話を取った時点では種類がわからないため、初期値は未選択 (null)。基本情報を聞き終えた
@@ -221,7 +224,7 @@ export function ReservationScreen() {
     setListError(null);
     getReservations()
       .then(({ items }) => setReservations(items))
-      .catch((err) => setListError(err instanceof ReservationApiError ? err.message : '予約一覧の取得に失敗しました'))
+      .catch((err) => setListError(err instanceof ReservationApiError ? err.message : t('reservation.listLoadError')))
       .finally(() => setListLoading(false));
   }
 
@@ -239,12 +242,12 @@ export function ReservationScreen() {
 
   // 種類選択ステップでボタンを押した瞬間に type を確定し、次のステップへ進む
   // (他の選択肢と違い「次へ」を別途押させない — 元の「種類選択→即ウィザード開始」の操作感を踏襲)。
-  function chooseType(t: ReservationType) {
-    setType(t);
+  function chooseType(newType: ReservationType) {
+    setType(newType);
     setStepIndex((i) => i + 1);
   }
 
-  const steps = buildSteps(type, answers.reservationDate ?? '');
+  const steps = buildSteps(type, answers.reservationDate ?? '', t);
   const isSummary = stepIndex >= steps.length;
   const step = !isSummary ? steps[stepIndex] : null;
 
@@ -271,7 +274,7 @@ export function ReservationScreen() {
     // 確認画面 (isSummary) に到達する時点では、必ず種類選択ステップを通過済み
     // (canProceed が type!==null を要求する) なので type は non-null のはずだが、念のためガードする。
     if (!type) {
-      setSubmitError('予約の種類が選択されていません。前の画面に戻って選択してください。');
+      setSubmitError(t('reservation.typeNotSelected'));
       return;
     }
     setSubmitting(true);
@@ -293,7 +296,7 @@ export function ReservationScreen() {
       });
       setMode('done');
     } catch (err) {
-      setSubmitError(err instanceof ReservationApiError ? err.message : '予約の保存に失敗しました');
+      setSubmitError(err instanceof ReservationApiError ? err.message : t('reservation.saveError'));
     } finally {
       setSubmitting(false);
     }
@@ -326,7 +329,7 @@ export function ReservationScreen() {
       setEditingTablesId(null);
       loadList();
     } catch (err) {
-      setTableSaveError(err instanceof ReservationApiError ? err.message : '卓の設定に失敗しました');
+      setTableSaveError(err instanceof ReservationApiError ? err.message : t('reservation.tableAssignError'));
     } finally {
       setTableSaving(false);
     }
@@ -340,12 +343,12 @@ export function ReservationScreen() {
             onClick={() => (mode === 'list' ? router.push('/pos') : setMode('list'))}
             className="flex h-9 items-center gap-1 rounded-lg px-2.5 text-[12.5px] font-semibold text-muted-foreground hover:bg-secondary"
           >
-            ← {mode === 'list' ? '戻る' : '予約一覧へ'}
+            ← {mode === 'list' ? t('reservation.navBack') : t('reservation.navToList')}
           </button>
           <div>
-            <div className="text-base font-bold">予約受付</div>
+            <div className="text-base font-bold">{t('reservation.title')}</div>
             <div className="text-xs text-muted-foreground">
-              電話予約を、画面の質問(声かけ文言つき)に沿って受け付けます
+              {t('reservation.subtitle')}
             </div>
           </div>
         </div>
@@ -354,7 +357,7 @@ export function ReservationScreen() {
             onClick={startNew}
             className="h-10 rounded-lg bg-primary px-4.5 text-[13.5px] font-bold text-primary-foreground"
           >
-            + 新規予約を受け付ける
+            {t('reservation.newButton')}
           </button>
         )}
       </div>
@@ -362,11 +365,11 @@ export function ReservationScreen() {
       <div className="flex-1 overflow-auto px-8 py-6">
         {mode === 'list' && (
           <div className="flex flex-col gap-3">
-            {listLoading && <div className="text-sm text-muted-foreground">読み込み中…</div>}
+            {listLoading && <div className="text-sm text-muted-foreground">{t('common.loadingEllipsis')}</div>}
             {listError && <div className="text-sm text-destructive">{listError}</div>}
             {!listLoading && !listError && reservations.length === 0 && (
               <div className="rounded-xl border border-border p-5 text-center text-sm text-muted-foreground">
-                予約はまだありません
+                {t('reservation.emptyList')}
               </div>
             )}
             {reservations.map((r) => (
@@ -381,32 +384,36 @@ export function ReservationScreen() {
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="rounded-full bg-secondary px-2 py-0.5 text-[10.5px] font-semibold">
-                        {TYPE_LABEL[r.reservationType]}
+                        {typeLabel(r.reservationType, t)}
                       </span>
                       {r.source === 'app' && (
                         <span className="rounded-full bg-brand/10 px-2 py-0.5 text-[10.5px] font-semibold text-brand">
-                          アプリ予約
+                          {t('reservation.appReservationBadge')}
                         </span>
                       )}
                       {r.status === 'cancelled' && (
                         <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-[10.5px] font-semibold text-destructive">
-                          キャンセル済み
+                          {t('reservation.cancelledBadge')}
                         </span>
                       )}
                       {r.tableCodes.length > 0 && (
                         <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10.5px] font-semibold text-emerald-800">
-                          卓: {r.tableCodes.join(', ')}
+                          {t('reservation.tableBadge', { tables: r.tableCodes.join(', ') })}
                         </span>
                       )}
                     </div>
                     <div className="mt-1 text-[14px] font-bold">
-                      {r.reservationDate} {r.reservationTime ?? ''} ・ {r.customerName}様
-                      {r.partySize ? ` ・ ${r.partySize}名` : ''}
+                      {t('reservation.summaryLine', {
+                        date: r.reservationDate,
+                        time: r.reservationTime ?? '',
+                        name: r.customerName,
+                        partyPart: r.partySize ? t('reservation.partyPart', { count: r.partySize }) : '',
+                      })}
                     </div>
                     <div className="mt-0.5 text-[11.5px] text-muted-foreground">
-                      {r.phone ? `TEL ${r.phone} ・ ` : ''}
-                      受付: {r.createdByName ?? '-'}
-                      {r.notes ? ` ・ 備考: ${r.notes}` : ''}
+                      {r.phone ? t('reservation.phonePrefix', { phone: r.phone }) : ''}
+                      {t('reservation.receivedByLabel', { name: r.createdByName ?? '-' })}
+                      {r.notes ? t('reservation.notesSuffix', { notes: r.notes }) : ''}
                     </div>
                   </div>
                   <div className="flex flex-shrink-0 gap-2">
@@ -415,7 +422,7 @@ export function ReservationScreen() {
                         onClick={() => (editingTablesId === r.id ? setEditingTablesId(null) : openTableEditor(r))}
                         className="h-9 rounded-lg border border-border bg-card px-3.5 text-[12px] font-semibold text-foreground"
                       >
-                        {r.tableCodes.length > 0 ? '卓を変更' : '卓を設定'}
+                        {r.tableCodes.length > 0 ? t('reservation.changeTablesButton') : t('reservation.setTablesButton')}
                       </button>
                     )}
                     {r.status === 'confirmed' && r.source === 'pos' && (
@@ -423,7 +430,7 @@ export function ReservationScreen() {
                         onClick={() => handleCancel(r.id)}
                         className="h-9 rounded-lg border border-destructive px-3.5 text-[12px] font-semibold text-destructive"
                       >
-                        キャンセルにする
+                        {t('reservation.cancelButton')}
                       </button>
                     )}
                   </div>
@@ -432,21 +439,21 @@ export function ReservationScreen() {
                 {editingTablesId === r.id && (
                   <div className="rounded-lg border border-border bg-secondary/20 p-3">
                     <div className="mb-2 text-[11.5px] font-semibold text-muted-foreground">
-                      {r.reservationTime ? `${r.reservationTime} から使う卓を選択` : '使う卓を選択 (時間未定)'}
+                      {r.reservationTime ? t('reservation.selectTablesFrom', { time: r.reservationTime }) : t('reservation.selectTablesNoTime')}
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      {tableOptions.map((t) => (
+                      {tableOptions.map((opt) => (
                         <button
-                          key={t.code}
-                          onClick={() => toggleTableCode(t.code)}
+                          key={opt.code}
+                          onClick={() => toggleTableCode(opt.code)}
                           className={
                             'h-9 rounded-lg border px-3 text-[12.5px] font-semibold ' +
-                            (editingTableCodes.includes(t.code)
+                            (editingTableCodes.includes(opt.code)
                               ? 'border-primary bg-primary/10 text-primary'
                               : 'border-border bg-card text-foreground')
                           }
                         >
-                          {t.code}
+                          {opt.code}
                         </button>
                       ))}
                     </div>
@@ -456,14 +463,14 @@ export function ReservationScreen() {
                         onClick={() => setEditingTablesId(null)}
                         className="h-9 rounded-lg border border-border px-3.5 text-[12px] font-semibold"
                       >
-                        キャンセル
+                        {t('common.cancel')}
                       </button>
                       <button
                         onClick={() => saveTableAssignment(r.id)}
                         disabled={tableSaving}
                         className="h-9 rounded-lg bg-primary px-4 text-[12px] font-bold text-primary-foreground disabled:opacity-60"
                       >
-                        {tableSaving ? '保存中…' : '保存'}
+                        {tableSaving ? t('reservation.savingTables') : t('common.save')}
                       </button>
                     </div>
                   </div>
@@ -475,18 +482,16 @@ export function ReservationScreen() {
 
         {mode === 'wizard' && step && step.field.kind === 'type-select' && (
           <div className="mx-auto flex max-w-[640px] flex-col gap-3">
-            <div className="text-[11.5px] font-semibold text-muted-foreground">
-              基本情報の確認完了 ・ 最後にご予約の種類を選択してください
-            </div>
-            <div className="text-[15px] font-bold">どの予約として受け付けますか？</div>
-            {(Object.keys(TYPE_LABEL) as ReservationType[]).map((t) => (
+            <div className="text-[11.5px] font-semibold text-muted-foreground">{t('reservation.basicInfoDoneNote')}</div>
+            <div className="text-[15px] font-bold">{t('reservation.chooseTypeQuestion')}</div>
+            {RESERVATION_TYPES.map((rt) => (
               <button
-                key={t}
-                onClick={() => chooseType(t)}
+                key={rt}
+                onClick={() => chooseType(rt)}
                 className="rounded-xl border border-border bg-card p-4 text-left hover:border-primary"
               >
-                <div className="text-[14px] font-bold">{TYPE_LABEL[t]}</div>
-                <div className="mt-0.5 text-[12px] text-muted-foreground">{TYPE_DESC[t]}</div>
+                <div className="text-[14px] font-bold">{typeLabel(rt, t)}</div>
+                <div className="mt-0.5 text-[12px] text-muted-foreground">{typeDesc(rt, t)}</div>
               </button>
             ))}
             <div className="mt-1 flex justify-start">
@@ -494,7 +499,7 @@ export function ReservationScreen() {
                 onClick={() => setStepIndex((i) => Math.max(0, i - 1))}
                 className="h-11 rounded-lg border border-border px-5 text-[13px] font-semibold"
               >
-                戻る
+                {t('reservation.navBack')}
               </button>
             </div>
           </div>
@@ -503,10 +508,10 @@ export function ReservationScreen() {
         {mode === 'wizard' && step && step.field.kind !== 'type-select' && (
           <div className="mx-auto flex max-w-[560px] flex-col gap-4">
             <div className="text-[11.5px] font-semibold text-muted-foreground">
-              {type ? TYPE_LABEL[type] : '基本情報のヒアリング'} ・ {stepIndex + 1} / {steps.length + 1}
+              {type ? typeLabel(type, t) : t('reservation.basicInfoHearing')} ・ {stepIndex + 1} / {steps.length + 1}
             </div>
             <div className="rounded-xl border border-primary/30 bg-primary/5 p-4">
-              <div className="text-[11px] font-semibold text-primary">お客様への声かけ</div>
+              <div className="text-[11px] font-semibold text-primary">{t('reservation.scriptLabel')}</div>
               <div className="mt-1 text-[14px] leading-relaxed">「{step.script}」</div>
             </div>
             {step.note && (
@@ -523,14 +528,14 @@ export function ReservationScreen() {
                 disabled={stepIndex === 0}
                 className="h-11 rounded-lg border border-border px-5 text-[13px] font-semibold disabled:opacity-40"
               >
-                戻る
+                {t('reservation.navBack')}
               </button>
               <button
                 onClick={() => setStepIndex((i) => i + 1)}
                 disabled={!canProceed()}
                 className="h-11 rounded-lg bg-primary px-6 text-[13px] font-bold text-primary-foreground disabled:opacity-40"
               >
-                次へ
+                {t('reservation.nextButton')}
               </button>
             </div>
           </div>
@@ -539,25 +544,26 @@ export function ReservationScreen() {
         {mode === 'wizard' && isSummary && (
           <div className="mx-auto flex max-w-[560px] flex-col gap-4">
             <div className="rounded-xl border border-primary/30 bg-primary/5 p-4">
-              <div className="text-[11px] font-semibold text-primary">お客様への声かけ</div>
+              <div className="text-[11px] font-semibold text-primary">{t('reservation.scriptLabel')}</div>
               <div className="mt-1 text-[14px] leading-relaxed">
-                「ご予約内容を確認させていただきます。{answers.customerName}様、
-                {answers.partySize ? `${answers.partySize}名様、` : ''}
-                {answers.reservationDate}
-                {answers.reservationTime ? ` ${answers.reservationTime}` : ''}
-                のご予約で承りました。以上でお間違いございませんでしょうか？」
+                「{t('reservation.summaryScript', {
+                  name: answers.customerName ?? '',
+                  partyPart: answers.partySize ? t('reservation.summaryScriptParty', { count: answers.partySize }) : '',
+                  date: answers.reservationDate ?? '',
+                  timePart: answers.reservationTime ? ` ${answers.reservationTime}` : '',
+                })}」
               </div>
             </div>
             <div className="rounded-xl border border-border p-4 text-[12.5px] leading-relaxed">
-              <div className="font-bold">{type ? TYPE_LABEL[type] : '-'}</div>
+              <div className="font-bold">{type ? typeLabel(type, t) : '-'}</div>
               <div className="mt-2 grid grid-cols-2 gap-y-1.5">
-                <div className="text-muted-foreground">お名前</div>
+                <div className="text-muted-foreground">{t('reservation.nameLabel')}</div>
                 <div>{answers.customerName || '-'}</div>
-                <div className="text-muted-foreground">電話番号</div>
+                <div className="text-muted-foreground">{t('reservation.phoneLabel')}</div>
                 <div>{answers.phone || '-'}</div>
-                <div className="text-muted-foreground">人数</div>
-                <div>{answers.partySize ? `${answers.partySize}名` : '-'}</div>
-                <div className="text-muted-foreground">日付・時間</div>
+                <div className="text-muted-foreground">{t('reservation.partySizeLabel')}</div>
+                <div>{answers.partySize ? t('reservation.partySizeValue', { count: answers.partySize }) : '-'}</div>
+                <div className="text-muted-foreground">{t('reservation.dateTimeLabel')}</div>
                 <div>
                   {answers.reservationDate || '-'} {answers.reservationTime || ''}
                 </div>
@@ -569,12 +575,12 @@ export function ReservationScreen() {
                       : answers[k];
                   return (
                     <Fragment key={k}>
-                      <div className="text-muted-foreground">{DETAIL_LABELS[k] ?? k}</div>
+                      <div className="text-muted-foreground">{detailLabel(k, t)}</div>
                       <div>{displayValue}</div>
                     </Fragment>
                   );
                 })}
-                <div className="text-muted-foreground">備考</div>
+                <div className="text-muted-foreground">{t('reservation.notesLabel')}</div>
                 <div>{answers.notes || '-'}</div>
               </div>
             </div>
@@ -584,14 +590,14 @@ export function ReservationScreen() {
                 onClick={() => setStepIndex((i) => Math.max(0, i - 1))}
                 className="h-11 rounded-lg border border-border px-5 text-[13px] font-semibold"
               >
-                戻る
+                {t('reservation.navBack')}
               </button>
               <button
                 onClick={handleConfirm}
                 disabled={submitting}
                 className="h-11 rounded-lg bg-primary px-6 text-[13px] font-bold text-primary-foreground disabled:opacity-60"
               >
-                {submitting ? '保存中…' : '予約を確定する'}
+                {submitting ? t('reservation.savingConfirm') : t('reservation.confirmButton')}
               </button>
             </div>
           </div>
@@ -602,22 +608,22 @@ export function ReservationScreen() {
             <div className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-2xl text-emerald-600">
               ✓
             </div>
-            <div className="text-[15px] font-bold">予約を受け付けました</div>
+            <div className="text-[15px] font-bold">{t('reservation.doneTitle')}</div>
             <div className="text-[12.5px] text-muted-foreground">
-              「お電話ありがとうございました。{answers.customerName}様のご来店を心よりお待ちしております。」
+              「{t('reservation.doneScript', { name: answers.customerName ?? '' })}」
             </div>
             <div className="mt-2 flex gap-3">
               <button
                 onClick={startNew}
                 className="h-11 rounded-lg border border-border px-5 text-[13px] font-semibold"
               >
-                続けて予約を受け付ける
+                {t('reservation.continueButton')}
               </button>
               <button
                 onClick={() => setMode('list')}
                 className="h-11 rounded-lg bg-primary px-5 text-[13px] font-bold text-primary-foreground"
               >
-                予約一覧へ戻る
+                {t('reservation.navToList')}
               </button>
             </div>
           </div>

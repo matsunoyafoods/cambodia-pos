@@ -21,6 +21,9 @@ import { getStaffRoster, listStaff, type PosStaffMember, type PosStaffRosterEntr
 import { applyTimecardRounding } from '@/lib/timecard-rounding';
 import { downloadCsv } from '@/lib/csv-export';
 import { DEFAULT_TIMECARD_ROUNDING, type TimecardRecord, type TimecardRoundingSettings } from '@/lib/pos-types';
+import { LanguageProvider, useLanguage, STAFF_LANGUAGE_STORAGE_KEY } from './language-context';
+
+type TFunc = ReturnType<typeof useLanguage>['t'];
 
 // スタッフ別タイムカード画像出力 (2026-09-01 追加。「明細をスタッフのテレグラムに送れるように」)。
 // サーバー側でPDF/画像を生成する仕組みは追加せず、ブラウザ上のDOMを直接PNG画像化するライブラリ
@@ -38,12 +41,9 @@ async function loadHtml2Canvas() {
 // (Tom「打刻についてプルダウンでスタッフを選べるようにしてください」)。ログインしたまま
 // 端末を共有し、出勤する本人がプルダウンで自分の名前を選んで打刻する運用を想定している。
 
-const STATUS_LABEL: Record<MyTimecardStatus['status'], string> = {
-  not_clocked_in: '未出勤',
-  working: '勤務中',
-  on_break: '休憩中',
-  clocked_out: '退勤済み',
-};
+function statusLabel(status: MyTimecardStatus['status'], t: TFunc): string {
+  return t(`timecardScreen.status.${status}`);
+}
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
@@ -84,6 +84,15 @@ function printReport(title: string) {
 }
 
 export function TimecardScreen() {
+  return (
+    <LanguageProvider storageKey={STAFF_LANGUAGE_STORAGE_KEY} defaultLang="ja">
+      <TimecardScreenInner />
+    </LanguageProvider>
+  );
+}
+
+function TimecardScreenInner() {
+  const { t } = useLanguage();
   const router = useRouter();
   const me = useStaff();
   const isPosNative = me.authMode === 'pos_native';
@@ -93,9 +102,9 @@ export function TimecardScreen() {
     <div className="flex h-dvh w-full flex-col overflow-hidden bg-background print:h-auto print:overflow-visible">
       <div className="flex flex-shrink-0 items-center gap-3 border-b border-border px-5 py-3 print:hidden">
         <button onClick={() => router.push('/pos')} className="flex h-9 items-center rounded-lg border border-border bg-card px-3 text-[13px] font-semibold">
-          ← レジ画面へ
+          ← {t('common.backToRegister')}
         </button>
-        <div className="text-[15px] font-bold">勤怠</div>
+        <div className="text-[15px] font-bold">{t('timecardScreen.title')}</div>
       </div>
       <div className="flex-1 overflow-auto p-5 print:overflow-visible print:p-0">
         <div className="mx-auto flex max-w-[720px] flex-col gap-6 print:max-w-none">
@@ -122,24 +131,23 @@ export function TimecardScreen() {
 // dine 対応は別途 matsunoya-dine 側に署名付きトークン発行 API を追加する必要があり、
 // 今回は見送り (「I'm hungryアプリ」チャット側の対応事項として later)。
 function PosNativeOnlyNotice() {
+  const { t } = useLanguage();
   return (
     <div className="rounded-xl border-2 border-amber-300 bg-amber-50 p-5 text-amber-900">
-      <p className="mb-2 font-bold">POS PINログインが必要です</p>
-      <p className="mb-3 text-[13px] leading-relaxed">
-        経費・勤怠は現在、POS PINログイン (スタッフ選択 + PINでのログイン) をした端末専用です。matsunoya-dine
-        (Telegram) のログインだけではこの画面のデータは扱えません。
-      </p>
+      <p className="mb-2 font-bold">{t('common.posNativeOnlyTitle')}</p>
+      <p className="mb-3 text-[13px] leading-relaxed">{t('common.posNativeOnlyBody')}</p>
       <a
         href="/login"
         className="inline-flex h-10 items-center rounded-full bg-primary px-5 text-[13px] font-bold text-primary-foreground shadow-md"
       >
-        PINでログインする
+        {t('common.posNativeOnlyLoginLink')}
       </a>
     </div>
   );
 }
 
 function PunchCard() {
+  const { t } = useLanguage();
   const me = useStaff();
   const [roster, setRoster] = useState<PosStaffRosterEntry[]>([]);
   const [selectedStaffId, setSelectedStaffId] = useState(me.id);
@@ -159,8 +167,8 @@ function PunchCard() {
   const load = useCallback(() => {
     getTimecardStatus(selectedStaffId)
       .then(setStatus)
-      .catch((err) => setError(err instanceof PosTimecardApiError ? err.message : '勤怠状態の取得に失敗しました'));
-  }, [selectedStaffId]);
+      .catch((err) => setError(err instanceof PosTimecardApiError ? err.message : t('timecardScreen.statusLoadError')));
+  }, [selectedStaffId, t]);
 
   useEffect(() => {
     load();
@@ -168,15 +176,15 @@ function PunchCard() {
 
   const selectedName = roster.find((r) => r.id === selectedStaffId)?.display_name ?? me.display_name;
 
-  async function run(actionLabel: string, action: (staffId: string) => Promise<void>) {
-    if (!confirm(`${selectedName} として「${actionLabel}」を打刻しますか？`)) return;
+  async function run(actionLabelKey: string, action: (staffId: string) => Promise<void>) {
+    if (!confirm(t('timecardScreen.punchConfirm', { name: selectedName, action: t(actionLabelKey) }))) return;
     setBusy(true);
     setError(null);
     try {
       await action(selectedStaffId);
       load();
     } catch (err) {
-      setError(err instanceof PosTimecardApiError ? err.message : '操作に失敗しました');
+      setError(err instanceof PosTimecardApiError ? err.message : t('common.actionError'));
     } finally {
       setBusy(false);
     }
@@ -188,7 +196,7 @@ function PunchCard() {
     <div className="rounded-xl border border-border bg-card p-5">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2.5">
         <div className="flex items-center gap-2.5">
-          <div className="text-[13.5px] font-semibold">打刻するスタッフ</div>
+          <div className="text-[13.5px] font-semibold">{t('timecardScreen.staffToPunchLabel')}</div>
           <select
             value={selectedStaffId}
             onChange={(e) => setSelectedStaffId(e.target.value)}
@@ -212,13 +220,13 @@ function PunchCard() {
                   : 'bg-secondary text-muted-foreground')
             }
           >
-            {STATUS_LABEL[s]}
+            {statusLabel(s, t)}
           </span>
         )}
       </div>
 
       {status?.timecard && (
-        <div className="mb-3 text-[12.5px] text-muted-foreground">出勤: {fmtTime(status.timecard.clockIn)}</div>
+        <div className="mb-3 text-[12.5px] text-muted-foreground">{t('timecardScreen.clockInLabel', { time: fmtTime(status.timecard.clockIn) })}</div>
       )}
 
       {error && <div className="mb-2 text-[12.5px] text-destructive">{error}</div>}
@@ -226,31 +234,31 @@ function PunchCard() {
       <div className="flex flex-wrap gap-2.5">
         <button
           disabled={busy || s !== 'not_clocked_in'}
-          onClick={() => run('出勤', (id) => clockIn(id))}
+          onClick={() => run('timecardScreen.action.clockIn', (id) => clockIn(id))}
           className="h-11 rounded-lg bg-primary px-5 text-[13.5px] font-bold text-primary-foreground disabled:opacity-40"
         >
-          出勤
+          {t('timecardScreen.action.clockIn')}
         </button>
         <button
           disabled={busy || s !== 'working'}
-          onClick={() => run('休憩開始', (id) => startBreak(id))}
+          onClick={() => run('timecardScreen.action.breakStart', (id) => startBreak(id))}
           className="h-11 rounded-lg border border-border px-5 text-[13.5px] font-bold disabled:opacity-40"
         >
-          休憩開始
+          {t('timecardScreen.action.breakStart')}
         </button>
         <button
           disabled={busy || s !== 'on_break'}
-          onClick={() => run('休憩終了', (id) => endBreak(id))}
+          onClick={() => run('timecardScreen.action.breakEnd', (id) => endBreak(id))}
           className="h-11 rounded-lg border border-border px-5 text-[13.5px] font-bold disabled:opacity-40"
         >
-          休憩終了
+          {t('timecardScreen.action.breakEnd')}
         </button>
         <button
           disabled={busy || (s !== 'working' && s !== 'on_break')}
-          onClick={() => run('退勤', (id) => clockOut(id))}
+          onClick={() => run('timecardScreen.action.clockOut', (id) => clockOut(id))}
           className="h-11 rounded-lg border border-destructive px-5 text-[13.5px] font-bold text-destructive disabled:opacity-40"
         >
-          退勤
+          {t('timecardScreen.action.clockOut')}
         </button>
       </div>
     </div>
@@ -258,6 +266,7 @@ function PunchCard() {
 }
 
 function TimecardReport() {
+  const { t } = useLanguage();
   const me = useStaff();
   const [from, setFrom] = useState(() => todayIso().slice(0, 8) + '01'); // 今月1日
   const [to, setTo] = useState(todayIso());
@@ -274,8 +283,8 @@ function TimecardReport() {
         setRows(timecards);
         setStaffList(staff);
       })
-      .catch((err) => setError(err instanceof PosTimecardApiError ? err.message : '勤怠レポートの取得に失敗しました'));
-  }, [from, to]);
+      .catch((err) => setError(err instanceof PosTimecardApiError ? err.message : t('timecardScreen.reportLoadError')));
+  }, [from, to, t]);
 
   useEffect(() => {
     load();
@@ -335,20 +344,28 @@ function TimecardReport() {
   }, [rows]);
 
   async function handleDelete(id: string) {
-    if (!confirm('この勤怠記録を削除しますか？')) return;
+    if (!confirm(t('timecardScreen.deleteConfirm'))) return;
     try {
       await deleteTimecard(id);
       load();
     } catch (err) {
-      setError(err instanceof PosTimecardApiError ? err.message : '削除に失敗しました');
+      setError(err instanceof PosTimecardApiError ? err.message : t('common.deleteError'));
     }
   }
 
   function handleCsvExport() {
     if (!rows || rows.length === 0) return;
     downloadCsv(
-      `勤怠レポート_${from}_${to}`,
-      ['スタッフ', '出勤', '退勤', '休憩回数', `実働時間(h)${rounding.enabled ? '(丸め後)' : ''}`, '概算人件費(USD)', '修正'],
+      `${t('timecardScreen.csvFilename')}_${from}_${to}`,
+      [
+        t('timecardScreen.csvStaff'),
+        t('timecardScreen.action.clockIn'),
+        t('timecardScreen.action.clockOut'),
+        t('timecardScreen.csvBreakCount'),
+        `${t('timecardScreen.csvWorkedHours')}${rounding.enabled ? t('timecardScreen.csvRoundedSuffix') : ''}`,
+        t('timecardScreen.csvEstimatedLaborCost'),
+        t('timecardScreen.csvEdited'),
+      ],
       rows.map((r) => {
         const wage = wageById.get(r.staffId);
         const m = roundedMinutes(r);
@@ -359,7 +376,7 @@ function TimecardReport() {
           r.breaks.length,
           (m / 60).toFixed(2),
           wage ? ((m / 60) * wage).toFixed(2) : '',
-          r.editedAt ? '修正済み' : '',
+          r.editedAt ? t('timecardScreen.editedBadge') : '',
         ];
       }),
     );
@@ -368,37 +385,37 @@ function TimecardReport() {
   return (
     <div className="rounded-xl border border-border bg-card p-5 print:border-0 print:p-0">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2.5 print:hidden">
-        <div className="text-[13.5px] font-semibold">勤怠レポート (人件費)</div>
+        <div className="text-[13.5px] font-semibold">{t('timecardScreen.reportTitle')}</div>
         <div className="flex items-center gap-2">
           <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-9 rounded-lg border border-border px-2.5 text-[12.5px]" />
           <span className="text-[12px] text-muted-foreground">〜</span>
           <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-9 rounded-lg border border-border px-2.5 text-[12.5px]" />
           <button onClick={load} className="h-9 rounded-lg border border-border px-3 text-[12.5px] font-semibold">
-            更新
+            {t('common.refresh')}
           </button>
           <button
             onClick={handleCsvExport}
             disabled={!rows || rows.length === 0}
             className="h-9 rounded-lg border border-border px-3 text-[12.5px] font-semibold disabled:opacity-50"
           >
-            CSV出力
+            {t('common.csvExportButton')}
           </button>
           <button
-            onClick={() => printReport(`勤怠レポート_${from}_${to}`)}
+            onClick={() => printReport(`${t('timecardScreen.csvFilename')}_${from}_${to}`)}
             disabled={!rows || rows.length === 0}
             className="h-9 rounded-lg bg-primary px-3 text-[12.5px] font-semibold text-primary-foreground disabled:opacity-50"
           >
-            PDF出力
+            {t('common.pdfExportButton')}
           </button>
         </div>
       </div>
 
       {/* 印刷時のみ表示するヘッダー (店名・期間・出力日時) */}
       <div className="hidden print:mb-4 print:block">
-        <div className="text-[16px] font-bold">勤怠レポート (人件費){me.store_name ? ` — ${me.store_name}` : ''}</div>
+        <div className="text-[16px] font-bold">{t('timecardScreen.reportTitle')}{me.store_name ? ` — ${me.store_name}` : ''}</div>
         <div className="text-[12px] text-muted-foreground">
-          対象期間: {from} 〜 {to} ・ 出力日時: {new Date().toLocaleString('ja-JP')}
-          {rounding.enabled && ` ・ 丸め設定: ${rounding.unitMinutes}分単位 (${ROUNDING_DIRECTION_LABEL[rounding.direction]})`}
+          {t('common.printHeaderPeriod', { from, to })} ・ {t('common.printHeaderGenerated', { datetime: new Date().toLocaleString('ja-JP') })}
+          {rounding.enabled && ` ・ ${t('timecardScreen.roundingSummary', { minutes: rounding.unitMinutes, direction: roundingDirectionLabel(rounding.direction, t) })}`}
         </div>
       </div>
 
@@ -409,12 +426,12 @@ function TimecardReport() {
       {rows && (
         <div className="mb-3 flex gap-5 rounded-lg bg-secondary/40 px-4 py-2.5 text-[12.5px] print:rounded-none print:bg-transparent print:px-0">
           <div>
-            合計実働時間: <span className="font-semibold">{fmtHours(totals.minutes)} 時間</span>
-            {rounding.enabled && <span className="ml-1 text-[11px] text-muted-foreground">(丸め後)</span>}
+            {t('timecardScreen.totalWorkedLabel')} <span className="font-semibold">{t('timecardScreen.hoursValue', { hours: fmtHours(totals.minutes) })}</span>
+            {rounding.enabled && <span className="ml-1 text-[11px] text-muted-foreground">{t('timecardScreen.roundedSuffix')}</span>}
           </div>
           <div>
-            概算人件費: <span className="font-semibold">${totals.cost.toFixed(2)}</span>
-            <span className="ml-1 text-[11px] text-muted-foreground">(時給未設定のスタッフは含まれません)</span>
+            {t('timecardScreen.estimatedLaborCostLabel')} <span className="font-semibold">${totals.cost.toFixed(2)}</span>
+            <span className="ml-1 text-[11px] text-muted-foreground">{t('timecardScreen.noWageExcludedNote')}</span>
           </div>
         </div>
       )}
@@ -423,8 +440,8 @@ function TimecardReport() {
 
       <StaffImageExportSection groups={byStaff} wageById={wageById} rounding={rounding} storeName={me.store_name} from={from} to={to} />
 
-      {!rows && <div className="text-[12.5px] text-muted-foreground">読み込み中…</div>}
-      {rows?.length === 0 && <div className="text-[12.5px] text-muted-foreground">この期間の勤怠記録はありません。</div>}
+      {!rows && <div className="text-[12.5px] text-muted-foreground">{t('common.loadingEllipsis')}</div>}
+      {rows?.length === 0 && <div className="text-[12.5px] text-muted-foreground">{t('timecardScreen.noRecordsForPeriod')}</div>}
 
       <div className="flex flex-col gap-2 print:gap-1.5">
         {rows?.map((r) => (
@@ -435,17 +452,17 @@ function TimecardReport() {
                 <span className="ml-2 text-muted-foreground">
                   {fmtTime(r.clockIn)} 〜 {fmtTime(r.clockOut)}
                 </span>
-                {!r.clockOut && <span className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 text-[10.5px] font-semibold text-emerald-700 print:hidden">勤務中</span>}
+                {!r.clockOut && <span className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 text-[10.5px] font-semibold text-emerald-700 print:hidden">{t('timecardScreen.status.working')}</span>}
               </div>
               <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
-                <span>実働 {fmtHours(roundedMinutes(r))}h</span>
-                {r.breaks.length > 0 && <span>休憩{r.breaks.length}回</span>}
-                {r.editedAt && <span className="text-amber-600">修正済み</span>}
+                <span>{t('timecardScreen.workedHoursShort', { hours: fmtHours(roundedMinutes(r)) })}</span>
+                {r.breaks.length > 0 && <span>{t('timecardScreen.breakCountShort', { count: r.breaks.length })}</span>}
+                {r.editedAt && <span className="text-amber-600">{t('timecardScreen.editedBadge')}</span>}
                 <button onClick={() => setEditingId((v) => (v === r.id ? null : r.id))} className="rounded-md border border-border px-2 py-1 text-[11.5px] font-semibold print:hidden">
-                  修正
+                  {t('common.edit')}
                 </button>
                 <button onClick={() => handleDelete(r.id)} className="rounded-md border border-border px-2 py-1 text-[11.5px] font-semibold text-destructive print:hidden">
-                  削除
+                  {t('common.delete')}
                 </button>
               </div>
             </div>
@@ -459,7 +476,7 @@ function TimecardReport() {
                 onCancel={() => setEditingId(null)}
               />
             )}
-            {r.note && <div className="mt-1.5 text-[11.5px] text-muted-foreground">メモ: {r.note}</div>}
+            {r.note && <div className="mt-1.5 text-[11.5px] text-muted-foreground">{t('expenses.noteLine', { note: r.note })}</div>}
           </div>
         ))}
       </div>
@@ -467,13 +484,12 @@ function TimecardReport() {
   );
 }
 
-const ROUNDING_DIRECTION_LABEL: Record<TimecardRoundingSettings['direction'], string> = {
-  up: '切り上げ',
-  down: '切り捨て',
-  nearest: '四捨五入',
-};
+function roundingDirectionLabel(direction: TimecardRoundingSettings['direction'], t: TFunc): string {
+  return t(`timecardScreen.roundingDirection.${direction}`);
+}
 
 function RoundingSettingsPanel({ rounding, onSaved }: { rounding: TimecardRoundingSettings; onSaved: (s: TimecardRoundingSettings) => void }) {
+  const { t } = useLanguage();
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(rounding);
   const [saving, setSaving] = useState(false);
@@ -491,7 +507,7 @@ function RoundingSettingsPanel({ rounding, onSaved }: { rounding: TimecardRoundi
       onSaved(saved);
       setOpen(false);
     } catch (err) {
-      setError(err instanceof PosTimecardApiError ? err.message : '保存に失敗しました');
+      setError(err instanceof PosTimecardApiError ? err.message : t('timecardScreen.roundingSaveError'));
     } finally {
       setSaving(false);
     }
@@ -501,55 +517,56 @@ function RoundingSettingsPanel({ rounding, onSaved }: { rounding: TimecardRoundi
     <div className="mb-3 rounded-lg border border-border bg-secondary/20 print:hidden">
       <button onClick={() => setOpen((v) => !v)} className="flex w-full items-center justify-between px-4 py-2.5 text-left text-[12.5px] font-semibold">
         <span>
-          丸め設定{rounding.enabled ? ` (${rounding.unitMinutes}分単位・${ROUNDING_DIRECTION_LABEL[rounding.direction]})` : ' (無効)'}
+          {t('timecardScreen.roundingToggleLabel')}
+          {rounding.enabled
+            ? ` (${t('timecardScreen.roundingUnitSuffix', { unit: rounding.unitMinutes })}・${roundingDirectionLabel(rounding.direction, t)})`
+            : ` (${t('timecardScreen.roundingDisabled')})`}
         </span>
-        <span className="text-muted-foreground">{open ? '閉じる' : '設定'}</span>
+        <span className="text-muted-foreground">{open ? t('common.close') : t('common.settingsButton')}</span>
       </button>
       {open && (
         <div className="flex flex-col gap-2.5 border-t border-border px-4 py-3">
-          <p className="text-[11.5px] text-muted-foreground">
-            打刻の記録自体は変更されません。実働時間・概算人件費・CSV・PDF・スタッフ別画像・AI分析の集計にだけ適用されます。
-          </p>
+          <p className="text-[11.5px] text-muted-foreground">{t('timecardScreen.roundingExplanation')}</p>
           <label className="flex items-center gap-1.5 text-[12.5px]">
             <input type="checkbox" checked={draft.enabled} onChange={(e) => setDraft((d) => ({ ...d, enabled: e.target.checked }))} />
-            丸めを有効にする
+            {t('timecardScreen.roundingEnableCheckbox')}
           </label>
           <div className="flex flex-wrap items-center gap-2.5">
             <label className="flex flex-col gap-1 text-[11.5px] text-muted-foreground">
-              単位
+              {t('timecardScreen.roundingUnitLabel')}
               <select
                 value={draft.unitMinutes}
                 disabled={!draft.enabled}
                 onChange={(e) => setDraft((d) => ({ ...d, unitMinutes: Number(e.target.value) as TimecardRoundingSettings['unitMinutes'] }))}
                 className="h-9 rounded-lg border border-border px-2 text-[12.5px] disabled:opacity-50"
               >
-                <option value={5}>5分</option>
-                <option value={10}>10分</option>
-                <option value={15}>15分</option>
-                <option value={30}>30分</option>
+                <option value={5}>{t('timecardScreen.roundingUnitSuffix', { unit: 5 })}</option>
+                <option value={10}>{t('timecardScreen.roundingUnitSuffix', { unit: 10 })}</option>
+                <option value={15}>{t('timecardScreen.roundingUnitSuffix', { unit: 15 })}</option>
+                <option value={30}>{t('timecardScreen.roundingUnitSuffix', { unit: 30 })}</option>
               </select>
             </label>
             <label className="flex flex-col gap-1 text-[11.5px] text-muted-foreground">
-              方向
+              {t('timecardScreen.roundingDirectionLabelText')}
               <select
                 value={draft.direction}
                 disabled={!draft.enabled}
                 onChange={(e) => setDraft((d) => ({ ...d, direction: e.target.value as TimecardRoundingSettings['direction'] }))}
                 className="h-9 rounded-lg border border-border px-2 text-[12.5px] disabled:opacity-50"
               >
-                <option value="nearest">四捨五入</option>
-                <option value="up">切り上げ</option>
-                <option value="down">切り捨て</option>
+                <option value="nearest">{t('timecardScreen.roundingDirection.nearest')}</option>
+                <option value="up">{t('timecardScreen.roundingDirection.up')}</option>
+                <option value="down">{t('timecardScreen.roundingDirection.down')}</option>
               </select>
             </label>
           </div>
           {error && <div className="text-[11.5px] text-destructive">{error}</div>}
           <div className="flex gap-2">
             <button onClick={save} disabled={saving} className="h-9 w-fit rounded-lg bg-primary px-4 text-[12.5px] font-semibold text-primary-foreground disabled:opacity-60">
-              {saving ? '保存中…' : '保存'}
+              {saving ? t('common.saving') : t('common.save')}
             </button>
             <button onClick={() => setOpen(false)} className="h-9 w-fit rounded-lg border border-border px-4 text-[12.5px] font-semibold">
-              キャンセル
+              {t('common.cancel')}
             </button>
           </div>
         </div>
@@ -560,6 +577,7 @@ function RoundingSettingsPanel({ rounding, onSaved }: { rounding: TimecardRoundi
 
 // 日別の概算人件費の簡易棒グラフ (2026-09-01 追加。新規ライブラリは使わずSVGを手描き)。
 function LaborCostChart({ data }: { data: { date: string; cost: number }[] }) {
+  const { t } = useLanguage();
   if (data.length === 0 || data.every((d) => d.cost === 0)) return null;
   const max = Math.max(...data.map((d) => d.cost));
   const width = 640;
@@ -569,8 +587,8 @@ function LaborCostChart({ data }: { data: { date: string; cost: number }[] }) {
 
   return (
     <div className="mb-3 rounded-lg border border-border p-3.5 print:hidden">
-      <div className="mb-2 text-[12px] font-semibold text-muted-foreground">日別 概算人件費</div>
-      <svg viewBox={`0 0 ${width} ${height + 20}`} className="h-[120px] w-full" role="img" aria-label="日別の概算人件費の棒グラフ">
+      <div className="mb-2 text-[12px] font-semibold text-muted-foreground">{t('timecardScreen.laborCostChartTitle')}</div>
+      <svg viewBox={`0 0 ${width} ${height + 20}`} className="h-[120px] w-full" role="img" aria-label={t('timecardScreen.laborCostChartAriaLabel')}>
         {data.map((d, i) => {
           const barHeight = max > 0 ? (d.cost / max) * height : 0;
           const x = i * (barWidth + barGap);
@@ -612,6 +630,7 @@ function StaffImageExportSection({
   from: string;
   to: string;
 }) {
+  const { t } = useLanguage();
   const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [savingId, setSavingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -625,17 +644,17 @@ function StaffImageExportSection({
       const html2canvas = await loadHtml2Canvas();
       const canvas = await html2canvas(node, { scale: 2, backgroundColor: '#ffffff' });
       const blob: Blob | null = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
-      if (!blob) throw new Error('画像の生成に失敗しました');
+      if (!blob) throw new Error(t('timecardScreen.imageGenerationError'));
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `勤怠明細_${staffName}_${from}_${to}.png`;
+      a.download = `${t('timecardScreen.imageFilenamePrefix')}_${staffName}_${from}_${to}.png`;
       document.body.appendChild(a);
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
     } catch {
-      setError('画像の生成に失敗しました。もう一度お試しください。');
+      setError(t('timecardScreen.imageGenerationErrorRetry'));
     } finally {
       setSavingId(null);
     }
@@ -645,7 +664,7 @@ function StaffImageExportSection({
 
   return (
     <div className="mb-3 rounded-lg border border-border p-3.5 print:hidden">
-      <div className="mb-1 text-[12px] font-semibold text-muted-foreground">スタッフ別 画像出力 (Telegramで個別に送るのに使えます)</div>
+      <div className="mb-1 text-[12px] font-semibold text-muted-foreground">{t('timecardScreen.staffImageExportTitle')}</div>
       {error && <div className="mb-1.5 text-[11.5px] text-destructive">{error}</div>}
       <div className="flex flex-wrap gap-2">
         {groups.map((g) => (
@@ -655,7 +674,7 @@ function StaffImageExportSection({
             disabled={savingId !== null}
             className="h-9 rounded-lg border border-border px-3 text-[12.5px] font-semibold disabled:opacity-50"
           >
-            {savingId === g.staffId ? '作成中…' : `${g.staffName} を画像で保存`}
+            {savingId === g.staffId ? t('timecardScreen.imageCreating') : t('timecardScreen.imageSaveButton', { name: g.staffName })}
           </button>
         ))}
       </div>
@@ -675,7 +694,7 @@ function StaffImageExportSection({
               }}
               style={{ width: 480, padding: 28, background: '#ffffff', color: '#111827', fontFamily: 'sans-serif' }}
             >
-              <div style={{ fontSize: 18, fontWeight: 700 }}>勤怠明細 — {g.staffName}</div>
+              <div style={{ fontSize: 18, fontWeight: 700 }}>{t('timecardScreen.imageCardTitle', { name: g.staffName })}</div>
               <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
                 {storeName ? `${storeName} ・ ` : ''}
                 {from} 〜 {to}
@@ -683,16 +702,16 @@ function StaffImageExportSection({
               <div style={{ marginTop: 16, borderTop: '1px solid #e5e7eb' }}>
                 {g.records.map((r) => (
                   <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #f3f4f6', fontSize: 13 }}>
-                    <span>{fmtTime(r.clockIn)} 〜 {r.clockOut ? fmtTime(r.clockOut) : '(勤務中)'}</span>
+                    <span>{fmtTime(r.clockIn)} 〜 {r.clockOut ? fmtTime(r.clockOut) : t('timecardScreen.workingParen')}</span>
                     <span>{fmtHours(applyTimecardRounding(workedMinutes(r), rounding))}h</span>
                   </div>
                 ))}
               </div>
               <div style={{ marginTop: 16, fontSize: 14, fontWeight: 700 }}>
-                合計実働: {fmtHours(totalMinutes)} 時間
-                {cost !== null && ` ・ 概算人件費: $${cost.toFixed(2)}`}
+                {t('timecardScreen.imageTotalWorked', { hours: fmtHours(totalMinutes) })}
+                {cost !== null && ` ・ ${t('timecardScreen.imageEstimatedCost', { cost: cost.toFixed(2) })}`}
               </div>
-              <div style={{ marginTop: 10, fontSize: 10, color: '#9ca3af' }}>出力日時: {new Date().toLocaleString('ja-JP')}</div>
+              <div style={{ marginTop: 10, fontSize: 10, color: '#9ca3af' }}>{t('timecardScreen.imageGeneratedAt', { datetime: new Date().toLocaleString('ja-JP') })}</div>
             </div>
           );
         })}
@@ -709,6 +728,7 @@ function toLocalInputValue(iso: string | null): string {
 }
 
 function TimecardEditForm({ record, onDone, onCancel }: { record: TimecardRecord; onDone: () => void; onCancel: () => void }) {
+  const { t } = useLanguage();
   const [clockInValue, setClockInValue] = useState(toLocalInputValue(record.clockIn));
   const [clockOutValue, setClockOutValue] = useState(toLocalInputValue(record.clockOut));
   const [note, setNote] = useState(record.note ?? '');
@@ -726,7 +746,7 @@ function TimecardEditForm({ record, onDone, onCancel }: { record: TimecardRecord
       });
       onDone();
     } catch (err) {
-      setError(err instanceof PosTimecardApiError ? err.message : '修正の保存に失敗しました');
+      setError(err instanceof PosTimecardApiError ? err.message : t('timecardScreen.editSaveError'));
     } finally {
       setSaving(false);
     }
@@ -736,22 +756,27 @@ function TimecardEditForm({ record, onDone, onCancel }: { record: TimecardRecord
     <div className="mt-2.5 flex flex-col gap-2 border-t border-border pt-2.5 print:hidden">
       <div className="flex flex-wrap gap-2.5">
         <label className="flex flex-col gap-1 text-[11.5px] text-muted-foreground">
-          出勤時刻
+          {t('timecardScreen.clockInFieldLabel')}
           <input type="datetime-local" value={clockInValue} onChange={(e) => setClockInValue(e.target.value)} className="h-9 rounded-lg border border-border px-2 text-[12.5px]" />
         </label>
         <label className="flex flex-col gap-1 text-[11.5px] text-muted-foreground">
-          退勤時刻 (未退勤のままにするなら空欄)
+          {t('timecardScreen.clockOutFieldLabel')}
           <input type="datetime-local" value={clockOutValue} onChange={(e) => setClockOutValue(e.target.value)} className="h-9 rounded-lg border border-border px-2 text-[12.5px]" />
         </label>
       </div>
-      <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="修正メモ (任意。押し忘れの理由など)" className="h-9 rounded-lg border border-border px-2.5 text-[12.5px]" />
+      <input
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+        placeholder={t('timecardScreen.editNotePlaceholder')}
+        className="h-9 rounded-lg border border-border px-2.5 text-[12.5px]"
+      />
       {error && <div className="text-[11.5px] text-destructive">{error}</div>}
       <div className="flex gap-2">
         <button onClick={save} disabled={saving} className="h-9 rounded-lg bg-primary px-3.5 text-[12px] font-semibold text-primary-foreground disabled:opacity-60">
-          {saving ? '保存中…' : '保存'}
+          {saving ? t('common.saving') : t('common.save')}
         </button>
         <button onClick={onCancel} className="h-9 rounded-lg border border-border px-3.5 text-[12px] font-semibold">
-          キャンセル
+          {t('common.cancel')}
         </button>
       </div>
     </div>
