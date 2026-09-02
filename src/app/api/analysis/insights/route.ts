@@ -4,6 +4,7 @@ import { createPosAdminClient, getPosStoreId } from '@/lib/supabase/admin';
 import { withPosStaff } from '@/lib/pos-auth';
 import { applyTimecardRounding } from '@/lib/timecard-rounding';
 import { DEFAULT_TIMECARD_ROUNDING, type TimecardRoundingSettings } from '@/lib/pos-types';
+import { LANGS, type Lang } from '@/lib/i18n/lang';
 
 // AI分析・課題提案 (2026-09-01 追加。Tom「データ収集・AI分析機能」の第二弾)。
 // 経費・勤怠 (データ収集・AI分析 第一弾、§0.1f) で集めたデータを Gemini API に渡し、
@@ -12,6 +13,13 @@ import { DEFAULT_TIMECARD_ROUNDING, type TimecardRoundingSettings } from '@/lib/
 //
 // 必須環境変数: GEMINI_API_KEY (Google AI Studio / Vertex AI で発行)。
 // 任意: GEMINI_MODEL (未設定なら gemini-2.5-flash)。
+//
+// 多言語対応 (2026-09-02 追加。Tom「AIレポートはいちど日本語で出力した文字を設定した言語に
+// 翻訳してください」)。分析そのもの (集計・プロンプト・Gemini呼び出し) は常に日本語のまま行う
+// (集計ロジック・プロンプトの精度を言語ごとに作り分けない設計を維持するため)。生成結果を
+// クライアントの表示言語が日本語以外なら、その結果テキストだけを追加でGeminiに翻訳させる
+// 2段階方式にした。翻訳に失敗しても分析結果自体は無駄にせず、日本語のまま返す
+// (`translationFailed: true` を付けて画面側に伝える)。
 
 function addDaysIso(dateIso: string, days: number): string {
   const d = new Date(`${dateIso}T00:00:00Z`);
@@ -171,9 +179,71 @@ async function callGemini(prompt: string): Promise<{ summary: string; findings: 
   };
 }
 
+const LANG_NAME: Record<Exclude<Lang, 'ja'>, string> = {
+  en: '英語',
+  km: 'クメール語 (カンボジア語)',
+  zh: '簡体字中国語',
+  ko: '韓国語',
+};
+
+type InsightsText = { summary: string; findings: string[]; suggestions: string[] };
+
+// 既に日本語で生成済みの分析結果テキストを、指定言語へ翻訳する (分析そのものはやり直さない)。
+// summary/findings/suggestions の構造・項目数を保ったまま翻訳するよう明示的に指示する。
+async function translateInsightsText(result: InsightsText, lang: Exclude<Lang, 'ja'>): Promise<InsightsText> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error('GEMINI_API_KEY が設定されていません (Vercelの環境変数に追加してください)');
+  }
+  const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+
+  const prompt = `以下は日本語で書かれた飲食店の経営分析コメントです。意味を変えずに${LANG_NAME[lang]}へ自然に翻訳してください。数字・金額・固有名詞 (スタッフ名・費目名など) はそのまま保持してください。findings と suggestions は、それぞれ元と同じ項目数・同じ順序の配列として翻訳してください (項目を増減・統合しない)。
+
+【summary】
+${result.summary}
+
+【findings】
+${result.findings.map((f, i) => `${i + 1}. ${f}`).join('\n') || '(なし)'}
+
+【suggestions】
+${result.suggestions.map((s, i) => `${i + 1}. ${s}`).join('\n') || '(なし)'}`;
+
+  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: {
+        responseMimeType: 'application/json',
+        responseSchema: RESPONSE_SCHEMA,
+      },
+    }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`Gemini API呼び出しに失敗しました (${res.status}): ${text.slice(0, 300)}`);
+  }
+  const json = await res.json();
+  const text: string | undefined = json?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) throw new Error('Gemini APIから翻訳結果を取得できませんでした');
+  const parsed = JSON.parse(text);
+  const translated: InsightsText = {
+    summary: String(parsed.summary ?? ''),
+    findings: Array.isArray(parsed.findings) ? parsed.findings.map(String) : [],
+    suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions.map(String) : [],
+  };
+  // 項目数がずれた場合は翻訳漏れ・混ざりのリスクがあるため、失敗扱いにして呼び出し元に
+  // 日本語へフォールバックさせる。
+  if (translated.findings.length !== result.findings.length || translated.suggestions.length !== result.suggestions.length) {
+    throw new Error('翻訳結果の項目数が一致しませんでした');
+  }
+  return translated;
+}
+
 const postSchema = z.object({
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  lang: z.enum(LANGS as [Lang, ...Lang[]]).optional(),
 });
 
 // 分析実行。manager 以上のみ (経費・勤怠のレポート閲覧と同じ権限)。
@@ -183,7 +253,7 @@ export const POST = withPosStaff('manager', async (_session, req) => {
   if (!parsed.success) {
     return NextResponse.json({ error: 'invalid_request', details: parsed.error.flatten() }, { status: 400 });
   }
-  const { from, to } = parsed.data;
+  const { from, to, lang } = parsed.data;
   if (from > to) return NextResponse.json({ error: '開始日は終了日より前にしてください' }, { status: 400 });
 
   const supabase = createPosAdminClient();
@@ -207,7 +277,20 @@ export const POST = withPosStaff('manager', async (_session, req) => {
 
     const prompt = buildPrompt(storeName, current, previous);
     const result = await callGemini(prompt);
-    return NextResponse.json({ ...result, current, previous });
+
+    // 分析結果 (常に日本語) を、リクエストされた表示言語が日本語以外なら追加で翻訳する。
+    // 翻訳が失敗しても分析自体は成功しているので、日本語のまま返す (再生成させない)。
+    let output: InsightsText = result;
+    let translationFailed = false;
+    if (lang && lang !== 'ja') {
+      try {
+        output = await translateInsightsText(result, lang);
+      } catch {
+        translationFailed = true;
+      }
+    }
+
+    return NextResponse.json({ ...output, current, previous, translationFailed });
   } catch (err) {
     const message = err instanceof Error ? err.message : '分析の生成に失敗しました';
     return NextResponse.json({ error: message }, { status: 500 });

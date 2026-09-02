@@ -67,7 +67,7 @@ function PosNativeOnlyNotice() {
 }
 
 function InsightsPanel() {
-  const { t } = useLanguage();
+  const { t, lang } = useLanguage();
   const [from, setFrom] = useState(() => todayIso().slice(0, 8) + '01');
   const [to, setTo] = useState(todayIso());
   const [loading, setLoading] = useState(false);
@@ -78,7 +78,10 @@ function InsightsPanel() {
     setLoading(true);
     setError(null);
     try {
-      const r = await generateInsights(from, to);
+      // AIレポート本文 (要約・気づいた点・改善提案) はサーバー側で一度日本語で生成し、
+      // 日本語以外の表示言語なら追加で翻訳して返す (2026-09-02。集計・プロンプト自体は
+      // 常に日本語のまま — route.ts のコメント参照)。
+      const r = await generateInsights(from, to, lang);
       setResult(r);
     } catch (err) {
       setError(err instanceof PosAnalysisApiError ? err.message : t('insights.generateError'));
@@ -108,6 +111,9 @@ function InsightsPanel() {
 
       {result && !loading && (
         <div className="flex flex-col gap-4">
+          {result.translationFailed && (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-[12px] text-amber-800">{t('insights.translationFailedNote')}</div>
+          )}
           <div className="rounded-xl border border-border bg-card p-5">
             <div className="mb-2 text-[13.5px] font-semibold">{t('insights.summaryLabel')}</div>
             <p className="text-[13.5px] leading-relaxed">{result.summary}</p>
