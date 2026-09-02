@@ -42,6 +42,8 @@ type ApiReservation = {
   createdAt: string;
   /** 'pos' = POSで直接受け付けた電話予約 (編集・キャンセル可能)。'app' = アプリ予約 (表示のみ、読み取り専用) */
   source: 'pos' | 'app';
+  /** 割り当てられた卓コード (2026-09-02 追加、pos.reservation_table_assignments 由来)。未割当は [] */
+  tableCodes: string[];
 };
 
 function toApiFromPos(row: PosRow): ApiReservation {
@@ -59,6 +61,7 @@ function toApiFromPos(row: PosRow): ApiReservation {
     createdByName: row.created_by_name,
     createdAt: row.created_at,
     source: 'pos',
+    tableCodes: [],
   };
 }
 
@@ -135,8 +138,22 @@ async function fetchAppReservations(): Promise<ApiReservation[]> {
       createdByName: null,
       createdAt: r.created_at,
       source: 'app',
+      tableCodes: [],
     };
   });
+}
+
+async function fetchTableAssignments(storeId: string): Promise<Map<string, string[]>> {
+  const supabase = createPosAdminClient();
+  const { data } = await supabase
+    .from('reservation_table_assignments')
+    .select('reservation_ref, table_codes')
+    .eq('store_id', storeId);
+  const map = new Map<string, string[]>();
+  for (const row of data ?? []) {
+    map.set(row.reservation_ref as string, ((row.table_codes as string[] | null) ?? []) as string[]);
+  }
+  return map;
 }
 
 export const GET = withPosStaff('staff', async () => {
@@ -156,12 +173,15 @@ export const GET = withPosStaff('staff', async () => {
 
   const posItems = (data ?? []).map((row) => toApiFromPos(row as PosRow));
   const appItems = await fetchAppReservations().catch(() => []);
+  const tableCodesByRef = await fetchTableAssignments(storeId).catch(() => new Map<string, string[]>());
 
-  const items = [...posItems, ...appItems].sort((a, b) => {
-    const ad = a.reservationDate + (a.reservationTime ?? '');
-    const bd = b.reservationDate + (b.reservationTime ?? '');
-    return ad < bd ? -1 : ad > bd ? 1 : 0;
-  });
+  const items = [...posItems, ...appItems]
+    .map((item) => ({ ...item, tableCodes: tableCodesByRef.get(item.id) ?? [] }))
+    .sort((a, b) => {
+      const ad = a.reservationDate + (a.reservationTime ?? '');
+      const bd = b.reservationDate + (b.reservationTime ?? '');
+      return ad < bd ? -1 : ad > bd ? 1 : 0;
+    });
 
   return NextResponse.json({ items });
 });

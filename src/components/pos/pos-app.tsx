@@ -53,8 +53,9 @@ import {
 import { effectiveBasePrice, isHappyHourNow } from '@/lib/happy-hour';
 import { cartLineNetTotal, discountAmount } from '@/lib/cart';
 import { logoutPosStaff } from '@/lib/staff-client';
+import { getReservations, type ReservationRecord } from '@/lib/reservation-client';
 import { useStaff } from './staff-context';
-import { TableMapScreen } from './table-map-screen';
+import { TableMapScreen, type TableReservationBadge } from './table-map-screen';
 import { OrderScreen } from './order-screen';
 import { CheckoutScreen } from './checkout-screen';
 import { ReceiptScreen } from './receipt-screen';
@@ -93,6 +94,7 @@ export function PosApp() {
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [layoutItems, setLayoutItems] = useState<TableLayoutItemRecord[]>([]);
   const [tableSessions, setTableSessions] = useState<TableSessionRecord[]>([]);
+  const [reservations, setReservations] = useState<ReservationRecord[]>([]);
   const [dataLoading, setDataLoading] = useState(true);
   const [dataError, setDataError] = useState<string | null>(null);
   const [loadToken, setLoadToken] = useState(0);
@@ -190,13 +192,17 @@ export function PosApp() {
         // 決済方法は連携モードに関係なく pos.payment_methods (店舗単位) から読む
         // (2026-08-31 追加。未設定でも会計自体は止めたくないので失敗時は空配列)。
         const paymentMethodsPromise = getPosOrderPaymentMethods().catch(() => ({ paymentMethods: [] as PaymentMethodConfig[] }));
+        // 予約の卓割り当てをテーブルマップに反映するため (2026-09-02 追加)。連携モードに関係なく
+        // POS側の予約一覧 (pos.reservations + アプリ予約マージ) から読む。失敗時は空配列 (バッジなしで表示継続)。
+        const reservationsPromise = getReservations().catch(() => ({ items: [] as ReservationRecord[] }));
         if (menuSource === 'pos_native') {
-          const [menuData, settingsData, layoutData, sessionsData, paymentMethodsData] = await Promise.all([
+          const [menuData, settingsData, layoutData, sessionsData, paymentMethodsData, reservationsData] = await Promise.all([
             getPosOrderMenu(),
             getPosOrderSettings(),
             layoutPromise,
             sessionsPromise,
             paymentMethodsPromise,
+            reservationsPromise,
           ]);
           if (cancelled) return;
           setMenu(menuData.items);
@@ -205,13 +211,15 @@ export function PosApp() {
           setLayoutItems(layoutData.items);
           setTableSessions(sessionsData.items);
           setPaymentMethods(paymentMethodsData.paymentMethods);
+          setReservations(reservationsData.items);
         } else {
-          const [menuData, settingsData, layoutData, sessionsData, paymentMethodsData] = await Promise.all([
+          const [menuData, settingsData, layoutData, sessionsData, paymentMethodsData, reservationsData] = await Promise.all([
             getPosMenus(),
             getPosSettings(),
             layoutPromise,
             sessionsPromise,
             paymentMethodsPromise,
+            reservationsPromise,
           ]);
           if (cancelled) return;
           setMenu(
@@ -225,6 +233,7 @@ export function PosApp() {
           setLayoutItems(layoutData.items);
           setTableSessions(sessionsData.items);
           setPaymentMethods(paymentMethodsData.paymentMethods);
+          setReservations(reservationsData.items);
         }
       } catch (err) {
         if (cancelled) return;
@@ -259,6 +268,13 @@ export function PosApp() {
         .catch(() => {
           /* ポーリング失敗時は次回まで前回値を表示し続ける */
         });
+      // 予約の卓割り当ては他端末での操作でも変わるため、テーブルマップのバッジも
+      // 同じ周期で更新する (2026-09-02 追加)。
+      getReservations()
+        .then(({ items }) => setReservations(items))
+        .catch(() => {
+          /* ポーリング失敗時は次回まで前回値を表示し続ける */
+        });
     }, 20000);
     return () => clearInterval(id);
   }, [dataLoading]);
@@ -280,6 +296,32 @@ export function PosApp() {
     return () => clearInterval(id);
   }, []);
   const happyHourActive = useMemo(() => isHappyHourNow(settings, now), [settings, now]);
+
+  // 卓別の直近予約バッジ (2026-09-02 追加)。Tom「設定した席に予約マークがついて何時から
+  // 予約かが分かるようにしてほしい」への対応。本日の確定予約のうち卓が割り当てられているものだけ
+  // 対象にし、卓ごとに「まだ来ていない一番近い予約」(時間未定の予約は常に対象) を1件だけ表示する。
+  const reservationsByTable: Record<string, TableReservationBadge> = useMemo(() => {
+    const todayStr = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Phnom_Penh' }).format(now);
+    const nowStr = new Intl.DateTimeFormat('sv-SE', {
+      timeZone: 'Asia/Phnom_Penh',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(now);
+
+    const upcoming = reservations.filter(
+      (r) => r.status === 'confirmed' && r.reservationDate === todayStr && r.tableCodes.length > 0 && (!r.reservationTime || r.reservationTime >= nowStr),
+    );
+    upcoming.sort((a, b) => (a.reservationTime ?? '99:99').localeCompare(b.reservationTime ?? '99:99'));
+
+    const map: Record<string, TableReservationBadge> = {};
+    for (const r of upcoming) {
+      for (const code of r.tableCodes) {
+        if (!map[code]) map[code] = { time: r.reservationTime, customerName: r.customerName };
+      }
+    }
+    return map;
+  }, [reservations, now]);
 
   function upsertLocalSession(tableCode: string, patch: Partial<TableSessionRecord>) {
     setTableSessions((prev) => {
@@ -1027,6 +1069,7 @@ export function PosApp() {
           onSelectTable={selectTable}
           layoutItems={layoutItems}
           tableSessions={tableSessions}
+          reservationsByTable={reservationsByTable}
           tableActionMode={tableActionMode}
           moveSourceTable={moveSourceTable}
           mergeTargetTable={mergeTargetTable}

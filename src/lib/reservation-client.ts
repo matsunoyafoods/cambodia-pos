@@ -30,6 +30,8 @@ export type ReservationRecord = {
   createdAt: string;
   /** 'pos' = POSで直接受け付けた電話予約。'app' = matsunoya-dineアプリ予約 (読み取り専用でマージ表示、2026-08-31 追加) */
   source: 'pos' | 'app';
+  /** 割り当てられた卓コード (2026-09-02 追加)。未割当は [] */
+  tableCodes: string[];
 };
 
 export type CreateReservationInput = {
@@ -76,4 +78,12 @@ export function createReservation(input: CreateReservationInput): Promise<Reserv
 
 export function cancelReservation(id: string): Promise<ReservationRecord> {
   return request(`/api/reservations/${id}`, { method: 'PATCH', body: JSON.stringify({ status: 'cancelled' }) });
+}
+
+// 予約の卓割り当て (2026-09-02 追加)。POS電話予約・アプリ予約どちらの id でも呼べる。
+export function assignReservationTables(id: string, tableCodes: string[]): Promise<{ id: string; tableCodes: string[] }> {
+  return request(`/api/reservations/${encodeURIComponent(id)}/tables`, {
+    method: 'PATCH',
+    body: JSON.stringify({ tableCodes }),
+  });
 }

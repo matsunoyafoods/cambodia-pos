@@ -22,6 +22,23 @@ const STATUS_CLASS: Record<TableStatus, string> = {
 
 const OBSTACLE_LABEL: Record<string, string> = { pillar: '柱', counter: 'カウンター', wall: '壁' };
 
+// 卓別の直近予約 (2026-09-02 追加。Tom「設定した席に予約マークがついて何時から予約かが
+// 分かるようにしてほしい」への対応)。予約側 (reservation-screen.tsx) で卓を割り当てると、
+// テーブルマップ上のその卓に「📅 19:00」のような小さなバッジが付く。
+export type TableReservationBadge = { time: string | null; customerName: string };
+
+function ReservationMark({ reservation }: { reservation: TableReservationBadge | undefined }) {
+  if (!reservation) return null;
+  return (
+    <span
+      className="mt-0.5 inline-flex items-center gap-0.5 rounded-full bg-violet-100 px-1.5 py-0.5 text-[9px] font-semibold leading-none text-violet-800"
+      title={`予約: ${reservation.customerName}様`}
+    >
+      📅{reservation.time ?? '時間未定'}
+    </span>
+  );
+}
+
 // 飲み放題タイマーが切れているか (テーブルマップ全体で「小さなバッジだけだと気づきにくい」
 // という指摘を受け、卓の枠自体を赤くパルスさせて一目でわかるようにする 2026-08-31 追加)。
 function isDrinkTimerExpired(session: TableSessionRecord | undefined): boolean {
@@ -69,6 +86,7 @@ export function TableMapScreen({
   onSelectTable,
   layoutItems,
   tableSessions,
+  reservationsByTable = {},
   tableActionMode = 'none',
   moveSourceTable = null,
   mergeTargetTable = null,
@@ -87,6 +105,8 @@ export function TableMapScreen({
   onSelectTable: (code: string) => void;
   layoutItems: TableLayoutItemRecord[];
   tableSessions: TableSessionRecord[];
+  /** 卓別の直近予約 (2026-09-02 追加)。省略時はバッジを表示しない。 */
+  reservationsByTable?: Record<string, TableReservationBadge>;
   /** 席移動・会計合算 (2026-08-31 追加)。省略時は従来通りの通常モードのみ。 */
   tableActionMode?: 'none' | 'move' | 'merge';
   moveSourceTable?: string | null;
@@ -255,6 +275,7 @@ export function TableMapScreen({
                       {STATUS_LABEL[status]}
                     </div>
                     <TableTimerBadges session={sessionByTable.get(t.table_code)} />
+                    <ReservationMark reservation={reservationsByTable[t.table_code]} />
                   </button>
                 );
               })}
@@ -291,6 +312,7 @@ export function TableMapScreen({
                         0/{group.seats} ・ {STATUS_LABEL[t.status]}
                       </div>
                       <TableTimerBadges session={sessionByTable.get(t.code)} />
+                      <ReservationMark reservation={reservationsByTable[t.code]} />
                     </button>
                   ))}
                 </div>

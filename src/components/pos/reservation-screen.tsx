@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
+  assignReservationTables,
   cancelReservation,
   createReservation,
   getReservations,
@@ -10,6 +11,8 @@ import {
   type ReservationRecord,
   type ReservationType,
 } from '@/lib/reservation-client';
+import { listTableLayout } from '@/lib/table-layout-client';
+import { DEMO_TABLES } from '@/lib/demo-data';
 
 const TYPE_LABEL: Record<ReservationType, string> = {
   normal: '通常予約',
@@ -187,6 +190,24 @@ export function ReservationScreen() {
   const [listLoading, setListLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
 
+  // 卓割り当て (2026-09-02 追加)。予約一覧の各行から「どの卓を使うか」を設定できるようにする。
+  // 選択肢は設定画面のテーブルレイアウトから取得し、まだ何も配置していない店舗はテーブルマップと
+  // 同じサンプル卓一覧 (DEMO_TABLES) にフォールバックする。
+  const [tableOptions, setTableOptions] = useState<{ code: string; seats: number }[]>([]);
+  const [editingTablesId, setEditingTablesId] = useState<string | null>(null);
+  const [editingTableCodes, setEditingTableCodes] = useState<string[]>([]);
+  const [tableSaving, setTableSaving] = useState(false);
+  const [tableSaveError, setTableSaveError] = useState<string | null>(null);
+
+  useEffect(() => {
+    listTableLayout()
+      .then(({ items }) => {
+        const tables = items.filter((t) => t.kind === 'table').map((t) => ({ code: t.table_code, seats: t.seats }));
+        setTableOptions(tables.length > 0 ? tables : DEMO_TABLES.map((t) => ({ code: t.code, seats: t.seats })));
+      })
+      .catch(() => setTableOptions(DEMO_TABLES.map((t) => ({ code: t.code, seats: t.seats }))));
+  }, []);
+
   // 電話を取った時点では種類がわからないため、初期値は未選択 (null)。基本情報を聞き終えた
   // 最後のステップ (TYPE_SELECT_STEP) でスタッフが選択するまで null のまま。
   const [type, setType] = useState<ReservationType | null>(null);
@@ -287,6 +308,30 @@ export function ReservationScreen() {
     }
   }
 
+  function openTableEditor(r: ReservationRecord) {
+    setEditingTablesId(r.id);
+    setEditingTableCodes(r.tableCodes);
+    setTableSaveError(null);
+  }
+
+  function toggleTableCode(code: string) {
+    setEditingTableCodes((prev) => (prev.includes(code) ? prev.filter((c) => c !== code) : [...prev, code]));
+  }
+
+  async function saveTableAssignment(id: string) {
+    setTableSaving(true);
+    setTableSaveError(null);
+    try {
+      await assignReservationTables(id, editingTableCodes);
+      setEditingTablesId(null);
+      loadList();
+    } catch (err) {
+      setTableSaveError(err instanceof ReservationApiError ? err.message : '卓の設定に失敗しました');
+    } finally {
+      setTableSaving(false);
+    }
+  }
+
   return (
     <div className="flex h-[800px] w-[1280px] flex-col overflow-hidden bg-background">
       <div className="flex h-16 flex-shrink-0 items-center justify-between border-b border-border px-6">
@@ -328,43 +373,100 @@ export function ReservationScreen() {
               <div
                 key={r.id}
                 className={
-                  'flex items-center justify-between rounded-xl border p-4 ' +
+                  'flex flex-col gap-3 rounded-xl border p-4 ' +
                   (r.status === 'cancelled' ? 'border-border bg-secondary/40 opacity-60' : 'border-border bg-card')
                 }
               >
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="rounded-full bg-secondary px-2 py-0.5 text-[10.5px] font-semibold">
-                      {TYPE_LABEL[r.reservationType]}
-                    </span>
-                    {r.source === 'app' && (
-                      <span className="rounded-full bg-brand/10 px-2 py-0.5 text-[10.5px] font-semibold text-brand">
-                        アプリ予約
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-full bg-secondary px-2 py-0.5 text-[10.5px] font-semibold">
+                        {TYPE_LABEL[r.reservationType]}
                       </span>
-                    )}
-                    {r.status === 'cancelled' && (
-                      <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-[10.5px] font-semibold text-destructive">
-                        キャンセル済み
-                      </span>
-                    )}
+                      {r.source === 'app' && (
+                        <span className="rounded-full bg-brand/10 px-2 py-0.5 text-[10.5px] font-semibold text-brand">
+                          アプリ予約
+                        </span>
+                      )}
+                      {r.status === 'cancelled' && (
+                        <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-[10.5px] font-semibold text-destructive">
+                          キャンセル済み
+                        </span>
+                      )}
+                      {r.tableCodes.length > 0 && (
+                        <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10.5px] font-semibold text-emerald-800">
+                          卓: {r.tableCodes.join(', ')}
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-1 text-[14px] font-bold">
+                      {r.reservationDate} {r.reservationTime ?? ''} ・ {r.customerName}様
+                      {r.partySize ? ` ・ ${r.partySize}名` : ''}
+                    </div>
+                    <div className="mt-0.5 text-[11.5px] text-muted-foreground">
+                      {r.phone ? `TEL ${r.phone} ・ ` : ''}
+                      受付: {r.createdByName ?? '-'}
+                      {r.notes ? ` ・ 備考: ${r.notes}` : ''}
+                    </div>
                   </div>
-                  <div className="mt-1 text-[14px] font-bold">
-                    {r.reservationDate} {r.reservationTime ?? ''} ・ {r.customerName}様
-                    {r.partySize ? ` ・ ${r.partySize}名` : ''}
-                  </div>
-                  <div className="mt-0.5 text-[11.5px] text-muted-foreground">
-                    {r.phone ? `TEL ${r.phone} ・ ` : ''}
-                    受付: {r.createdByName ?? '-'}
-                    {r.notes ? ` ・ 備考: ${r.notes}` : ''}
+                  <div className="flex flex-shrink-0 gap-2">
+                    {r.status === 'confirmed' && (
+                      <button
+                        onClick={() => (editingTablesId === r.id ? setEditingTablesId(null) : openTableEditor(r))}
+                        className="h-9 rounded-lg border border-border bg-card px-3.5 text-[12px] font-semibold text-foreground"
+                      >
+                        {r.tableCodes.length > 0 ? '卓を変更' : '卓を設定'}
+                      </button>
+                    )}
+                    {r.status === 'confirmed' && r.source === 'pos' && (
+                      <button
+                        onClick={() => handleCancel(r.id)}
+                        className="h-9 rounded-lg border border-destructive px-3.5 text-[12px] font-semibold text-destructive"
+                      >
+                        キャンセルにする
+                      </button>
+                    )}
                   </div>
                 </div>
-                {r.status === 'confirmed' && r.source === 'pos' && (
-                  <button
-                    onClick={() => handleCancel(r.id)}
-                    className="h-9 rounded-lg border border-destructive px-3.5 text-[12px] font-semibold text-destructive"
-                  >
-                    キャンセルにする
-                  </button>
+
+                {editingTablesId === r.id && (
+                  <div className="rounded-lg border border-border bg-secondary/20 p-3">
+                    <div className="mb-2 text-[11.5px] font-semibold text-muted-foreground">
+                      {r.reservationTime ? `${r.reservationTime} から使う卓を選択` : '使う卓を選択 (時間未定)'}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {tableOptions.map((t) => (
+                        <button
+                          key={t.code}
+                          onClick={() => toggleTableCode(t.code)}
+                          className={
+                            'h-9 rounded-lg border px-3 text-[12.5px] font-semibold ' +
+                            (editingTableCodes.includes(t.code)
+                              ? 'border-primary bg-primary/10 text-primary'
+                              : 'border-border bg-card text-foreground')
+                          }
+                        >
+                          {t.code}
+                        </button>
+                      ))}
+                    </div>
+                    {tableSaveError && <div className="mt-2 text-[12px] text-destructive">{tableSaveError}</div>}
+                    <div className="mt-3 flex justify-end gap-2">
+                      <button
+                        onClick={() => setEditingTablesId(null)}
+                        className="h-9 rounded-lg border border-border px-3.5 text-[12px] font-semibold"
+                      >
+                        キャンセル
+                      </button>
+                      <button
+                        onClick={() => saveTableAssignment(r.id)}
+                        disabled={tableSaving}
+                        className="h-9 rounded-lg bg-primary px-4 text-[12px] font-bold text-primary-foreground disabled:opacity-60"
+                      >
+                        {tableSaving ? '保存中…' : '保存'}
+                      </button>
+                    </div>
+                  </div>
                 )}
               </div>
             ))}
