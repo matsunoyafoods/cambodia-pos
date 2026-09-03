@@ -3,6 +3,8 @@
  * 同一オリジン API クライアント。staff-client.ts と同じ方針。
  */
 
+import type { TranslationMap } from '@/lib/pos-types';
+
 export class PosMenuApiError extends Error {
   constructor(
     message: string,
@@ -36,7 +38,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export type PosMenuCategory = { id: string; name: string; sort_order: number; parent_id: string | null };
+export type PosMenuCategory = {
+  id: string;
+  name: string;
+  sort_order: number;
+  parent_id: string | null;
+  /** 翻訳タブで入力済みの多言語名 (2026-09-03 追加。カテゴリーツリーの表示言語切り替えに使う。
+   * 並び替え・検索・リネーム入力など内部ロジックは従来通り日本語の name を使う) */
+  translations?: TranslationMap;
+};
 
 export type PosMenuItemRecord = {
   id: string;
@@ -48,6 +58,8 @@ export type PosMenuItemRecord = {
   active: boolean;
   sort_order: number;
   image_url: string | null;
+  /** 翻訳タブで入力済みの多言語名 (2026-09-03 追加。商品一覧の表示言語切り替えに使う) */
+  translations?: TranslationMap;
 };
 
 export function listMenuCategories(): Promise<{ categories: PosMenuCategory[] }> {

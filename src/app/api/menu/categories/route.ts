@@ -9,9 +9,11 @@ export const GET = withPosStaff('manager', async () => {
   const supabase = createPosAdminClient();
   const storeId = getPosStoreId();
 
+  // translations (2026-09-03 追加): 「翻訳」タブで入力済みの多言語名を、このカテゴリー
+  // ツリーの表示 (menuText 経由) でも使うために select に含める。
   const { data, error } = await supabase
     .from('menu_categories')
-    .select('id, name, sort_order, parent_id')
+    .select('id, name, sort_order, parent_id, translations')
     .eq('store_id', storeId)
     .order('sort_order')
     .order('name');

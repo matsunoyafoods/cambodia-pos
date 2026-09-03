@@ -6,6 +6,7 @@ import { DEMO_TABLE_GROUPS } from '@/lib/demo-data';
 import type { TableLayoutItemRecord } from '@/lib/table-layout-client';
 import type { TableSessionRecord } from '@/lib/table-session-client';
 import { drinkTimerState, elapsedMinutes, formatDuration } from '@/lib/table-timer';
+import { useLanguage } from './language-context';
 
 // ハンディ端末向けの卓選択画面 (2026-08-31 追加。「ハンディ注文機能」)。
 // レジ画面のテーブルマップ (table-map-screen.tsx) は 940×640px 固定キャンバスに絶対座標で
@@ -100,6 +101,7 @@ export function HandyTableList({
   /** 設定画面「ハンディ表示」タブで設定した卓グループ・並び順 (2026-08-31 追加) */
   handyGroups: HandyTableGroup[];
 }) {
+  const { t: tr, menuText } = useLanguage();
   const sessionByTable = new Map(tableSessions.map((s) => [s.table_code, s]));
 
   const realTables = layoutItems.filter((t) => t.kind === 'table').map((t) => ({ code: t.table_code, seats: t.seats }));
@@ -110,7 +112,9 @@ export function HandyTableList({
     const usedCodes = new Set<string>();
     const configured = handyGroups
       .map((g) => ({
-        label: g.name,
+        // 卓グループ名の翻訳表示 (2026-09-03 追加。ハンディ画面はスタッフが直接見るため、
+        // 設定画面「ハンディ表示」タブで入力済みの多言語名があればそれを使う)。
+        label: menuText(g.name, g.translations),
         tables: g.tableCodes
           .filter((code) => seatsByCode.has(code) && !usedCodes.has(code))
           .map((code) => {
@@ -122,7 +126,7 @@ export function HandyTableList({
     const ungrouped = realTables.filter((t) => !usedCodes.has(t.code)).sort((a, b) => naturalTableCompare(a.code, b.code));
 
     if (configured.length > 0) {
-      groups = ungrouped.length > 0 ? [...configured, { label: '未分類', tables: ungrouped }] : configured;
+      groups = ungrouped.length > 0 ? [...configured, { label: tr('settings.handy.unassignedGroupLabel'), tables: ungrouped }] : configured;
     } else {
       groups = [{ label: null, tables: realTables.slice().sort((a, b) => naturalTableCompare(a.code, b.code)) }];
     }

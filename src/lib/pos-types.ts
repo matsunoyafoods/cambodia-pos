@@ -123,6 +123,10 @@ export type HandyTableGroup = {
   id: string;
   name: string;
   tableCodes: string[];
+  /** 卓グループ名の多言語表示用 (2026-09-03 追加。ハンディ画面はスタッフが直接見るため、
+   * 未分類などと同じくグループ名も翻訳できるようにする)。未設定の言語は name (日本語) を
+   * そのまま表示する。 */
+  translations?: TranslationMap;
 };
 
 // 会計の1つの支払いライン。1つの伝票を複数の支払い方法・複数人に分けて会計できるようにする

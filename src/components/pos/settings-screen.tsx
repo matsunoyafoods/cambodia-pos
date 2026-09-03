@@ -695,6 +695,7 @@ function HandyGroupCard({
   onAddTable,
   onRemoveTable,
   onMoveTable,
+  onTranslationChange,
 }: {
   group: HandyTableGroup;
   index: number;
@@ -708,9 +709,11 @@ function HandyGroupCard({
   onAddTable: (code: string) => void;
   onRemoveTable: (code: string) => void;
   onMoveTable: (tableIndex: number, direction: -1 | 1) => void;
+  onTranslationChange: (lang: MenuTranslationLang, value: string) => void;
 }) {
   const { t } = useLanguage();
   const [pendingCode, setPendingCode] = useState('');
+  const [showTranslations, setShowTranslations] = useState(false);
 
   return (
     <div className="rounded-xl border border-border p-3.5">
@@ -742,6 +745,13 @@ function HandyGroupCard({
         />
         <button
           type="button"
+          onClick={() => setShowTranslations((v) => !v)}
+          className="h-9 flex-shrink-0 rounded-lg border border-border px-3 text-[12px] font-semibold"
+        >
+          {t('settings.nav.translations')}
+        </button>
+        <button
+          type="button"
           disabled={!canManageSettings}
           onClick={onDelete}
           className="h-9 flex-shrink-0 rounded-lg border border-border px-3 text-[12px] font-semibold text-destructive disabled:opacity-60"
@@ -749,6 +759,23 @@ function HandyGroupCard({
           {t('settings.handy.deleteGroup')}
         </button>
       </div>
+
+      {showTranslations && (
+        <div className="mt-3 grid grid-cols-2 gap-2 rounded-lg bg-secondary/40 p-2.5 sm:grid-cols-4">
+          {(['en', 'km', 'zh', 'ko'] as MenuTranslationLang[]).map((lang) => (
+            <div key={lang} className="flex flex-col gap-1">
+              <label className="text-[10.5px] font-semibold text-muted-foreground">{translationLangLabel(t, lang)}</label>
+              <input
+                value={group.translations?.[lang] ?? ''}
+                onChange={(e) => onTranslationChange(lang, e.target.value)}
+                disabled={!canManageSettings}
+                maxLength={40}
+                className="h-8 rounded-lg border border-border px-2 text-[12.5px] disabled:opacity-60"
+              />
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="mt-3 flex flex-wrap gap-1.5">
         {group.tableCodes.map((code, i) => (
@@ -929,6 +956,9 @@ function HandyGroupsSection({ canManageSettings }: { canManageSettings: boolean 
               [next[tableIndex], next[otherIndex]] = [next[otherIndex], next[tableIndex]];
               return { ...x, tableCodes: next };
             })
+          }
+          onTranslationChange={(lang, value) =>
+            updateGroup(g.id, (x) => ({ ...x, translations: { ...x.translations, [lang]: value } }))
           }
         />
       ))}
@@ -1841,7 +1871,7 @@ function ResetPinForm({ staffId, onDone }: { staffId: string; onDone: () => void
 // (POS単体運用モード用。matsunoya-dine 連携店舗は matsunoya-dine 管理画面が編集元のまま)。
 // API 側は manager 以上のみ許可しているので、こちらは UI 側の補助的なガード。
 function MenuTab() {
-  const { t } = useLanguage();
+  const { t, menuText } = useLanguage();
   const me = useStaff();
   const isPosNative = me.authMode === 'pos_native';
   const canManage = isPosNative && (me.role === 'owner' || me.role === 'manager');
@@ -1891,13 +1921,20 @@ function MenuTab() {
     );
   }
 
+  // カテゴリー名の翻訳表示 (2026-09-03 追加。「翻訳」タブで入力済みの多言語名を、この
+  // 管理画面のカテゴリーツリー・商品一覧でも選択言語に応じて表示する。Tomさんの選択により
+  // 日本語併記はせず翻訳名のみ表示 — 並び替え・検索・リネーム入力など内部ロジックは
+  // 従来通り日本語の name を使う)。
+  const categoryTranslationsById = new Map((categories ?? []).map((c) => [c.id, c.translations]));
   const categoryName = (id: string | null) => {
     if (!id || !categories) return t('settings.menu.uncategorized');
     const resolved = resolveCategoryChain(id, indexCategories(categories as CategoryNode[]));
     if (!resolved) return t('settings.menu.unknownCategory');
-    const parts = [resolved.majorName];
-    if (resolved.middleName) parts.push(resolved.middleName);
-    if (resolved.minorName !== resolved.majorName && resolved.minorName !== resolved.middleName) parts.push(resolved.minorName);
+    const parts = [menuText(resolved.majorName, categoryTranslationsById.get(resolved.majorId))];
+    if (resolved.middleName) parts.push(menuText(resolved.middleName, categoryTranslationsById.get(resolved.middleId ?? '')));
+    if (resolved.minorName !== resolved.majorName && resolved.minorName !== resolved.middleName) {
+      parts.push(menuText(resolved.minorName, categoryTranslationsById.get(resolved.minorId)));
+    }
     return parts.join(' > ');
   };
 
@@ -2140,7 +2177,7 @@ function MenuItemRow({
   onRefresh: () => void;
   onCategoriesChanged: () => void;
 }) {
-  const { t } = useLanguage();
+  const { t, menuText } = useLanguage();
   return (
     <div className="rounded-xl border border-border px-4 py-3">
       <div className="flex items-center justify-between gap-3">
@@ -2156,7 +2193,7 @@ function MenuItemRow({
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <div className={'truncate text-[13px] font-semibold ' + (item.active ? '' : 'text-muted-foreground line-through')}>
-                {item.name}
+                {menuText(item.name, item.translations)}
               </div>
               {!item.active && (
                 <span className="rounded bg-secondary px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
@@ -2383,7 +2420,7 @@ function CategoryChip({
   onRenamed: () => void;
   onDelete: () => void;
 }) {
-  const { t } = useLanguage();
+  const { t, menuText } = useLanguage();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(category.name);
   const [submitting, setSubmitting] = useState(false);
@@ -2424,7 +2461,7 @@ function CategoryChip({
   return (
     <div className="flex items-center gap-1 rounded-full border border-border bg-card py-1 pl-3 pr-1.5">
       <button onClick={() => setEditing(true)} disabled={submitting} className="text-[12.5px] font-semibold">
-        {category.name}
+        {menuText(category.name, category.translations)}
       </button>
       <button
         onClick={onDelete}
@@ -2523,7 +2560,7 @@ function CategoryCascadeSelect({
   onChange: (categoryId: string) => void;
   onCategoriesChanged: () => void;
 }) {
-  const { t } = useLanguage();
+  const { t, menuText } = useLanguage();
   const byId = new Map(categories.map((c) => [c.id, c]));
   const sortFn = (a: PosMenuCategory, b: PosMenuCategory) => a.sort_order - b.sort_order || a.name.localeCompare(b.name);
   const majors = categories.filter((c) => !c.parent_id).sort(sortFn);
@@ -2575,7 +2612,7 @@ function CategoryCascadeSelect({
           </option>
           {majors.map((c) => (
             <option key={c.id} value={c.id}>
-              {c.name}
+              {menuText(c.name, c.translations)}
             </option>
           ))}
         </select>
@@ -2588,7 +2625,7 @@ function CategoryCascadeSelect({
           <option value="">{t('settings.menu.noMiddleCategory')}</option>
           {middleOptions.map((c) => (
             <option key={c.id} value={c.id}>
-              {c.name}
+              {menuText(c.name, c.translations)}
             </option>
           ))}
         </select>
