@@ -87,35 +87,45 @@ import {
   type CreatePrinterInput,
 } from '@/lib/printer-client';
 import type { HandyTableGroup, PaymentMethodConfig, PrinterConfig } from '@/lib/pos-types';
+import { LanguageProvider, useLanguage, STAFF_LANGUAGE_STORAGE_KEY } from './language-context';
+
+// 設定画面の多言語化 (2026-09-03 追加)。この画面は '/pos/layout.tsx' が LanguageProvider を
+// 被せていないので、他の管理画面 (kitchen-screen.tsx 等) と同じく画面側で自前にラップする。
+type TFunc = ReturnType<typeof useLanguage>['t'];
 
 type Tab = 'general' | 'printer' | 'payment' | 'staff' | 'menu' | 'translations' | 'layout' | 'handy' | 'integration';
 
-const NAV: { key: Tab; label: string }[] = [
-  { key: 'general', label: '一般設定' },
-  { key: 'printer', label: 'プリンター設定' },
-  { key: 'payment', label: '決済設定' },
-  { key: 'staff', label: 'スタッフ管理' },
-  { key: 'menu', label: 'メニュー・商品オプション' },
-  { key: 'translations', label: '翻訳' },
-  { key: 'layout', label: 'テーブルレイアウト' },
-  { key: 'handy', label: 'ハンディ表示' },
-  { key: 'integration', label: '連携設定' },
+const NAV: { key: Tab; labelKey: string }[] = [
+  { key: 'general', labelKey: 'settings.nav.general' },
+  { key: 'printer', labelKey: 'settings.nav.printer' },
+  { key: 'payment', labelKey: 'settings.nav.payment' },
+  { key: 'staff', labelKey: 'settings.nav.staff' },
+  { key: 'menu', labelKey: 'settings.nav.menu' },
+  { key: 'translations', labelKey: 'settings.nav.translations' },
+  { key: 'layout', labelKey: 'settings.nav.layout' },
+  { key: 'handy', labelKey: 'settings.nav.handy' },
+  { key: 'integration', labelKey: 'settings.nav.integration' },
 ];
 
-const ROLE_LABEL: Record<PosStaffRole, string> = { owner: 'オーナー', manager: 'マネージャー', staff: 'スタッフ' };
+function roleLabel(t: TFunc, role: PosStaffRole): string {
+  return t(`role.${role}`);
+}
 
 // プリンター設定 (2026-08-31 プリンター実装で追加)。
-const PRINTER_ROLE_LABEL: Record<PrinterConfig['role'], string> = { receipt: 'レシート印刷', kitchen: 'キッチン印刷' };
-const PRINTER_CONNECTION_LABEL: Record<PrinterConfig['connectionType'], string> = {
-  usb_agent: 'USB接続 (ローカルエージェント経由)',
-  lan: 'LAN接続 (IPアドレス指定)',
-  bluetooth: 'Bluetooth接続 (中継PCとペアリング、ローカルエージェント経由)',
-  passprnt: 'Bluetooth接続 (レジ端末に直接ペアリング、PassPRNTアプリ使用・中継機不要)',
-};
+function printerRoleLabel(t: TFunc, role: PrinterConfig['role']): string {
+  return role === 'receipt' ? t('settings.printer.role.receipt') : t('settings.printer.role.kitchen');
+}
+function printerConnectionLabel(t: TFunc, type: PrinterConfig['connectionType']): string {
+  if (type === 'usb_agent') return t('settings.printer.connection.usbAgent');
+  if (type === 'lan') return t('settings.printer.connection.lan');
+  if (type === 'bluetooth') return t('settings.printer.connection.bluetooth');
+  return t('settings.printer.connection.passprnt');
+}
 
 // プリンター追加フォーム。接続方法によって必要な入力 (USBのキュー名 or LANのIP:ポート) が
 // 変わるので、選択に応じて表示を切り替える。
 function AddPrinterForm({ onAdd, disabled }: { onAdd: (input: CreatePrinterInput) => Promise<void>; disabled: boolean }) {
+  const { t } = useLanguage();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
   const [role, setRole] = useState<PrinterConfig['role']>('receipt');
@@ -164,7 +174,7 @@ function AddPrinterForm({ onAdd, disabled }: { onAdd: (input: CreatePrinterInput
         onClick={() => setOpen(true)}
         className="h-10 w-fit rounded-lg border border-dashed border-border px-4 text-[12.5px] font-semibold text-muted-foreground disabled:opacity-60"
       >
-        ＋ プリンターを追加
+        ＋ {t('settings.printer.addPrinter')}
       </button>
     );
   }
@@ -173,42 +183,42 @@ function AddPrinterForm({ onAdd, disabled }: { onAdd: (input: CreatePrinterInput
     <div className="flex flex-col gap-3 rounded-xl border border-dashed border-border p-4">
       <div className="flex gap-3">
         <div className="flex-1">
-          <div className="mb-1 text-[11px] text-muted-foreground">名前</div>
+          <div className="mb-1 text-[11px] text-muted-foreground">{t('settings.printer.name')}</div>
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="レジ横レシートプリンター"
+            placeholder={t('settings.printer.namePlaceholder')}
             className="h-9 w-full rounded-lg border border-border px-3 text-[13px]"
           />
         </div>
         <div>
-          <div className="mb-1 text-[11px] text-muted-foreground">用途</div>
+          <div className="mb-1 text-[11px] text-muted-foreground">{t('settings.printer.role')}</div>
           <select
             value={role}
             onChange={(e) => setRole(e.target.value as PrinterConfig['role'])}
             className="h-9 rounded-lg border border-border px-2 text-[13px]"
           >
-            <option value="receipt">レシート印刷</option>
-            <option value="kitchen">キッチン印刷</option>
+            <option value="receipt">{t('settings.printer.role.receipt')}</option>
+            <option value="kitchen">{t('settings.printer.role.kitchen')}</option>
           </select>
         </div>
       </div>
       <div className="flex gap-3">
         <div>
-          <div className="mb-1 text-[11px] text-muted-foreground">接続方法</div>
+          <div className="mb-1 text-[11px] text-muted-foreground">{t('settings.printer.connectionMethod')}</div>
           <select
             value={connectionType}
             onChange={(e) => setConnectionType(e.target.value as PrinterConfig['connectionType'])}
             className="h-9 rounded-lg border border-border px-2 text-[13px]"
           >
-            <option value="usb_agent">USB接続 (ローカルエージェント経由)</option>
-            <option value="lan">LAN接続 (IPアドレス指定)</option>
-            <option value="passprnt">Bluetooth接続 (レジ端末に直接ペアリング・中継機不要)</option>
-            <option value="bluetooth">Bluetooth接続 (中継PCとペアリング)</option>
+            <option value="usb_agent">{t('settings.printer.connection.usbAgent')}</option>
+            <option value="lan">{t('settings.printer.connection.lan')}</option>
+            <option value="passprnt">{t('settings.printer.connection.passprntShort')}</option>
+            <option value="bluetooth">{t('settings.printer.connection.bluetoothShort')}</option>
           </select>
         </div>
         <div>
-          <div className="mb-1 text-[11px] text-muted-foreground">用紙幅</div>
+          <div className="mb-1 text-[11px] text-muted-foreground">{t('settings.printer.paperWidth')}</div>
           <select
             value={paperWidthMm}
             onChange={(e) => setPaperWidthMm(parseInt(e.target.value, 10))}
@@ -221,9 +231,7 @@ function AddPrinterForm({ onAdd, disabled }: { onAdd: (input: CreatePrinterInput
       </div>
       {connectionType === 'usb_agent' ? (
         <div>
-          <div className="mb-1 text-[11px] text-muted-foreground">
-            エージェント側のプリンターキュー名 (例: macOSの `lpstat -p` で確認できる名前)
-          </div>
+          <div className="mb-1 text-[11px] text-muted-foreground">{t('settings.printer.usbQueueNameLabel')}</div>
           <input
             value={deviceName}
             onChange={(e) => setDeviceName(e.target.value)}
@@ -233,9 +241,7 @@ function AddPrinterForm({ onAdd, disabled }: { onAdd: (input: CreatePrinterInput
         </div>
       ) : connectionType === 'bluetooth' ? (
         <div>
-          <div className="mb-1 text-[11px] text-muted-foreground">
-            ペアリング後にOSが割り当てるデバイスパス (例: macOSの `/dev/tty.TSP650II`、Windowsの `COM5`。print-agent/README.md 参照)
-          </div>
+          <div className="mb-1 text-[11px] text-muted-foreground">{t('settings.printer.bluetoothDevicePathLabel')}</div>
           <input
             value={deviceName}
             onChange={(e) => setDeviceName(e.target.value)}
@@ -245,15 +251,12 @@ function AddPrinterForm({ onAdd, disabled }: { onAdd: (input: CreatePrinterInput
         </div>
       ) : connectionType === 'passprnt' ? (
         <div className="rounded-lg bg-muted/50 p-3 text-[11.5px] leading-relaxed text-muted-foreground">
-          追加設定は不要です。このプリンターを使う端末 (レジ端末) 自体に、App Store /
-          Google Playから無料アプリ「PassPRNT」をインストールし、端末のBluetooth設定でプリンターと
-          直接ペアリングしてください。会計・テスト印刷時、その端末のブラウザがPassPRNTを自動的に
-          呼び出して印刷します。別に中継用のPC等を用意する必要はありません。
+          {t('settings.printer.passprntInfo')}
         </div>
       ) : (
         <div className="flex gap-3">
           <div className="flex-1">
-            <div className="mb-1 text-[11px] text-muted-foreground">IPアドレス</div>
+            <div className="mb-1 text-[11px] text-muted-foreground">{t('settings.printer.ipAddress')}</div>
             <input
               value={lanIp}
               onChange={(e) => setLanIp(e.target.value)}
@@ -262,7 +265,7 @@ function AddPrinterForm({ onAdd, disabled }: { onAdd: (input: CreatePrinterInput
             />
           </div>
           <div>
-            <div className="mb-1 text-[11px] text-muted-foreground">ポート</div>
+            <div className="mb-1 text-[11px] text-muted-foreground">{t('settings.printer.port')}</div>
             <input
               value={lanPort}
               onChange={(e) => setLanPort(e.target.value)}
@@ -278,14 +281,14 @@ function AddPrinterForm({ onAdd, disabled }: { onAdd: (input: CreatePrinterInput
           disabled={submitting || !name.trim()}
           className="h-9 rounded-lg bg-primary px-4 text-[12.5px] font-semibold text-primary-foreground disabled:opacity-60"
         >
-          {submitting ? '追加中…' : '追加する'}
+          {submitting ? t('settings.printer.addingEllipsis') : t('settings.printer.addSubmit')}
         </button>
         <button
           type="button"
           onClick={reset}
           className="h-9 rounded-lg border border-border px-4 text-[12.5px] font-semibold text-muted-foreground"
         >
-          キャンセル
+          {t('common.cancel')}
         </button>
       </div>
     </div>
@@ -297,6 +300,7 @@ function AddPrinterForm({ onAdd, disabled }: { onAdd: (input: CreatePrinterInput
 // レシートや領収書にロゴ印刷できるようにしたい」)。用紙幅は各プリンターの登録内容
 // (paperWidthMm) がそのまま使われるので、ここでは店舗共通のロゴ・文言だけを扱う。
 function ReceiptFormatSection({ canManageSettings }: { canManageSettings: boolean }) {
+  const { t } = useLanguage();
   const [headerText, setHeaderText] = useState('');
   const [footerText, setFooterText] = useState('');
   const [loaded, setLoaded] = useState(false);
@@ -318,13 +322,13 @@ function ReceiptFormatSection({ canManageSettings }: { canManageSettings: boolea
         setLogoPreview(logo);
         setLoaded(true);
       } catch (err) {
-        if (!cancelled) setError(err instanceof PosPrinterApiError ? err.message : '印字設定の取得に失敗しました');
+        if (!cancelled) setError(err instanceof PosPrinterApiError ? err.message : t('settings.receipt.fetchError'));
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [t]);
 
   async function handleSaveText() {
     setSaving(true);
@@ -334,7 +338,7 @@ function ReceiptFormatSection({ canManageSettings }: { canManageSettings: boolea
       await updateReceiptFormat({ headerText, footerText });
       setSaved(true);
     } catch (err) {
-      setError(err instanceof PosPrinterApiError ? err.message : '保存に失敗しました');
+      setError(err instanceof PosPrinterApiError ? err.message : t('common.saveError'));
     } finally {
       setSaving(false);
     }
@@ -345,7 +349,7 @@ function ReceiptFormatSection({ canManageSettings }: { canManageSettings: boolea
     e.target.value = '';
     if (!file) return;
     if (file.type !== 'image/png') {
-      setLogoError('PNG形式の画像を選んでください');
+      setLogoError(t('settings.receipt.pngOnly'));
       return;
     }
     setLogoBusy(true);
@@ -358,13 +362,13 @@ function ReceiptFormatSection({ canManageSettings }: { canManageSettings: boolea
         await uploadReceiptLogo(base64);
         setLogoPreview(base64);
       } catch (err) {
-        setLogoError(err instanceof PosPrinterApiError ? err.message : 'アップロードに失敗しました');
+        setLogoError(err instanceof PosPrinterApiError ? err.message : t('settings.receipt.uploadError'));
       } finally {
         setLogoBusy(false);
       }
     };
     reader.onerror = () => {
-      setLogoError('画像の読み込みに失敗しました');
+      setLogoError(t('settings.receipt.imageLoadError'));
       setLogoBusy(false);
     };
     reader.readAsDataURL(file);
@@ -377,7 +381,7 @@ function ReceiptFormatSection({ canManageSettings }: { canManageSettings: boolea
       await deleteReceiptLogo();
       setLogoPreview(null);
     } catch (err) {
-      setLogoError(err instanceof PosPrinterApiError ? err.message : '削除に失敗しました');
+      setLogoError(err instanceof PosPrinterApiError ? err.message : t('common.deleteError'));
     } finally {
       setLogoBusy(false);
     }
@@ -386,26 +390,23 @@ function ReceiptFormatSection({ canManageSettings }: { canManageSettings: boolea
   if (!loaded) {
     return (
       <div className="rounded-xl border border-border p-3.5 text-[12px] text-muted-foreground">
-        {error ?? '印字設定を読み込み中…'}
+        {error ?? t('settings.receipt.loadingEllipsis')}
       </div>
     );
   }
 
   return (
     <div className="rounded-xl border border-border p-3.5">
-      <div className="mb-2.5 text-[13px] font-semibold">レシート・領収書の印字設定</div>
-      <div className="mb-3 text-[11px] text-muted-foreground">
-        用紙幅は下の各プリンターの登録内容がそのまま使われます。ここではロゴ・ヘッダー/フッター文言など、
-        店舗共通の内容を設定します (厨房伝票にはロゴ・文言は印字されません)。
-      </div>
+      <div className="mb-2.5 text-[13px] font-semibold">{t('settings.receipt.title')}</div>
+      <div className="mb-3 text-[11px] text-muted-foreground">{t('settings.receipt.intro')}</div>
 
       <div className="mb-3.5">
-        <div className="mb-1.5 text-[12px] font-semibold">ロゴ画像 (PNG)</div>
+        <div className="mb-1.5 text-[12px] font-semibold">{t('settings.receipt.logoHeading')}</div>
         {logoPreview ? (
           <div className="flex items-center gap-3">
             <img
               src={`data:image/png;base64,${logoPreview}`}
-              alt="レシートロゴ"
+              alt={t('settings.receipt.logoAlt')}
               className="h-14 w-auto rounded border border-border bg-white p-1"
             />
             <button
@@ -414,12 +415,12 @@ function ReceiptFormatSection({ canManageSettings }: { canManageSettings: boolea
               disabled={!canManageSettings || logoBusy}
               className="h-8 rounded-md border border-border px-3 text-[11.5px] font-semibold text-destructive disabled:opacity-60"
             >
-              {logoBusy ? '処理中…' : 'ロゴを削除'}
+              {logoBusy ? t('common.processing') : t('settings.receipt.deleteLogo')}
             </button>
           </div>
         ) : (
           <label className="inline-flex h-9 cursor-pointer items-center rounded-md border border-border px-3 text-[12px] font-semibold">
-            {logoBusy ? 'アップロード中…' : 'PNG画像を選択してアップロード'}
+            {logoBusy ? t('settings.receipt.uploadingEllipsis') : t('settings.receipt.selectPng')}
             <input
               type="file"
               accept="image/png"
@@ -430,12 +431,10 @@ function ReceiptFormatSection({ canManageSettings }: { canManageSettings: boolea
           </label>
         )}
         {logoError && <div className="mt-1.5 text-[11px] text-destructive">{logoError}</div>}
-        <div className="mt-1.5 text-[11px] text-muted-foreground">
-          レシート・領収書の先頭に印刷されます。300KB以下のPNGを推奨します。
-        </div>
+        <div className="mt-1.5 text-[11px] text-muted-foreground">{t('settings.receipt.logoDesc')}</div>
       </div>
 
-      <Field label="ヘッダー文言 (店名の下に印字。住所・電話番号など、複数行可)">
+      <Field label={t('settings.receipt.headerLabel')}>
         <textarea
           value={headerText}
           disabled={!canManageSettings}
@@ -447,7 +446,7 @@ function ReceiptFormatSection({ canManageSettings }: { canManageSettings: boolea
           className="w-full rounded-lg border border-border px-3 py-2 text-[12.5px] disabled:opacity-60"
         />
       </Field>
-      <Field label="フッター文言 (レシート下部に印字。複数行可)">
+      <Field label={t('settings.receipt.footerLabel')}>
         <textarea
           value={footerText}
           disabled={!canManageSettings}
@@ -469,7 +468,7 @@ function ReceiptFormatSection({ canManageSettings }: { canManageSettings: boolea
           (saved ? 'bg-emerald-100 text-emerald-600' : 'bg-primary text-primary-foreground')
         }
       >
-        {saving ? '保存中…' : saved ? '保存しました ✓' : '文言を保存'}
+        {saving ? t('common.saving') : saved ? t('settings.receipt.saved') : t('settings.receipt.saveText')}
       </button>
     </div>
   );
@@ -480,6 +479,7 @@ function ReceiptFormatSection({ canManageSettings }: { canManageSettings: boolea
 // 未接続で使われていなかった)、店舗が自由に名前を付けて決済方法を追加・並び替え・無効化できる
 // ようにした。会計画面 (checkout-screen.tsx) はここで有効化した決済方法だけを表示する。
 function PaymentMethodsSection({ canManageSettings }: { canManageSettings: boolean }) {
+  const { t } = useLanguage();
   const [methods, setMethods] = useState<PaymentMethodConfig[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -498,13 +498,13 @@ function PaymentMethodsSection({ canManageSettings }: { canManageSettings: boole
           setLoaded(true);
         }
       } catch (err) {
-        if (!cancelled) setError(err instanceof PosPrinterApiError ? err.message : '決済方法の取得に失敗しました');
+        if (!cancelled) setError(err instanceof PosPrinterApiError ? err.message : t('settings.payment.fetchError'));
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [t]);
 
   async function handleAdd() {
     const name = newName.trim();
@@ -517,7 +517,7 @@ function PaymentMethodsSection({ canManageSettings }: { canManageSettings: boole
       setNewName('');
       setNewIsCash(false);
     } catch (err) {
-      setError(err instanceof PosPrinterApiError ? err.message : '追加に失敗しました');
+      setError(err instanceof PosPrinterApiError ? err.message : t('common.addError'));
     } finally {
       setAdding(false);
     }
@@ -530,7 +530,7 @@ function PaymentMethodsSection({ canManageSettings }: { canManageSettings: boole
       const updated = await updatePaymentMethod(m.id, { enabled: !m.enabled });
       setMethods((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
     } catch (err) {
-      setError(err instanceof PosPrinterApiError ? err.message : '更新に失敗しました');
+      setError(err instanceof PosPrinterApiError ? err.message : t('common.updateError'));
     } finally {
       setBusyId(null);
     }
@@ -543,7 +543,7 @@ function PaymentMethodsSection({ canManageSettings }: { canManageSettings: boole
       await deletePaymentMethod(id);
       setMethods((prev) => prev.filter((x) => x.id !== id));
     } catch (err) {
-      setError(err instanceof PosPrinterApiError ? err.message : '削除に失敗しました');
+      setError(err instanceof PosPrinterApiError ? err.message : t('common.deleteError'));
     } finally {
       setBusyId(null);
     }
@@ -568,7 +568,7 @@ function PaymentMethodsSection({ canManageSettings }: { canManageSettings: boole
           .sort((x, y) => x.sortOrder - y.sortOrder),
       );
     } catch (err) {
-      setError(err instanceof PosPrinterApiError ? err.message : '並び替えに失敗しました');
+      setError(err instanceof PosPrinterApiError ? err.message : t('settings.payment.reorderError'));
     } finally {
       setBusyId(null);
     }
@@ -577,7 +577,7 @@ function PaymentMethodsSection({ canManageSettings }: { canManageSettings: boole
   if (!loaded) {
     return (
       <div className="rounded-xl border border-border p-3 text-[12.5px] text-muted-foreground">
-        {error ?? '決済方法を読み込み中…'}
+        {error ?? t('settings.payment.loadingEllipsis')}
       </div>
     );
   }
@@ -612,7 +612,7 @@ function PaymentMethodsSection({ canManageSettings }: { canManageSettings: boole
                   {m.name}
                   {m.isCash && (
                     <span className="ml-2 rounded-full bg-secondary px-2 py-0.5 text-[10.5px] font-semibold text-muted-foreground">
-                      現金 (お釣り計算あり)
+                      {t('settings.payment.cashBadge')}
                     </span>
                   )}
                 </div>
@@ -629,7 +629,7 @@ function PaymentMethodsSection({ canManageSettings }: { canManageSettings: boole
                 }
               >
                 <span className={'inline-block h-2 w-2 rounded-full ' + (m.enabled ? 'bg-emerald-500' : 'bg-border')} />
-                {m.enabled ? '有効' : '無効'}
+                {m.enabled ? t('settings.payment.enabled') : t('settings.payment.disabled')}
               </button>
               <button
                 type="button"
@@ -637,21 +637,21 @@ function PaymentMethodsSection({ canManageSettings }: { canManageSettings: boole
                 onClick={() => handleDelete(m.id)}
                 className="h-[34px] rounded-lg border border-border px-3 text-[12.5px] font-semibold text-destructive disabled:opacity-60"
               >
-                削除
+                {t('common.delete')}
               </button>
             </div>
           </div>
         ))}
-        {methods.length === 0 && <div className="text-[12.5px] text-muted-foreground">まだ決済方法が登録されていません。</div>}
+        {methods.length === 0 && <div className="text-[12.5px] text-muted-foreground">{t('settings.payment.empty')}</div>}
       </div>
 
       <div className="rounded-xl border border-dashed border-border p-3.5">
-        <div className="mb-2 text-[12.5px] font-semibold">決済方法を追加</div>
+        <div className="mb-2 text-[12.5px] font-semibold">{t('settings.payment.addHeading')}</div>
         <div className="flex flex-wrap items-center gap-2.5">
           <input
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
-            placeholder="例: ABA Pay, Wing, カード"
+            placeholder={t('settings.payment.namePlaceholder')}
             disabled={!canManageSettings}
             className="h-9 w-56 rounded-lg border border-border px-3 text-[13px] disabled:opacity-60"
           />
@@ -662,7 +662,7 @@ function PaymentMethodsSection({ canManageSettings }: { canManageSettings: boole
               onChange={(e) => setNewIsCash(e.target.checked)}
               disabled={!canManageSettings}
             />
-            現金として扱う (預り金額入力・お釣り自動計算を出す)
+            {t('settings.payment.cashCheckboxLabel')}
           </label>
           <button
             type="button"
@@ -670,7 +670,7 @@ function PaymentMethodsSection({ canManageSettings }: { canManageSettings: boole
             disabled={!canManageSettings || adding || !newName.trim()}
             className="h-9 rounded-lg bg-primary px-4 text-[12.5px] font-semibold text-primary-foreground disabled:opacity-60"
           >
-            {adding ? '追加中…' : '追加する'}
+            {adding ? t('settings.printer.addingEllipsis') : t('settings.printer.addSubmit')}
           </button>
         </div>
       </div>
@@ -709,6 +709,7 @@ function HandyGroupCard({
   onRemoveTable: (code: string) => void;
   onMoveTable: (tableIndex: number, direction: -1 | 1) => void;
 }) {
+  const { t } = useLanguage();
   const [pendingCode, setPendingCode] = useState('');
 
   return (
@@ -745,7 +746,7 @@ function HandyGroupCard({
           onClick={onDelete}
           className="h-9 flex-shrink-0 rounded-lg border border-border px-3 text-[12px] font-semibold text-destructive disabled:opacity-60"
         >
-          グループ削除
+          {t('settings.handy.deleteGroup')}
         </button>
       </div>
 
@@ -753,12 +754,12 @@ function HandyGroupCard({
         {group.tableCodes.map((code, i) => (
           <div key={code} className="flex items-center gap-1 rounded-full border border-border bg-secondary/60 py-1 pl-3 pr-1.5 text-[12px]">
             <span className="font-semibold">{code}</span>
-            <span className="text-muted-foreground">({seatsByCode.get(code) ?? '?'}席)</span>
+            <span className="text-muted-foreground">({t('settings.handy.seatsCount', { n: seatsByCode.get(code) ?? '?' })})</span>
             <button
               type="button"
               disabled={!canManageSettings || i === 0}
               onClick={() => onMoveTable(i, -1)}
-              title="前に移動"
+              title={t('settings.handy.moveBefore')}
               className="px-0.5 text-[10px] text-muted-foreground disabled:opacity-30"
             >
               ◀
@@ -767,7 +768,7 @@ function HandyGroupCard({
               type="button"
               disabled={!canManageSettings || i === group.tableCodes.length - 1}
               onClick={() => onMoveTable(i, 1)}
-              title="後ろに移動"
+              title={t('settings.handy.moveAfter')}
               className="px-0.5 text-[10px] text-muted-foreground disabled:opacity-30"
             >
               ▶
@@ -776,14 +777,14 @@ function HandyGroupCard({
               type="button"
               disabled={!canManageSettings}
               onClick={() => onRemoveTable(code)}
-              title="このグループから外す"
+              title={t('settings.handy.removeFromGroup')}
               className="ml-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-secondary text-[11px] disabled:opacity-40"
             >
               ×
             </button>
           </div>
         ))}
-        {group.tableCodes.length === 0 && <div className="text-[12px] text-muted-foreground">まだ卓が入っていません。</div>}
+        {group.tableCodes.length === 0 && <div className="text-[12px] text-muted-foreground">{t('settings.handy.noTablesYet')}</div>}
       </div>
 
       {canManageSettings && (
@@ -793,10 +794,10 @@ function HandyGroupCard({
             onChange={(e) => setPendingCode(e.target.value)}
             className="h-9 rounded-lg border border-border px-2.5 text-[12.5px]"
           >
-            <option value="">卓を選択…</option>
+            <option value="">{t('settings.handy.selectTablePlaceholder')}</option>
             {availableCodes.map((code) => (
               <option key={code} value={code}>
-                {code} ({seatsByCode.get(code) ?? '?'}席)
+                {code} ({t('settings.handy.seatsCount', { n: seatsByCode.get(code) ?? '?' })})
               </option>
             ))}
           </select>
@@ -810,7 +811,7 @@ function HandyGroupCard({
             }}
             className="h-9 rounded-lg border border-border px-3 text-[12.5px] font-semibold disabled:opacity-50"
           >
-            このグループに追加
+            {t('settings.handy.addToGroup')}
           </button>
         </div>
       )}
@@ -819,6 +820,7 @@ function HandyGroupCard({
 }
 
 function HandyGroupsSection({ canManageSettings }: { canManageSettings: boolean }) {
+  const { t } = useLanguage();
   const [allTables, setAllTables] = useState<{ code: string; seats: number }[]>([]);
   const [groups, setGroups] = useState<HandyTableGroup[]>([]);
   const [savedSnapshot, setSavedSnapshot] = useState('[]');
@@ -835,24 +837,24 @@ function HandyGroupsSection({ canManageSettings }: { canManageSettings: boolean 
         const [layout, handyGroups] = await Promise.all([listTableLayout(), getHandyTableGroups()]);
         if (cancelled) return;
         const tables = (layout.items as TableLayoutItemRecord[])
-          .filter((t) => t.kind === 'table')
-          .map((t) => ({ code: t.table_code, seats: t.seats }));
+          .filter((tli) => tli.kind === 'table')
+          .map((tli) => ({ code: tli.table_code, seats: tli.seats }));
         setAllTables(tables);
         setGroups(handyGroups.groups);
         setSavedSnapshot(JSON.stringify(handyGroups.groups));
         setLoaded(true);
       } catch (err) {
-        if (!cancelled) setLoadError(err instanceof PosSettingsApiError ? err.message : '卓グループの取得に失敗しました');
+        if (!cancelled) setLoadError(err instanceof PosSettingsApiError ? err.message : t('settings.handy.fetchError'));
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [t]);
 
-  const seatsByCode = new Map(allTables.map((t) => [t.code, t.seats]));
+  const seatsByCode = new Map(allTables.map((tbl) => [tbl.code, tbl.seats]));
   const assignedCodes = new Set(groups.flatMap((g) => g.tableCodes));
-  const unassignedTables = allTables.filter((t) => !assignedCodes.has(t.code));
+  const unassignedTables = allTables.filter((tbl) => !assignedCodes.has(tbl.code));
   const dirty = JSON.stringify(groups) !== savedSnapshot;
 
   function updateGroup(id: string, patch: (g: HandyTableGroup) => HandyTableGroup) {
@@ -862,7 +864,7 @@ function HandyGroupsSection({ canManageSettings }: { canManageSettings: boolean 
 
   function handleAddGroup() {
     const id = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `g_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    setGroups((prev) => [...prev, { id, name: '新しいグループ', tableCodes: [] }]);
+    setGroups((prev) => [...prev, { id, name: t('settings.handy.newGroupDefaultName'), tableCodes: [] }]);
     setSavedJustNow(false);
   }
 
@@ -886,7 +888,7 @@ function HandyGroupsSection({ canManageSettings }: { canManageSettings: boolean 
       setSavedSnapshot(JSON.stringify(saved));
       setSavedJustNow(true);
     } catch (err) {
-      setSaveError(err instanceof PosSettingsApiError ? err.message : '保存に失敗しました');
+      setSaveError(err instanceof PosSettingsApiError ? err.message : t('common.saveError'));
     } finally {
       setSaving(false);
     }
@@ -895,7 +897,7 @@ function HandyGroupsSection({ canManageSettings }: { canManageSettings: boolean 
   if (!loaded) {
     return (
       <div className="rounded-xl border border-border p-3 text-[12.5px] text-muted-foreground">
-        {loadError ?? '読み込み中…'}
+        {loadError ?? t('common.loadingEllipsis')}
       </div>
     );
   }
@@ -908,7 +910,7 @@ function HandyGroupsSection({ canManageSettings }: { canManageSettings: boolean 
           group={g}
           index={i}
           total={groups.length}
-          availableCodes={allTables.filter((t) => !assignedCodes.has(t.code) || g.tableCodes.includes(t.code)).map((t) => t.code)}
+          availableCodes={allTables.filter((tbl) => !assignedCodes.has(tbl.code) || g.tableCodes.includes(tbl.code)).map((tbl) => tbl.code)}
           seatsByCode={seatsByCode}
           canManageSettings={canManageSettings}
           onRename={(name) => updateGroup(g.id, (x) => ({ ...x, name }))}
@@ -933,7 +935,7 @@ function HandyGroupsSection({ canManageSettings }: { canManageSettings: boolean 
 
       {groups.length === 0 && (
         <div className="rounded-xl border border-dashed border-border p-3.5 text-[12.5px] text-muted-foreground">
-          まだグループがありません。グループを作らない場合、ハンディ注文画面では卓番号順 (C1, C2, …, T1, T2, … のように英字→数字の順) に表示されます。
+          {t('settings.handy.noGroupsInfo')}
         </div>
       )}
 
@@ -943,22 +945,22 @@ function HandyGroupsSection({ canManageSettings }: { canManageSettings: boolean 
           onClick={handleAddGroup}
           className="h-10 self-start rounded-lg border border-dashed border-border px-4 text-[12.5px] font-semibold"
         >
-          + グループを追加
+          + {t('settings.handy.addGroupButton')}
         </button>
       )}
 
       <div className="rounded-xl border border-border p-3.5">
-        <div className="mb-1.5 text-[12.5px] font-semibold">未分類の卓 ({unassignedTables.length})</div>
+        <div className="mb-1.5 text-[12.5px] font-semibold">
+          {t('settings.handy.unassignedHeading', { n: unassignedTables.length })}
+        </div>
         <div className="text-[11.5px] text-muted-foreground">
-          {unassignedTables.length === 0
-            ? 'すべての卓がいずれかのグループに入っています。'
-            : 'ハンディ注文画面では、これらの卓が「未分類」として末尾にまとめて表示されます。'}
+          {unassignedTables.length === 0 ? t('settings.handy.allAssigned') : t('settings.handy.unassignedDesc')}
         </div>
         {unassignedTables.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1.5">
-            {unassignedTables.map((t) => (
-              <span key={t.code} className="rounded-full bg-secondary px-2.5 py-1 text-[11.5px] font-semibold">
-                {t.code}
+            {unassignedTables.map((tbl) => (
+              <span key={tbl.code} className="rounded-full bg-secondary px-2.5 py-1 text-[11.5px] font-semibold">
+                {tbl.code}
               </span>
             ))}
           </div>
@@ -973,10 +975,10 @@ function HandyGroupsSection({ canManageSettings }: { canManageSettings: boolean 
           onClick={handleSave}
           className="h-10 rounded-lg bg-primary px-5 text-[13px] font-bold text-primary-foreground disabled:opacity-50"
         >
-          {saving ? '保存中…' : '保存'}
+          {saving ? t('common.saving') : t('common.save')}
         </button>
-        {dirty && !saving && <span className="text-[11.5px] text-amber-700">未保存の変更があります</span>}
-        {savedJustNow && !dirty && <span className="text-[11.5px] text-emerald-700">保存しました</span>}
+        {dirty && !saving && <span className="text-[11.5px] text-amber-700">{t('settings.handy.unsavedChanges')}</span>}
+        {savedJustNow && !dirty && <span className="text-[11.5px] text-emerald-700">{t('settings.handy.savedNotice')}</span>}
       </div>
     </div>
   );
@@ -987,6 +989,15 @@ function HandyGroupsSection({ canManageSettings }: { canManageSettings: boolean 
 // Source of Truth。POS ネイティブ店舗 (authMode 'pos_native') は /api/settings/general
 // (pos.stores.settings) に保存する。既存の dine 連携動作は変えない。
 export function SettingsScreen() {
+  return (
+    <LanguageProvider storageKey={STAFF_LANGUAGE_STORAGE_KEY} defaultLang="ja">
+      <SettingsScreenInner />
+    </LanguageProvider>
+  );
+}
+
+function SettingsScreenInner() {
+  const { t } = useLanguage();
   const router = useRouter();
   const me = useStaff();
   const isPosNative = me.authMode === 'pos_native';
@@ -1027,30 +1038,30 @@ export function SettingsScreen() {
     let cancelled = false;
     (async () => {
       try {
-        const [p, t] = await Promise.all([listPrinters(), getPrintAgentToken()]);
+        const [p, agentTok] = await Promise.all([listPrinters(), getPrintAgentToken()]);
         if (!cancelled) {
           setPrinters(p);
-          setAgentToken(t);
+          setAgentToken(agentTok);
           setPrintersLoaded(true);
         }
       } catch (err) {
         if (!cancelled) {
-          setPrinterError(err instanceof PosPrinterApiError ? err.message : 'プリンター設定の取得に失敗しました');
+          setPrinterError(err instanceof PosPrinterApiError ? err.message : t('settings.printer.fetchError'));
         }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [isPosNative, tab, printersLoaded]);
+  }, [isPosNative, tab, printersLoaded, t]);
 
   async function handleRegenerateToken() {
     setTokenBusy(true);
     try {
-      const t = await regeneratePrintAgentToken();
-      setAgentToken(t);
+      const newToken = await regeneratePrintAgentToken();
+      setAgentToken(newToken);
     } catch (err) {
-      setPrinterError(err instanceof PosPrinterApiError ? err.message : 'トークンの再発行に失敗しました');
+      setPrinterError(err instanceof PosPrinterApiError ? err.message : t('settings.printer.reissueError'));
     } finally {
       setTokenBusy(false);
     }
@@ -1062,7 +1073,7 @@ export function SettingsScreen() {
       const p = await createPrinter(input);
       setPrinters((prev) => [...prev, p]);
     } catch (err) {
-      setPrinterError(err instanceof PosPrinterApiError ? err.message : 'プリンターの追加に失敗しました');
+      setPrinterError(err instanceof PosPrinterApiError ? err.message : t('settings.printer.addError'));
     }
   }
 
@@ -1072,7 +1083,7 @@ export function SettingsScreen() {
       const updated = await updatePrinter(p.id, { enabled: !p.enabled });
       setPrinters((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
     } catch (err) {
-      setPrinterError(err instanceof PosPrinterApiError ? err.message : '更新に失敗しました');
+      setPrinterError(err instanceof PosPrinterApiError ? err.message : t('common.updateError'));
     }
   }
 
@@ -1082,7 +1093,7 @@ export function SettingsScreen() {
       await deletePrinter(id);
       setPrinters((prev) => prev.filter((p) => p.id !== id));
     } catch (err) {
-      setPrinterError(err instanceof PosPrinterApiError ? err.message : '削除に失敗しました');
+      setPrinterError(err instanceof PosPrinterApiError ? err.message : t('common.deleteError'));
     }
   }
 
@@ -1094,7 +1105,7 @@ export function SettingsScreen() {
       await testPrint(id);
       setTestedId(id);
     } catch (err) {
-      setPrinterError(err instanceof PosPrinterApiError ? err.message : 'テスト印刷の送信に失敗しました');
+      setPrinterError(err instanceof PosPrinterApiError ? err.message : t('settings.printer.testPrintSendError'));
     } finally {
       setTestingId(null);
     }
@@ -1148,7 +1159,7 @@ export function SettingsScreen() {
       setSaved(true);
     } catch (err) {
       const message =
-        err instanceof PosSettingsApiError || err instanceof PosApiError ? err.message : '保存に失敗しました';
+        err instanceof PosSettingsApiError || err instanceof PosApiError ? err.message : t('common.saveError');
       setSaveError(message);
     } finally {
       setSaving(false);
@@ -1163,11 +1174,11 @@ export function SettingsScreen() {
             onClick={() => router.push('/pos')}
             className="flex h-9 items-center gap-1 rounded-lg px-2.5 text-[12.5px] font-semibold text-muted-foreground hover:bg-secondary"
           >
-            ← 戻る
+            ← {t('settings.header.back')}
           </button>
           <div>
-            <div className="text-base font-bold">設定</div>
-            <div className="text-xs text-muted-foreground">店舗の各種設定を管理します</div>
+            <div className="text-base font-bold">{t('settings.header.title')}</div>
+            <div className="text-xs text-muted-foreground">{t('settings.header.subtitle')}</div>
           </div>
         </div>
         <div className="flex items-center gap-2.5">
@@ -1181,7 +1192,7 @@ export function SettingsScreen() {
                 (saved ? 'bg-emerald-100 text-emerald-600' : 'bg-primary text-primary-foreground')
               }
             >
-              {saving ? '保存中…' : saved ? '保存しました ✓' : '保存'}
+              {saving ? t('common.saving') : saved ? t('settings.receipt.saved') : t('common.save')}
             </button>
           )}
         </div>
@@ -1198,7 +1209,7 @@ export function SettingsScreen() {
                 (tab === n.key ? 'bg-secondary text-foreground' : 'text-muted-foreground')
               }
             >
-              {n.label}
+              {t(n.labelKey)}
             </button>
           ))}
         </div>
@@ -1206,13 +1217,13 @@ export function SettingsScreen() {
         <div className="flex-1 overflow-auto px-8 py-6">
           {tab === 'general' && (
             <div className="flex max-w-[520px] flex-col gap-5">
-              <div className="text-[15px] font-bold">一般設定</div>
+              <div className="text-[15px] font-bold">{t('settings.nav.general')}</div>
               {!canManageSettings && (
                 <div className="rounded-xl border border-border p-3 text-[12.5px] text-muted-foreground">
-                  一般設定の変更には manager 以上の権限が必要です。
+                  {t('settings.general.managerRequired')}
                 </div>
               )}
-              <Field label="VAT率 (%)">
+              <Field label={t('settings.general.vatRateLabel')}>
                 <input
                   value={settings.vatRate}
                   disabled={!canManageSettings}
@@ -1221,7 +1232,7 @@ export function SettingsScreen() {
                 />
               </Field>
               {isPosNative && (
-                <Field label="VATの扱い">
+                <Field label={t('settings.general.vatHandlingLabel')}>
                   <div className="flex w-fit gap-1.5 rounded-lg bg-secondary p-1">
                     <button
                       type="button"
@@ -1232,7 +1243,7 @@ export function SettingsScreen() {
                         (!settings.vatInclusive ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground')
                       }
                     >
-                      税別 (外税)
+                      {t('settings.general.vatExclusive')}
                     </button>
                     <button
                       type="button"
@@ -1243,15 +1254,13 @@ export function SettingsScreen() {
                         (settings.vatInclusive ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground')
                       }
                     >
-                      税込み (内税)
+                      {t('settings.general.vatInclusiveOption')}
                     </button>
                   </div>
-                  <div className="mt-1.5 text-[11px] text-muted-foreground">
-                    税別: メニュー価格にVATを上乗せして合計を計算します。税込み: メニュー価格に既にVATが含まれているものとして扱い、VAT額は内訳表示のみで合計には加算しません(サービス料は税別・税込みどちらでも合計に加算されます)。
-                  </div>
+                  <div className="mt-1.5 text-[11px] text-muted-foreground">{t('settings.general.vatHandlingDesc')}</div>
                 </Field>
               )}
-              <Field label="サービス料率 (%)">
+              <Field label={t('settings.general.serviceRateLabel')}>
                 <input
                   value={settings.serviceRate}
                   disabled={!canManageSettings}
@@ -1259,20 +1268,18 @@ export function SettingsScreen() {
                   className="h-10 w-40 rounded-lg border border-border px-3 text-[13.5px] disabled:opacity-60"
                 />
               </Field>
-              <Field label="参考為替レート (1 USD = ? KHR)">
+              <Field label={t('settings.general.khrRateLabel')}>
                 <input
                   value={settings.khrRate}
                   disabled={!canManageSettings}
                   onChange={(e) => update('khrRate', parseInt(e.target.value, 10) || 0)}
                   className="h-10 w-40 rounded-lg border border-border px-3 text-[13.5px] disabled:opacity-60"
                 />
-                <div className="mt-1.5 text-[11px] text-muted-foreground">
-                  レジ締め・会計画面のKHR自動計算に使用されます。日次で更新してください。
-                </div>
+                <div className="mt-1.5 text-[11px] text-muted-foreground">{t('settings.general.khrRateDesc')}</div>
               </Field>
 
               {isPosNative && (
-                <Field label="レジ画面のメニュー写真">
+                <Field label={t('settings.general.menuImageStyleLabel')}>
                   <div className="flex w-fit gap-1.5 rounded-lg bg-secondary p-1">
                     <button
                       type="button"
@@ -1283,7 +1290,7 @@ export function SettingsScreen() {
                         (settings.menuImageStyle !== 'full' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground')
                       }
                     >
-                      小さめ (一覧性重視)
+                      {t('settings.general.menuImageStyleCompact')}
                     </button>
                     <button
                       type="button"
@@ -1294,17 +1301,15 @@ export function SettingsScreen() {
                         (settings.menuImageStyle === 'full' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground')
                       }
                     >
-                      商品全体を表示
+                      {t('settings.general.menuImageStyleFull')}
                     </button>
                   </div>
-                  <div className="mt-1.5 text-[11px] text-muted-foreground">
-                    小さめ: 従来通りコンパクトに表示 (商品を切り取って詰めるため画像が見切れることがあります)。商品全体を表示: 写真を切り取らず全体が見えるように大きめに表示します (商品数が多いと縦スクロールが増えます)。
-                  </div>
+                  <div className="mt-1.5 text-[11px] text-muted-foreground">{t('settings.general.menuImageStyleDesc')}</div>
                 </Field>
               )}
 
               {isPosNative && (
-                <Field label="テーマカラー">
+                <Field label={t('settings.general.themeColorLabel')}>
                   <div className="flex items-center gap-2.5">
                     <input
                       type="color"
@@ -1313,7 +1318,9 @@ export function SettingsScreen() {
                       onChange={(e) => update('themeColor', e.target.value)}
                       className="h-10 w-14 cursor-pointer rounded-lg border border-border p-1 disabled:opacity-60"
                     />
-                    <span className="text-[12.5px] text-muted-foreground">{settings.themeColor ?? 'デフォルト (未設定)'}</span>
+                    <span className="text-[12.5px] text-muted-foreground">
+                      {settings.themeColor ?? t('settings.general.themeColorDefault')}
+                    </span>
                     {settings.themeColor && (
                       <button
                         type="button"
@@ -1321,33 +1328,29 @@ export function SettingsScreen() {
                         onClick={() => update('themeColor', null)}
                         className="h-8 rounded-lg border border-border px-3 text-[11.5px] font-semibold disabled:opacity-60"
                       >
-                        デフォルトに戻す
+                        {t('settings.general.themeColorReset')}
                       </button>
                     )}
                   </div>
-                  <div className="mt-1.5 text-[11px] text-muted-foreground">
-                    レジ画面・設定画面・経費/勤怠/売上レポート等、/pos 配下のボタンやアクセント色をこの1色に変更します。保存後、画面を再読み込みすると反映されます。
-                  </div>
+                  <div className="mt-1.5 text-[11px] text-muted-foreground">{t('settings.general.themeColorDesc')}</div>
                 </Field>
               )}
 
               {isPosNative && (
                 <>
                   <div className="mt-2 border-t border-border pt-4 text-[13.5px] font-bold">
-                    ハッピーアワー (時間帯価格)
+                    {t('settings.general.happyHourHeading')}
                   </div>
-                  <div className="text-[11.5px] text-muted-foreground">
-                    対象商品(生ビール グラス・ARAWAZA・DAIYAME・いいちこ・カンポットハイボール)は、下記の時間帯のみ自動で割引価格になります。
-                  </div>
+                  <div className="text-[11.5px] text-muted-foreground">{t('settings.general.happyHourDesc')}</div>
                   <ToggleRow
-                    name="ハッピーアワーを有効にする"
-                    desc="OFFにすると時間帯にかかわらず通常価格のまま"
+                    name={t('settings.general.happyHourToggleName')}
+                    desc={t('settings.general.happyHourToggleDesc')}
                     on={settings.happyHourEnabled}
                     disabled={!canManageSettings}
                     onToggle={() => update('happyHourEnabled', !settings.happyHourEnabled)}
                   />
                   <div className="flex items-center gap-3">
-                    <Field label="開始時刻">
+                    <Field label={t('settings.general.startTime')}>
                       <input
                         type="time"
                         value={settings.happyHourStart}
@@ -1356,7 +1359,7 @@ export function SettingsScreen() {
                         className="h-10 w-36 rounded-lg border border-border px-3 text-[13.5px] disabled:opacity-60"
                       />
                     </Field>
-                    <Field label="終了時刻">
+                    <Field label={t('settings.general.endTime')}>
                       <input
                         type="time"
                         value={settings.happyHourEnd}
@@ -1373,23 +1376,20 @@ export function SettingsScreen() {
 
           {tab === 'printer' && (
             <div className="flex max-w-[640px] flex-col gap-3.5">
-              <div className="text-[15px] font-bold">プリンター設定</div>
+              <div className="text-[15px] font-bold">{t('settings.nav.printer')}</div>
 
               {!isPosNative ? (
                 <div className="rounded-xl border border-border p-3 text-[12.5px] text-muted-foreground">
-                  プリンター設定は POS ネイティブ運用店舗のみで利用できます。
+                  {t('settings.printer.nativeOnly')}
                 </div>
               ) : (
                 <>
                   <div className="rounded-xl border border-border p-3.5 text-[12px] text-muted-foreground">
-                    レジ画面 (クラウド) から店舗内のプリンターへは直接印刷できないため、店舗のPCで動く
-                    「ローカル印刷エージェント」が下のトークンを使って印刷ジョブを取りに来る仕組みです。
-                    USB接続のプリンターはエージェントが動くPC経由、LAN接続のプリンターはエージェントから
-                    IPアドレスへ直接送信します。エージェントの導入方法は別途お渡しする手順書をご覧ください。
+                    {t('settings.printer.agentIntro')}
                   </div>
 
                   <div className="rounded-xl border border-border p-3.5">
-                    <div className="mb-1.5 text-[13px] font-semibold">印刷エージェント用トークン</div>
+                    <div className="mb-1.5 text-[13px] font-semibold">{t('settings.printer.agentTokenHeading')}</div>
                     {agentToken ? (
                       <div className="flex items-center gap-2">
                         <code className="flex-1 truncate rounded-md bg-secondary px-2.5 py-1.5 text-[11.5px]">{agentToken}</code>
@@ -1398,11 +1398,11 @@ export function SettingsScreen() {
                           onClick={() => navigator.clipboard?.writeText(agentToken)}
                           className="h-8 rounded-md border border-border px-3 text-[11.5px] font-semibold"
                         >
-                          コピー
+                          {t('settings.printer.copy')}
                         </button>
                       </div>
                     ) : (
-                      <div className="text-[12px] text-muted-foreground">まだ発行されていません。</div>
+                      <div className="text-[12px] text-muted-foreground">{t('settings.printer.tokenNotIssued')}</div>
                     )}
                     <button
                       type="button"
@@ -1410,11 +1410,13 @@ export function SettingsScreen() {
                       disabled={!canManageSettings || tokenBusy}
                       className="mt-2 h-8 rounded-md border border-border px-3 text-[11.5px] font-semibold text-destructive disabled:opacity-60"
                     >
-                      {tokenBusy ? '発行中…' : agentToken ? 'トークンを再発行' : 'トークンを発行'}
+                      {tokenBusy
+                        ? t('settings.printer.issuingEllipsis')
+                        : agentToken
+                          ? t('settings.printer.reissueToken')
+                          : t('settings.printer.issueToken')}
                     </button>
-                    <div className="mt-1.5 text-[11px] text-muted-foreground">
-                      再発行すると古いトークンで動いているエージェントは使えなくなります。
-                    </div>
+                    <div className="mt-1.5 text-[11px] text-muted-foreground">{t('settings.printer.reissueWarning')}</div>
                   </div>
 
                   {printerError && <div className="text-[12px] text-destructive">{printerError}</div>}
@@ -1426,11 +1428,11 @@ export function SettingsScreen() {
                           <div className="text-[13.5px] font-semibold">
                             {p.name}
                             <span className="ml-2 rounded-full bg-secondary px-2 py-0.5 text-[10.5px] font-semibold text-muted-foreground">
-                              {PRINTER_ROLE_LABEL[p.role]}
+                              {printerRoleLabel(t, p.role)}
                             </span>
                           </div>
                           <div className="mt-0.5 text-[11.5px] text-muted-foreground">
-                            {PRINTER_CONNECTION_LABEL[p.connectionType]} ・ {p.paperWidthMm}mm
+                            {printerConnectionLabel(t, p.connectionType)} ・ {p.paperWidthMm}mm
                             {(p.connectionType === 'usb_agent' || p.connectionType === 'bluetooth') && p.deviceName ? ` ・ ${p.deviceName}` : ''}
                             {p.connectionType === 'lan' && p.lanIp ? ` ・ ${p.lanIp}:${p.lanPort ?? 9100}` : ''}
                           </div>
@@ -1446,7 +1448,7 @@ export function SettingsScreen() {
                             }
                           >
                             <span className={'inline-block h-2 w-2 rounded-full ' + (p.enabled ? 'bg-emerald-500' : 'bg-border')} />
-                            {p.enabled ? '有効' : '無効'}
+                            {p.enabled ? t('settings.payment.enabled') : t('settings.payment.disabled')}
                           </button>
                           <button
                             type="button"
@@ -1454,7 +1456,11 @@ export function SettingsScreen() {
                             disabled={testingId === p.id}
                             className="h-[34px] rounded-lg border border-border px-3.5 text-[12.5px] font-semibold disabled:opacity-60"
                           >
-                            {testingId === p.id ? '送信中…' : testedId === p.id ? 'キューに送信済み ✓' : 'テスト印刷'}
+                            {testingId === p.id
+                              ? t('settings.printer.sendingEllipsis')
+                              : testedId === p.id
+                                ? t('settings.printer.queuedCheck')
+                                : t('settings.printer.testPrint')}
                           </button>
                           <button
                             type="button"
@@ -1462,13 +1468,13 @@ export function SettingsScreen() {
                             onClick={() => handleDeletePrinter(p.id)}
                             className="h-[34px] rounded-lg border border-border px-3 text-[12.5px] font-semibold text-destructive disabled:opacity-60"
                           >
-                            削除
+                            {t('common.delete')}
                           </button>
                         </div>
                       </div>
                     ))}
                     {printersLoaded && printers.length === 0 && (
-                      <div className="text-[12.5px] text-muted-foreground">まだプリンターが登録されていません。</div>
+                      <div className="text-[12.5px] text-muted-foreground">{t('settings.printer.empty')}</div>
                     )}
                   </div>
 
@@ -1482,13 +1488,13 @@ export function SettingsScreen() {
 
           {tab === 'payment' && (
             <div className="flex max-w-[640px] flex-col gap-3.5">
-              <div className="text-[15px] font-bold">決済設定</div>
+              <div className="text-[15px] font-bold">{t('settings.nav.payment')}</div>
               <div className="rounded-xl border border-border p-3.5 text-[12px] text-muted-foreground">
-                店舗で実際に使っている決済方法を自由に登録してください。ここで「有効」にした決済方法だけがレジの会計画面に表示されます。「現金として扱う」を付けた決済方法は、預り金額の入力とお釣りの自動計算が出ます。
+                {t('settings.payment.tabIntro')}
               </div>
               {!canManageSettings && (
                 <div className="rounded-xl border border-border p-3 text-[12.5px] text-muted-foreground">
-                  決済方法の追加・変更には manager 以上の権限が必要です。
+                  {t('settings.payment.managerRequired')}
                 </div>
               )}
               <PaymentMethodsSection canManageSettings={canManageSettings} />
@@ -1503,22 +1509,22 @@ export function SettingsScreen() {
 
           {tab === 'layout' && (
             <InfoNote
-              title="テーブルレイアウト"
-              body="卓の配置・卓番号・席数は専用のレイアウト編集画面から変更できます。柱・カウンターなどの障害物の追加や、卓・障害物の大きさ変更もできます。"
-              cta="レイアウト編集を開く"
+              title={t('settings.layout.title')}
+              body={t('settings.layout.body')}
+              cta={t('settings.layout.cta')}
               onCta={() => router.push('/pos/table-layout')}
             />
           )}
 
           {tab === 'handy' && (
             <div className="flex max-w-[720px] flex-col gap-3.5">
-              <div className="text-[15px] font-bold">ハンディ表示</div>
+              <div className="text-[15px] font-bold">{t('settings.nav.handy')}</div>
               <div className="rounded-xl border border-border p-3.5 text-[12px] text-muted-foreground">
-                ハンディ注文画面 (/pos/handy) の卓カードの並び順・グループ分けを設定します。ここでの設定はレジ画面の見取り図には一切影響しません。グループを作らなければ卓番号順に表示され、どのグループにも入れていない卓は「未分類」として末尾にまとめて表示されます。
+                {t('settings.handy.tabIntro')}
               </div>
               {!canManageSettings && (
                 <div className="rounded-xl border border-border p-3 text-[12.5px] text-muted-foreground">
-                  ハンディ表示の変更には manager 以上の権限が必要です。
+                  {t('settings.handy.managerRequired')}
                 </div>
               )}
               <HandyGroupsSection canManageSettings={canManageSettings} />
@@ -1535,6 +1541,7 @@ export function SettingsScreen() {
 // スタッフ管理タブ: pos.staff の実データを CRUD する (POS ネイティブ PIN ログイン用)。
 // API 側は manager 以上のみ許可しているので、こちらは UI 側の補助的なガード。
 function StaffTab() {
+  const { t } = useLanguage();
   const me = useStaff();
   const isPosNative = me.authMode === 'pos_native';
   const canManage = isPosNative && (me.role === 'owner' || me.role === 'manager');
@@ -1550,9 +1557,9 @@ function StaffTab() {
     listStaff()
       .then(({ staff }) => setStaffList(staff))
       .catch((err) => {
-        setLoadError(err instanceof PosStaffApiError ? err.message : 'スタッフ一覧の取得に失敗しました');
+        setLoadError(err instanceof PosStaffApiError ? err.message : t('settings.staff.fetchError'));
       });
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     if (canManage) load();
@@ -1561,7 +1568,7 @@ function StaffTab() {
   if (!isPosNative) {
     return (
       <div className="flex max-w-[560px] flex-col gap-3.5">
-        <div className="text-[15px] font-bold">スタッフ管理</div>
+        <div className="text-[15px] font-bold">{t('settings.nav.staff')}</div>
         <PinLoginRequiredNote />
       </div>
     );
@@ -1570,9 +1577,9 @@ function StaffTab() {
   if (!canManage) {
     return (
       <div className="flex max-w-[560px] flex-col gap-3.5">
-        <div className="text-[15px] font-bold">スタッフ管理</div>
+        <div className="text-[15px] font-bold">{t('settings.nav.staff')}</div>
         <div className="rounded-xl border border-border p-4 text-[13px] text-muted-foreground">
-          スタッフ管理には manager 以上の権限が必要です。
+          {t('settings.staff.managerRequired')}
         </div>
       </div>
     );
@@ -1581,12 +1588,12 @@ function StaffTab() {
   return (
     <div className="flex max-w-[640px] flex-col gap-2.5">
       <div className="mb-1.5 flex items-center justify-between">
-        <div className="text-[15px] font-bold">スタッフ管理 (POS PINログイン)</div>
+        <div className="text-[15px] font-bold">{t('settings.staff.title')}</div>
         <button
           onClick={() => setShowAddForm((v) => !v)}
           className="h-9 rounded-lg border border-dashed border-brand px-3.5 text-[12.5px] font-semibold text-brand"
         >
-          {showAddForm ? 'キャンセル' : '＋ スタッフを追加'}
+          {showAddForm ? t('common.cancel') : `＋ ${t('settings.staff.addStaff')}`}
         </button>
       </div>
 
@@ -1600,10 +1607,10 @@ function StaffTab() {
       )}
 
       {loadError && <div className="text-xs text-destructive">{loadError}</div>}
-      {staffList === null && !loadError && <div className="text-xs text-muted-foreground">読み込み中…</div>}
+      {staffList === null && !loadError && <div className="text-xs text-muted-foreground">{t('common.loadingEllipsis')}</div>}
       {staffList?.length === 0 && (
         <div className="rounded-xl border border-dashed border-border p-4 text-[13px] text-muted-foreground">
-          登録済みのPOSスタッフがいません。「＋ スタッフを追加」から登録してください。
+          {t('settings.staff.empty')}
         </div>
       )}
 
@@ -1617,9 +1624,9 @@ function StaffTab() {
               <div>
                 <div className="text-[13px] font-semibold">{s.display_name}</div>
                 <div className="text-[11.5px] text-muted-foreground">
-                  {ROLE_LABEL[s.role]}
-                  {s.active === false && ' ・ 無効'}
-                  {s.hourly_wage_usd != null && ` ・ 時給 $${s.hourly_wage_usd.toFixed(2)}`}
+                  {roleLabel(t, s.role)}
+                  {s.active === false && ` ・ ${t('settings.staff.inactive')}`}
+                  {s.hourly_wage_usd != null && ` ・ ${t('settings.staff.hourlyWage', { amount: s.hourly_wage_usd.toFixed(2) })}`}
                 </div>
               </div>
             </div>
@@ -1628,13 +1635,13 @@ function StaffTab() {
                 onClick={() => setWageTargetId((v) => (v === s.id ? null : s.id))}
                 className="h-8 rounded-lg border border-border px-3 text-xs font-semibold"
               >
-                時給を設定
+                {t('settings.staff.setWage')}
               </button>
               <button
                 onClick={() => setResetTargetId((v) => (v === s.id ? null : s.id))}
                 className="h-8 rounded-lg border border-border px-3 text-xs font-semibold"
               >
-                PINをリセット
+                {t('settings.staff.resetPin')}
               </button>
             </div>
           </div>
@@ -1673,6 +1680,7 @@ function WageEditForm({
   onDone: (updated: PosStaffMember) => void;
   onCancel: () => void;
 }) {
+  const { t } = useLanguage();
   const [wage, setWage] = useState(currentWage != null ? String(currentWage) : '');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1688,7 +1696,7 @@ function WageEditForm({
       const { staff } = await updateStaffWage(staffId, value);
       onDone(staff);
     } catch (err) {
-      setError(err instanceof PosStaffApiError ? err.message : '時給の更新に失敗しました');
+      setError(err instanceof PosStaffApiError ? err.message : t('settings.staff.wageUpdateError'));
     } finally {
       setSubmitting(false);
     }
@@ -1703,7 +1711,7 @@ function WageEditForm({
         step="0.01"
         value={wage}
         onChange={(e) => setWage(e.target.value)}
-        placeholder="例: 2.50 (空欄で未設定に戻す)"
+        placeholder={t('settings.staff.wagePlaceholder')}
         className="h-9 w-52 rounded-lg border border-border px-3 text-[13px]"
       />
       <button
@@ -1711,10 +1719,10 @@ function WageEditForm({
         disabled={submitting}
         className="h-9 rounded-lg bg-primary px-3 text-xs font-semibold text-primary-foreground disabled:opacity-60"
       >
-        {submitting ? '更新中…' : '更新'}
+        {submitting ? t('settings.staff.updatingEllipsis') : t('settings.staff.updateButton')}
       </button>
       <button type="button" onClick={onCancel} className="h-9 rounded-lg border border-border px-3 text-xs font-semibold">
-        キャンセル
+        {t('common.cancel')}
       </button>
       {error && <div className="text-xs text-destructive">{error}</div>}
     </form>
@@ -1722,6 +1730,7 @@ function WageEditForm({
 }
 
 function AddStaffForm({ onCreated }: { onCreated: () => void }) {
+  const { t } = useLanguage();
   const [displayName, setDisplayName] = useState('');
   const [role, setRole] = useState<PosStaffRole>('staff');
   const [pin, setPin] = useState('');
@@ -1737,7 +1746,7 @@ function AddStaffForm({ onCreated }: { onCreated: () => void }) {
       await createStaff({ displayName: displayName.trim(), role, pin });
       onCreated();
     } catch (err) {
-      setError(err instanceof PosStaffApiError ? err.message : '登録に失敗しました');
+      setError(err instanceof PosStaffApiError ? err.message : t('common.registerError'));
     } finally {
       setSubmitting(false);
     }
@@ -1749,7 +1758,7 @@ function AddStaffForm({ onCreated }: { onCreated: () => void }) {
         <input
           value={displayName}
           onChange={(e) => setDisplayName(e.target.value)}
-          placeholder="氏名"
+          placeholder={t('settings.staff.namePlaceholder')}
           className="h-10 flex-1 rounded-lg border border-border px-3 text-[13.5px]"
         />
         <select
@@ -1757,9 +1766,9 @@ function AddStaffForm({ onCreated }: { onCreated: () => void }) {
           onChange={(e) => setRole(e.target.value as PosStaffRole)}
           className="h-10 w-36 rounded-lg border border-border px-3 text-[13.5px]"
         >
-          <option value="staff">スタッフ</option>
-          <option value="manager">マネージャー</option>
-          <option value="owner">オーナー</option>
+          <option value="staff">{t('role.staff')}</option>
+          <option value="manager">{t('role.manager')}</option>
+          <option value="owner">{t('role.owner')}</option>
         </select>
       </div>
       <input
@@ -1767,7 +1776,7 @@ function AddStaffForm({ onCreated }: { onCreated: () => void }) {
         inputMode="numeric"
         value={pin}
         onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 8))}
-        placeholder="初期PIN (4〜8桁の数字)"
+        placeholder={t('settings.staff.pinPlaceholder')}
         className="h-10 w-40 rounded-lg border border-border px-3 text-[13.5px]"
       />
       {error && <div className="text-xs text-destructive">{error}</div>}
@@ -1776,13 +1785,14 @@ function AddStaffForm({ onCreated }: { onCreated: () => void }) {
         disabled={submitting || !displayName.trim() || pin.length < 4}
         className="h-9 w-fit rounded-lg bg-primary px-4 text-[12.5px] font-semibold text-primary-foreground disabled:opacity-60"
       >
-        {submitting ? '登録中…' : '登録する'}
+        {submitting ? t('common.registering') : t('settings.staff.registerSubmit')}
       </button>
     </form>
   );
 }
 
 function ResetPinForm({ staffId, onDone }: { staffId: string; onDone: () => void }) {
+  const { t } = useLanguage();
   const [pin, setPin] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1796,7 +1806,7 @@ function ResetPinForm({ staffId, onDone }: { staffId: string; onDone: () => void
       await resetStaffPin(staffId, pin);
       onDone();
     } catch (err) {
-      setError(err instanceof PosStaffApiError ? err.message : 'リセットに失敗しました');
+      setError(err instanceof PosStaffApiError ? err.message : t('settings.staff.resetError'));
     } finally {
       setSubmitting(false);
     }
@@ -1809,7 +1819,7 @@ function ResetPinForm({ staffId, onDone }: { staffId: string; onDone: () => void
         inputMode="numeric"
         value={pin}
         onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 8))}
-        placeholder="新しいPIN"
+        placeholder={t('settings.staff.newPinPlaceholder')}
         className="h-9 w-36 rounded-lg border border-border px-3 text-[13px]"
       />
       <button
@@ -1817,10 +1827,10 @@ function ResetPinForm({ staffId, onDone }: { staffId: string; onDone: () => void
         disabled={submitting || pin.length < 4}
         className="h-9 rounded-lg bg-primary px-3 text-xs font-semibold text-primary-foreground disabled:opacity-60"
       >
-        {submitting ? '更新中…' : '更新'}
+        {submitting ? t('settings.staff.updatingEllipsis') : t('settings.staff.updateButton')}
       </button>
       <button type="button" onClick={onDone} className="h-9 rounded-lg border border-border px-3 text-xs font-semibold">
-        キャンセル
+        {t('common.cancel')}
       </button>
       {error && <div className="text-xs text-destructive">{error}</div>}
     </form>
@@ -1831,6 +1841,7 @@ function ResetPinForm({ staffId, onDone }: { staffId: string; onDone: () => void
 // (POS単体運用モード用。matsunoya-dine 連携店舗は matsunoya-dine 管理画面が編集元のまま)。
 // API 側は manager 以上のみ許可しているので、こちらは UI 側の補助的なガード。
 function MenuTab() {
+  const { t } = useLanguage();
   const me = useStaff();
   const isPosNative = me.authMode === 'pos_native';
   const canManage = isPosNative && (me.role === 'owner' || me.role === 'manager');
@@ -1852,9 +1863,9 @@ function MenuTab() {
         setItems(i.items);
       })
       .catch((err) => {
-        setLoadError(err instanceof PosMenuApiError ? err.message : 'メニューの取得に失敗しました');
+        setLoadError(err instanceof PosMenuApiError ? err.message : t('settings.menu.fetchError'));
       });
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     if (canManage) load();
@@ -1863,7 +1874,7 @@ function MenuTab() {
   if (!isPosNative) {
     return (
       <div className="flex max-w-[560px] flex-col gap-3.5">
-        <div className="text-[15px] font-bold">メニュー・商品オプション</div>
+        <div className="text-[15px] font-bold">{t('settings.nav.menu')}</div>
         <PinLoginRequiredNote />
       </div>
     );
@@ -1872,18 +1883,18 @@ function MenuTab() {
   if (!canManage) {
     return (
       <div className="flex max-w-[560px] flex-col gap-3.5">
-        <div className="text-[15px] font-bold">メニュー・商品オプション</div>
+        <div className="text-[15px] font-bold">{t('settings.nav.menu')}</div>
         <div className="rounded-xl border border-border p-4 text-[13px] text-muted-foreground">
-          メニュー管理には manager 以上の権限が必要です。
+          {t('settings.menu.managerRequired')}
         </div>
       </div>
     );
   }
 
   const categoryName = (id: string | null) => {
-    if (!id || !categories) return '未分類';
+    if (!id || !categories) return t('settings.menu.uncategorized');
     const resolved = resolveCategoryChain(id, indexCategories(categories as CategoryNode[]));
-    if (!resolved) return '(不明なカテゴリ)';
+    if (!resolved) return t('settings.menu.unknownCategory');
     const parts = [resolved.majorName];
     if (resolved.middleName) parts.push(resolved.middleName);
     if (resolved.minorName !== resolved.majorName && resolved.minorName !== resolved.middleName) parts.push(resolved.minorName);
@@ -1895,7 +1906,7 @@ function MenuTab() {
       await deleteMenuCategory(id);
       load();
     } catch (err) {
-      setLoadError(err instanceof PosMenuApiError ? err.message : 'カテゴリの削除に失敗しました');
+      setLoadError(err instanceof PosMenuApiError ? err.message : t('settings.menu.categoryDeleteError'));
     }
   }
 
@@ -1916,7 +1927,7 @@ function MenuTab() {
       await Promise.all([reorderMenuCategory(a.id, b.sort_order), reorderMenuCategory(b.id, a.sort_order)]);
       load();
     } catch (err) {
-      setLoadError(err instanceof PosMenuApiError ? err.message : '並び順の変更に失敗しました');
+      setLoadError(err instanceof PosMenuApiError ? err.message : t('settings.menu.reorderError'));
     }
   }
 
@@ -1925,7 +1936,7 @@ function MenuTab() {
       await updateMenuItem(item.id, { active: !item.active });
       load();
     } catch (err) {
-      setLoadError(err instanceof PosMenuApiError ? err.message : '更新に失敗しました');
+      setLoadError(err instanceof PosMenuApiError ? err.message : t('common.updateError'));
     }
   }
 
@@ -1934,17 +1945,15 @@ function MenuTab() {
       await deleteMenuItem(id);
       load();
     } catch (err) {
-      setLoadError(err instanceof PosMenuApiError ? err.message : '商品の削除に失敗しました');
+      setLoadError(err instanceof PosMenuApiError ? err.message : t('settings.menu.itemDeleteError'));
     }
   }
 
   return (
     <div className="flex max-w-[720px] flex-col gap-8">
       <div>
-        <div className="text-[15px] font-bold">メニュー・商品オプション</div>
-        <div className="mt-1 text-[11.5px] text-muted-foreground">
-          POS単体で運用する店舗向けの設定です。matsunoya-dine と連携している店舗は matsunoya-dine 管理画面が編集元です。
-        </div>
+        <div className="text-[15px] font-bold">{t('settings.nav.menu')}</div>
+        <div className="mt-1 text-[11.5px] text-muted-foreground">{t('settings.menu.intro')}</div>
       </div>
 
       {loadError && <div className="text-xs text-destructive">{loadError}</div>}
@@ -1953,23 +1962,21 @@ function MenuTab() {
       <div className="flex flex-col gap-2.5">
         <div className="mb-0.5 flex items-center justify-between">
           <div>
-            <div className="text-[13.5px] font-bold">カテゴリ (大 &gt; 中)</div>
-            <div className="mt-0.5 text-[11px] text-muted-foreground">
-              レジ画面には大カテゴリーがタブとして表示されます。中カテゴリーはタブの中の見出しになります (無くても登録可)。
-            </div>
+            <div className="text-[13.5px] font-bold">{t('settings.menu.categoryHeading')}</div>
+            <div className="mt-0.5 text-[11px] text-muted-foreground">{t('settings.menu.categoryDesc')}</div>
           </div>
           <button
             onClick={() => setShowAddCategory((v) => !v)}
             className="h-8 flex-shrink-0 rounded-lg border border-dashed border-brand px-3 text-[12px] font-semibold text-brand"
           >
-            {showAddCategory ? 'キャンセル' : '＋ 大カテゴリーを追加'}
+            {showAddCategory ? t('common.cancel') : `＋ ${t('settings.menu.addMajorCategory')}`}
           </button>
         </div>
 
         {showAddCategory && (
           <AddCategoryForm
             parentId={null}
-            placeholder="大カテゴリー名 (例: ドリンク)"
+            placeholder={t('settings.menu.majorCategoryPlaceholder')}
             onCreated={() => {
               setShowAddCategory(false);
               load();
@@ -1977,10 +1984,10 @@ function MenuTab() {
           />
         )}
 
-        {categories === null && !loadError && <div className="text-xs text-muted-foreground">読み込み中…</div>}
+        {categories === null && !loadError && <div className="text-xs text-muted-foreground">{t('common.loadingEllipsis')}</div>}
         {categories?.length === 0 && (
           <div className="rounded-xl border border-dashed border-border p-4 text-[13px] text-muted-foreground">
-            カテゴリが未登録です。「＋ 大カテゴリーを追加」から登録してください。
+            {t('settings.menu.categoryEmpty')}
           </div>
         )}
         {categories && categories.length > 0 && (
@@ -1998,7 +2005,7 @@ function MenuTab() {
       <div className="flex flex-col gap-2.5">
         <div className="mb-0.5 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="text-[13.5px] font-bold">商品一覧</div>
+            <div className="text-[13.5px] font-bold">{t('settings.menu.itemListHeading')}</div>
             {items && items.length > 0 && (
               <div className="flex w-fit gap-1 rounded-lg bg-secondary p-0.5">
                 <button
@@ -2008,7 +2015,7 @@ function MenuTab() {
                     (viewMode === 'category' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground')
                   }
                 >
-                  カテゴリ別
+                  {t('settings.menu.byCategory')}
                 </button>
                 <button
                   onClick={() => setViewMode('flat')}
@@ -2017,7 +2024,7 @@ function MenuTab() {
                     (viewMode === 'flat' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground')
                   }
                 >
-                  一覧
+                  {t('settings.menu.flatList')}
                 </button>
               </div>
             )}
@@ -2027,7 +2034,7 @@ function MenuTab() {
             disabled={!categories}
             className="h-8 rounded-lg border border-dashed border-brand px-3 text-[12px] font-semibold text-brand disabled:opacity-50"
           >
-            {showAddItem ? 'キャンセル' : '＋ 商品を追加'}
+            {showAddItem ? t('common.cancel') : `＋ ${t('settings.menu.addItem')}`}
           </button>
         </div>
 
@@ -2042,10 +2049,10 @@ function MenuTab() {
           />
         )}
 
-        {items === null && !loadError && <div className="text-xs text-muted-foreground">読み込み中…</div>}
+        {items === null && !loadError && <div className="text-xs text-muted-foreground">{t('common.loadingEllipsis')}</div>}
         {items?.length === 0 && (
           <div className="rounded-xl border border-dashed border-border p-4 text-[13px] text-muted-foreground">
-            商品が未登録です。「＋ 商品を追加」から登録してください。
+            {t('settings.menu.itemEmpty')}
           </div>
         )}
 
@@ -2055,7 +2062,9 @@ function MenuTab() {
               if (groupItems.length === 0) return null;
               return (
                 <div key={c ? c.id : 'uncategorized'} className="flex flex-col gap-2">
-                  <div className="mt-1 text-[12px] font-bold text-muted-foreground">{c ? categoryName(c.id) : '未分類'}</div>
+                  <div className="mt-1 text-[12px] font-bold text-muted-foreground">
+                    {c ? categoryName(c.id) : t('settings.menu.uncategorized')}
+                  </div>
                   {groupItems.map((item) => (
                     <MenuItemRow
                       key={item.id}
@@ -2131,6 +2140,7 @@ function MenuItemRow({
   onRefresh: () => void;
   onCategoriesChanged: () => void;
 }) {
+  const { t } = useLanguage();
   return (
     <div className="rounded-xl border border-border px-4 py-3">
       <div className="flex items-center justify-between gap-3">
@@ -2149,7 +2159,9 @@ function MenuItemRow({
                 {item.name}
               </div>
               {!item.active && (
-                <span className="rounded bg-secondary px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">非表示</span>
+                <span className="rounded bg-secondary px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
+                  {t('settings.menu.hidden')}
+                </span>
               )}
             </div>
             <div className="mt-0.5 text-[11.5px] text-muted-foreground">
@@ -2165,25 +2177,25 @@ function MenuItemRow({
             onClick={onToggleActive}
             className="h-8 rounded-lg border border-border px-3 text-xs font-semibold"
           >
-            {item.active ? '非表示にする' : '再表示する'}
+            {item.active ? t('settings.menu.hideItem') : t('settings.menu.showItem')}
           </button>
           <button
             onClick={onToggleEdit}
             className="h-8 rounded-lg border border-border px-3 text-xs font-semibold"
           >
-            編集
+            {t('common.edit')}
           </button>
           <button
             onClick={onToggleOptions}
             className="h-8 rounded-lg border border-border px-3 text-xs font-semibold"
           >
-            オプション
+            {t('settings.menu.options')}
           </button>
           <button
             onClick={onDelete}
             className="h-8 rounded-lg border border-border px-3 text-xs font-semibold text-destructive"
           >
-            削除
+            {t('common.delete')}
           </button>
         </div>
       </div>
@@ -2210,6 +2222,7 @@ function AddCategoryForm({
   placeholder?: string;
   onCreated: (category: PosMenuCategory) => void;
 }) {
+  const { t } = useLanguage();
   const [name, setName] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -2227,7 +2240,7 @@ function AddCategoryForm({
       const { category } = await createMenuCategory(name.trim(), parentId);
       onCreated(category);
     } catch (err) {
-      setError(err instanceof PosMenuApiError ? err.message : '登録に失敗しました');
+      setError(err instanceof PosMenuApiError ? err.message : t('common.registerError'));
     } finally {
       setSubmitting(false);
     }
@@ -2244,7 +2257,7 @@ function AddCategoryForm({
             submitCategory();
           }
         }}
-        placeholder={placeholder ?? 'カテゴリ名'}
+        placeholder={placeholder ?? t('settings.menu.categoryNamePlaceholder')}
         className="h-9 flex-1 rounded-lg border border-border px-3 text-[13px]"
       />
       {error && <div className="text-xs text-destructive">{error}</div>}
@@ -2254,7 +2267,7 @@ function AddCategoryForm({
         disabled={submitting || !name.trim()}
         className="h-9 rounded-lg bg-primary px-4 text-[12.5px] font-semibold text-primary-foreground disabled:opacity-60"
       >
-        {submitting ? '登録中…' : '登録'}
+        {submitting ? t('common.registering') : t('settings.menu.registerShort')}
       </button>
     </div>
   );
@@ -2277,6 +2290,7 @@ function CategoryTree({
   onChanged: () => void;
   onReorder: (id: string, direction: 'up' | 'down') => void;
 }) {
+  const { t } = useLanguage();
   const [addingUnder, setAddingUnder] = useState<string | null>(null);
 
   const byParent = new Map<string | null, PosMenuCategory[]>();
@@ -2309,7 +2323,7 @@ function CategoryTree({
                   <button
                     onClick={() => onReorder(major.id, 'up')}
                     disabled={majorIdx === 0}
-                    title="上に移動"
+                    title={t('settings.menu.moveUp')}
                     className="flex h-4 w-5 items-center justify-center text-[10px] text-muted-foreground disabled:opacity-25"
                   >
                     ▲
@@ -2317,7 +2331,7 @@ function CategoryTree({
                   <button
                     onClick={() => onReorder(major.id, 'down')}
                     disabled={majorIdx === majors.length - 1}
-                    title="下に移動"
+                    title={t('settings.menu.moveDown')}
                     className="flex h-4 w-5 items-center justify-center text-[10px] text-muted-foreground disabled:opacity-25"
                   >
                     ▼
@@ -2329,7 +2343,7 @@ function CategoryTree({
                 onClick={() => toggleAdding(major.id)}
                 className="h-7 flex-shrink-0 rounded-lg border border-dashed border-brand px-2.5 text-[11px] font-semibold text-brand"
               >
-                {addingUnder === major.id ? 'キャンセル' : '＋ 中カテゴリーを追加'}
+                {addingUnder === major.id ? t('common.cancel') : `＋ ${t('settings.menu.addMiddleCategory')}`}
               </button>
             </div>
 
@@ -2337,7 +2351,7 @@ function CategoryTree({
               <div className="mt-2.5">
                 <AddCategoryForm
                   parentId={major.id}
-                  placeholder="中カテゴリー名 (例: 焼酎)"
+                  placeholder={t('settings.menu.middleCategoryPlaceholder')}
                   onCreated={() => {
                     setAddingUnder(null);
                     onChanged();
@@ -2369,6 +2383,7 @@ function CategoryChip({
   onRenamed: () => void;
   onDelete: () => void;
 }) {
+  const { t } = useLanguage();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(category.name);
   const [submitting, setSubmitting] = useState(false);
@@ -2414,7 +2429,7 @@ function CategoryChip({
       <button
         onClick={onDelete}
         className="flex h-5 w-5 items-center justify-center rounded-full text-[11px] text-muted-foreground hover:text-destructive"
-        title="カテゴリを削除"
+        title={t('settings.menu.deleteCategory')}
       >
         ×
       </button>
@@ -2431,6 +2446,7 @@ function AddItemForm({
   onCreated: () => void;
   onCategoriesChanged: () => void;
 }) {
+  const { t } = useLanguage();
   const [name, setName] = useState('');
   const [price, setPrice] = useState('');
   const [happyHourPrice, setHappyHourPrice] = useState('');
@@ -2450,7 +2466,7 @@ function AddItemForm({
       await createMenuItem({ categoryId, name: name.trim(), price: priceValue, happyHourPrice: happyHourValue });
       onCreated();
     } catch (err) {
-      setError(err instanceof PosMenuApiError ? err.message : '登録に失敗しました');
+      setError(err instanceof PosMenuApiError ? err.message : t('common.registerError'));
     } finally {
       setSubmitting(false);
     }
@@ -2462,21 +2478,21 @@ function AddItemForm({
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="商品名"
+          placeholder={t('settings.menu.itemNamePlaceholder')}
           className="h-10 flex-1 rounded-lg border border-border px-3 text-[13.5px]"
         />
         <input
           value={price}
           onChange={(e) => setPrice(e.target.value)}
           inputMode="decimal"
-          placeholder="価格 ($)"
+          placeholder={t('settings.menu.pricePlaceholder')}
           className="h-10 w-28 rounded-lg border border-border px-3 text-[13.5px]"
         />
         <input
           value={happyHourPrice}
           onChange={(e) => setHappyHourPrice(e.target.value)}
           inputMode="decimal"
-          placeholder="🍻 HH価格 ($・任意)"
+          placeholder={t('settings.menu.happyHourPricePlaceholder')}
           className="h-10 w-36 rounded-lg border border-border px-3 text-[13.5px]"
         />
       </div>
@@ -2487,7 +2503,7 @@ function AddItemForm({
         disabled={submitting || !name.trim() || !price || !categoryId}
         className="h-9 w-fit rounded-lg bg-primary px-4 text-[12.5px] font-semibold text-primary-foreground disabled:opacity-60"
       >
-        {submitting ? '登録中…' : '登録する'}
+        {submitting ? t('common.registering') : t('settings.staff.registerSubmit')}
       </button>
     </form>
   );
@@ -2507,6 +2523,7 @@ function CategoryCascadeSelect({
   onChange: (categoryId: string) => void;
   onCategoriesChanged: () => void;
 }) {
+  const { t } = useLanguage();
   const byId = new Map(categories.map((c) => [c.id, c]));
   const sortFn = (a: PosMenuCategory, b: PosMenuCategory) => a.sort_order - b.sort_order || a.name.localeCompare(b.name);
   const majors = categories.filter((c) => !c.parent_id).sort(sortFn);
@@ -2554,7 +2571,7 @@ function CategoryCascadeSelect({
           className="h-9 flex-1 rounded-lg border border-border px-2 text-[12.5px]"
         >
           <option value="" disabled>
-            大カテゴリー
+            {t('settings.menu.majorCategory')}
           </option>
           {majors.map((c) => (
             <option key={c.id} value={c.id}>
@@ -2568,7 +2585,7 @@ function CategoryCascadeSelect({
           disabled={!majorId}
           className="h-9 flex-1 rounded-lg border border-border px-2 text-[12.5px] disabled:opacity-50"
         >
-          <option value="">(中カテゴリーなし)</option>
+          <option value="">{t('settings.menu.noMiddleCategory')}</option>
           {middleOptions.map((c) => (
             <option key={c.id} value={c.id}>
               {c.name}
@@ -2582,13 +2599,13 @@ function CategoryCascadeSelect({
           onClick={() => setShowAddMiddle(true)}
           className="w-fit text-[11px] font-semibold text-brand"
         >
-          ＋ 中カテゴリーを追加
+          ＋ {t('settings.menu.addMiddleCategory')}
         </button>
       )}
       {showAddMiddle && majorId && (
         <AddCategoryForm
           parentId={majorId}
-          placeholder="中カテゴリー名"
+          placeholder={t('settings.menu.middleCategoryNamePlaceholder')}
           onCreated={(cat) => {
             setShowAddMiddle(false);
             setMiddleId(cat.id);
@@ -2614,6 +2631,7 @@ function EditItemForm({
   onRefresh: () => void;
   onCategoriesChanged: () => void;
 }) {
+  const { t } = useLanguage();
   const [name, setName] = useState(item.name);
   const [price, setPrice] = useState(String(item.price));
   const [happyHourPrice, setHappyHourPrice] = useState(item.happy_hour_price != null ? String(item.happy_hour_price) : '');
@@ -2642,7 +2660,7 @@ function EditItemForm({
       });
       onDone();
     } catch (err) {
-      setError(err instanceof PosMenuApiError ? err.message : '更新に失敗しました');
+      setError(err instanceof PosMenuApiError ? err.message : t('common.updateError'));
     } finally {
       setSubmitting(false);
     }
@@ -2659,7 +2677,7 @@ function EditItemForm({
       setImageUrl(updated.image_url);
       onRefresh();
     } catch (err) {
-      setImageError(err instanceof PosMenuApiError ? err.message : '画像のアップロードに失敗しました');
+      setImageError(err instanceof PosMenuApiError ? err.message : t('settings.menu.imageUploadError'));
     } finally {
       setImageUploading(false);
     }
@@ -2673,7 +2691,7 @@ function EditItemForm({
       setImageUrl(updated.image_url);
       onRefresh();
     } catch (err) {
-      setImageError(err instanceof PosMenuApiError ? err.message : '画像の削除に失敗しました');
+      setImageError(err instanceof PosMenuApiError ? err.message : t('settings.menu.imageDeleteError'));
     } finally {
       setImageUploading(false);
     }
@@ -2693,7 +2711,11 @@ function EditItemForm({
         <div className="flex flex-col gap-1.5">
           <div className="flex gap-2">
             <label className="flex h-8 cursor-pointer items-center rounded-lg border border-border px-3 text-xs font-semibold">
-              {imageUploading ? 'アップロード中…' : imageUrl ? '画像を変更' : '＋ 画像を追加'}
+              {imageUploading
+                ? t('settings.receipt.uploadingEllipsis')
+                : imageUrl
+                  ? t('settings.menu.changeImage')
+                  : `＋ ${t('settings.menu.addImage')}`}
               <input
                 type="file"
                 accept="image/jpeg,image/png,image/webp"
@@ -2709,11 +2731,11 @@ function EditItemForm({
                 disabled={imageUploading}
                 className="h-8 rounded-lg border border-border px-3 text-xs font-semibold text-destructive disabled:opacity-60"
               >
-                削除
+                {t('common.delete')}
               </button>
             )}
           </div>
-          <div className="text-[10.5px] text-muted-foreground">jpg・png・webp / 3MBまで</div>
+          <div className="text-[10.5px] text-muted-foreground">{t('settings.menu.imageFormatNote')}</div>
           {imageError && <div className="text-[11px] text-destructive">{imageError}</div>}
         </div>
       </div>
@@ -2731,12 +2753,12 @@ function EditItemForm({
         />
       </div>
       <div>
-        <div className="mb-1 text-[10.5px] text-muted-foreground">🍻 ハッピーアワー価格 ($・空欄=対象外)</div>
+        <div className="mb-1 text-[10.5px] text-muted-foreground">{t('settings.menu.happyHourPriceLabel')}</div>
         <input
           value={happyHourPrice}
           onChange={(e) => setHappyHourPrice(e.target.value)}
           inputMode="decimal"
-          placeholder="例: 3.50"
+          placeholder={t('settings.menu.happyHourPriceExample')}
           className="h-9 w-32 rounded-lg border border-border px-3 text-[13px]"
         />
       </div>
@@ -2748,10 +2770,10 @@ function EditItemForm({
           disabled={submitting}
           className="h-9 rounded-lg bg-primary px-3 text-xs font-semibold text-primary-foreground disabled:opacity-60"
         >
-          {submitting ? '保存中…' : '保存'}
+          {submitting ? t('common.saving') : t('common.save')}
         </button>
         <button type="button" onClick={onDone} className="h-9 rounded-lg border border-border px-3 text-xs font-semibold">
-          キャンセル
+          {t('common.cancel')}
         </button>
       </div>
     </form>
@@ -2764,6 +2786,7 @@ function EditItemForm({
 // (適用時に内容をコピーするので、テンプレートを後から編集しても既に適用済みの商品には影響しない)。
 // 2026-08-31: Tomさんの要望で追加。
 function OptionTemplatesSection() {
+  const { t } = useLanguage();
   const [templates, setTemplates] = useState<PosMenuOptionGroupTemplate[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showAddTemplate, setShowAddTemplate] = useState(false);
@@ -2772,8 +2795,8 @@ function OptionTemplatesSection() {
     setError(null);
     listMenuOptionTemplates()
       .then((res) => setTemplates(res.templates))
-      .catch((err) => setError(err instanceof PosMenuApiError ? err.message : 'テンプレートの取得に失敗しました'));
-  }, []);
+      .catch((err) => setError(err instanceof PosMenuApiError ? err.message : t('settings.menu.templateFetchError')));
+  }, [t]);
 
   useEffect(() => {
     load();
@@ -2784,7 +2807,7 @@ function OptionTemplatesSection() {
       await deleteMenuOptionTemplate(templateId);
       load();
     } catch (err) {
-      setError(err instanceof PosMenuApiError ? err.message : 'テンプレートの削除に失敗しました');
+      setError(err instanceof PosMenuApiError ? err.message : t('settings.menu.templateDeleteError'));
     }
   }
 
@@ -2792,17 +2815,14 @@ function OptionTemplatesSection() {
     <div className="flex flex-col gap-2.5">
       <div className="mb-0.5 flex items-center justify-between">
         <div>
-          <div className="text-[13.5px] font-bold">オプションテンプレート</div>
-          <div className="mt-0.5 text-[11px] text-muted-foreground">
-            「ライスorパン」「ドリンク選択」のように複数の商品で使い回すオプションのひな形です。ここで登録しておくと、
-            各商品の「オプション」欄で同じ内容を毎回作り直さずに「テンプレートから追加」で呼び出せます。
-          </div>
+          <div className="text-[13.5px] font-bold">{t('settings.menu.templateHeading')}</div>
+          <div className="mt-0.5 text-[11px] text-muted-foreground">{t('settings.menu.templateDesc')}</div>
         </div>
         <button
           onClick={() => setShowAddTemplate((v) => !v)}
           className="h-8 flex-shrink-0 rounded-lg border border-dashed border-brand px-3 text-[12px] font-semibold text-brand"
         >
-          {showAddTemplate ? 'キャンセル' : '＋ テンプレートを追加'}
+          {showAddTemplate ? t('common.cancel') : `＋ ${t('settings.menu.addTemplate')}`}
         </button>
       </div>
 
@@ -2818,21 +2838,22 @@ function OptionTemplatesSection() {
         />
       )}
 
-      {templates === null && !error && <div className="text-xs text-muted-foreground">読み込み中…</div>}
+      {templates === null && !error && <div className="text-xs text-muted-foreground">{t('common.loadingEllipsis')}</div>}
       {templates?.length === 0 && (
         <div className="rounded-xl border border-dashed border-border p-4 text-[13px] text-muted-foreground">
-          テンプレートが未登録です。「＋ テンプレートを追加」から登録してください。
+          {t('settings.menu.templateEmpty')}
         </div>
       )}
 
-      {templates?.map((t) => (
-        <OptionTemplateCard key={t.id} template={t} onChanged={load} onDeleteTemplate={() => handleDeleteTemplate(t.id)} />
+      {templates?.map((tpl) => (
+        <OptionTemplateCard key={tpl.id} template={tpl} onChanged={load} onDeleteTemplate={() => handleDeleteTemplate(tpl.id)} />
       ))}
     </div>
   );
 }
 
 function AddOptionTemplateForm({ onCreated, onCancel }: { onCreated: () => void; onCancel: () => void }) {
+  const { t } = useLanguage();
   const [key, setKey] = useState('');
   const [label, setLabel] = useState('');
   const [required, setRequired] = useState(true);
@@ -2848,7 +2869,7 @@ function AddOptionTemplateForm({ onCreated, onCancel }: { onCreated: () => void;
       await createMenuOptionTemplate({ key: key.trim(), label: label.trim(), required });
       onCreated();
     } catch (err) {
-      setError(err instanceof PosMenuApiError ? err.message : '登録に失敗しました');
+      setError(err instanceof PosMenuApiError ? err.message : t('common.registerError'));
     } finally {
       setSubmitting(false);
     }
@@ -2860,18 +2881,18 @@ function AddOptionTemplateForm({ onCreated, onCancel }: { onCreated: () => void;
         <input
           value={key}
           onChange={(e) => setKey(e.target.value)}
-          placeholder="キー (例: rice_or_bread)"
+          placeholder={t('settings.menu.templateKeyPlaceholder')}
           className="h-8 w-32 rounded-lg border border-border px-2.5 text-[12.5px]"
         />
         <input
           value={label}
           onChange={(e) => setLabel(e.target.value)}
-          placeholder="表示名 (例: ライスorパン)"
+          placeholder={t('settings.menu.templateLabelPlaceholder')}
           className="h-8 flex-1 rounded-lg border border-border px-2.5 text-[12.5px]"
         />
         <label className="flex items-center gap-1.5 whitespace-nowrap text-[11.5px] text-muted-foreground">
           <input type="checkbox" checked={required} onChange={(e) => setRequired(e.target.checked)} />
-          必須
+          {t('settings.menu.required')}
         </label>
       </div>
       {error && <div className="text-xs text-destructive">{error}</div>}
@@ -2881,10 +2902,10 @@ function AddOptionTemplateForm({ onCreated, onCancel }: { onCreated: () => void;
           disabled={submitting || !key.trim() || !label.trim()}
           className="h-8 w-fit rounded-lg bg-primary px-3 text-[12px] font-semibold text-primary-foreground disabled:opacity-60"
         >
-          {submitting ? '登録中…' : '登録する'}
+          {submitting ? t('common.registering') : t('settings.staff.registerSubmit')}
         </button>
         <button type="button" onClick={onCancel} className="h-8 rounded-lg border border-border px-3 text-[12px] font-semibold">
-          キャンセル
+          {t('common.cancel')}
         </button>
       </div>
     </form>
@@ -2900,6 +2921,7 @@ function OptionTemplateCard({
   onChanged: () => void;
   onDeleteTemplate: () => void;
 }) {
+  const { t } = useLanguage();
   const [editing, setEditing] = useState(false);
   const [label, setLabel] = useState(template.label);
   const [required, setRequired] = useState(template.required);
@@ -2917,7 +2939,7 @@ function OptionTemplateCard({
       setEditing(false);
       onChanged();
     } catch (err) {
-      setError(err instanceof PosMenuApiError ? err.message : '更新に失敗しました');
+      setError(err instanceof PosMenuApiError ? err.message : t('common.updateError'));
     } finally {
       setSubmitting(false);
     }
@@ -2928,7 +2950,7 @@ function OptionTemplateCard({
       await deleteMenuOptionTemplateChoice(template.id, choiceId);
       onChanged();
     } catch (err) {
-      setError(err instanceof PosMenuApiError ? err.message : '選択肢の削除に失敗しました');
+      setError(err instanceof PosMenuApiError ? err.message : t('settings.menu.choiceDeleteError'));
     }
   }
 
@@ -2945,14 +2967,14 @@ function OptionTemplateCard({
             />
             <label className="flex items-center gap-1.5 whitespace-nowrap text-[11.5px] text-muted-foreground">
               <input type="checkbox" checked={required} onChange={(e) => setRequired(e.target.checked)} />
-              必須
+              {t('settings.menu.required')}
             </label>
             <button
               type="submit"
               disabled={submitting}
               className="h-8 rounded-lg bg-primary px-2.5 text-[11.5px] font-semibold text-primary-foreground disabled:opacity-60"
             >
-              保存
+              {t('common.save')}
             </button>
             <button
               type="button"
@@ -2963,7 +2985,7 @@ function OptionTemplateCard({
               }}
               className="h-8 rounded-lg border border-border px-2.5 text-[11.5px] font-semibold"
             >
-              キャンセル
+              {t('common.cancel')}
             </button>
           </form>
         ) : (
@@ -2973,7 +2995,9 @@ function OptionTemplateCard({
                 {template.label}
               </button>
               {template.required && (
-                <span className="rounded bg-secondary px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">必須</span>
+                <span className="rounded bg-secondary px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
+                  {t('settings.menu.required')}
+                </span>
               )}
             </div>
             <div className="mt-0.5 text-[11px] text-muted-foreground">key: {template.key}</div>
@@ -2981,7 +3005,7 @@ function OptionTemplateCard({
         )}
         {!editing && (
           <button onClick={onDeleteTemplate} className="flex-shrink-0 text-[11.5px] font-semibold text-destructive">
-            テンプレートを削除
+            {t('settings.menu.deleteTemplate')}
           </button>
         )}
       </div>
@@ -2990,7 +3014,7 @@ function OptionTemplateCard({
 
       <div className="mt-2.5 flex flex-col gap-1.5">
         {template.choices.length === 0 && !showAddChoice && (
-          <div className="text-[11.5px] text-muted-foreground">選択肢が未登録です。</div>
+          <div className="text-[11.5px] text-muted-foreground">{t('settings.menu.choicesEmpty')}</div>
         )}
         {template.choices.map((c) => (
           <OptionTemplateChoiceRow
@@ -3017,7 +3041,7 @@ function OptionTemplateCard({
           onClick={() => setShowAddChoice(true)}
           className="mt-2 h-7 w-fit rounded-lg border border-dashed border-brand px-2.5 text-[11px] font-semibold text-brand"
         >
-          ＋ 選択肢を追加
+          ＋ {t('settings.menu.addChoice')}
         </button>
       )}
     </div>
@@ -3039,6 +3063,7 @@ function OptionTemplateChoiceRow({
   const [label, setLabel] = useState(choice.label);
   const [priceDelta, setPriceDelta] = useState(String(choice.price_delta));
   const [submitting, setSubmitting] = useState(false);
+  const { t } = useLanguage();
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -3077,7 +3102,7 @@ function OptionTemplateChoiceRow({
           disabled={submitting}
           className="h-7 rounded bg-primary px-2 text-[11px] font-semibold text-primary-foreground disabled:opacity-60"
         >
-          保存
+          {t('common.save')}
         </button>
         <button
           type="button"
@@ -3088,7 +3113,7 @@ function OptionTemplateChoiceRow({
           }}
           className="h-7 rounded border border-border px-2 text-[11px] font-semibold"
         >
-          キャンセル
+          {t('common.cancel')}
         </button>
       </form>
     );
@@ -3100,7 +3125,7 @@ function OptionTemplateChoiceRow({
         {choice.label} <span className="text-muted-foreground">({choice.price_delta >= 0 ? '+' : ''}${choice.price_delta.toFixed(2)})</span>
       </button>
       <button onClick={onDelete} className="text-[11px] font-semibold text-destructive">
-        削除
+        {t('common.delete')}
       </button>
     </div>
   );
@@ -3115,6 +3140,7 @@ function AddOptionTemplateChoiceForm({
   onCreated: () => void;
   onCancel: () => void;
 }) {
+  const { t } = useLanguage();
   const [choiceKey, setChoiceKey] = useState('');
   const [label, setLabel] = useState('');
   const [priceDelta, setPriceDelta] = useState('0');
@@ -3131,7 +3157,7 @@ function AddOptionTemplateChoiceForm({
       await createMenuOptionTemplateChoice(templateId, { choiceKey: choiceKey.trim(), label: label.trim(), priceDelta: value });
       onCreated();
     } catch (err) {
-      setError(err instanceof PosMenuApiError ? err.message : '登録に失敗しました');
+      setError(err instanceof PosMenuApiError ? err.message : t('common.registerError'));
     } finally {
       setSubmitting(false);
     }
@@ -3143,20 +3169,20 @@ function AddOptionTemplateChoiceForm({
         <input
           value={choiceKey}
           onChange={(e) => setChoiceKey(e.target.value)}
-          placeholder="キー (例: rice)"
+          placeholder={t('settings.menu.choiceKeyPlaceholder')}
           className="h-7 w-24 rounded border border-border px-2 text-[12px]"
         />
         <input
           value={label}
           onChange={(e) => setLabel(e.target.value)}
-          placeholder="表示名 (例: ライス)"
+          placeholder={t('settings.menu.choiceLabelPlaceholder')}
           className="h-7 flex-1 rounded border border-border px-2 text-[12px]"
         />
         <input
           value={priceDelta}
           onChange={(e) => setPriceDelta(e.target.value)}
           inputMode="decimal"
-          placeholder="追加料金 ($)"
+          placeholder={t('settings.menu.extraChargePlaceholder')}
           className="h-7 w-24 rounded border border-border px-2 text-[12px]"
         />
       </div>
@@ -3167,10 +3193,10 @@ function AddOptionTemplateChoiceForm({
           disabled={submitting || !choiceKey.trim() || !label.trim()}
           className="h-7 w-fit rounded-lg bg-primary px-2.5 text-[11.5px] font-semibold text-primary-foreground disabled:opacity-60"
         >
-          {submitting ? '登録中…' : '追加する'}
+          {submitting ? t('settings.printer.addingEllipsis') : t('settings.printer.addSubmit')}
         </button>
         <button type="button" onClick={onCancel} className="h-7 rounded-lg border border-border px-2.5 text-[11.5px] font-semibold">
-          キャンセル
+          {t('common.cancel')}
         </button>
       </div>
     </form>
@@ -3180,6 +3206,7 @@ function AddOptionTemplateChoiceForm({
 // 商品オプション (トッピング・量目選択など) のグループ + 選択肢 管理パネル。
 // 商品一覧の各行で「オプション」ボタンを押すと展開される。
 function OptionGroupsPanel({ itemId }: { itemId: string }) {
+  const { t } = useLanguage();
   const [groups, setGroups] = useState<PosMenuOptionGroup[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showAddGroup, setShowAddGroup] = useState(false);
@@ -3189,8 +3216,8 @@ function OptionGroupsPanel({ itemId }: { itemId: string }) {
     setError(null);
     listMenuOptionGroups(itemId)
       .then((res) => setGroups(res.groups))
-      .catch((err) => setError(err instanceof PosMenuApiError ? err.message : 'オプションの取得に失敗しました'));
-  }, [itemId]);
+      .catch((err) => setError(err instanceof PosMenuApiError ? err.message : t('settings.menu.optionsFetchError')));
+  }, [itemId, t]);
 
   useEffect(() => {
     load();
@@ -3201,26 +3228,26 @@ function OptionGroupsPanel({ itemId }: { itemId: string }) {
       await deleteMenuOptionGroup(itemId, groupId);
       load();
     } catch (err) {
-      setError(err instanceof PosMenuApiError ? err.message : 'オプショングループの削除に失敗しました');
+      setError(err instanceof PosMenuApiError ? err.message : t('settings.menu.optionGroupDeleteError'));
     }
   }
 
   return (
     <div className="mt-3 flex flex-col gap-2.5 border-t border-border pt-3">
       <div className="flex items-center justify-between">
-        <div className="text-[12.5px] font-bold text-muted-foreground">商品オプション (トッピング・量目選択など)</div>
+        <div className="text-[12.5px] font-bold text-muted-foreground">{t('settings.menu.itemOptionsHeading')}</div>
         <div className="flex gap-2">
           <button
             onClick={() => setShowApplyTemplate((v) => !v)}
             className="h-7 rounded-lg border border-dashed border-border px-2.5 text-[11.5px] font-semibold text-foreground"
           >
-            {showApplyTemplate ? 'キャンセル' : 'テンプレートから追加'}
+            {showApplyTemplate ? t('common.cancel') : t('settings.menu.addFromTemplate')}
           </button>
           <button
             onClick={() => setShowAddGroup((v) => !v)}
             className="h-7 rounded-lg border border-dashed border-brand px-2.5 text-[11.5px] font-semibold text-brand"
           >
-            {showAddGroup ? 'キャンセル' : '＋ グループを追加'}
+            {showAddGroup ? t('common.cancel') : `＋ ${t('settings.menu.addGroup')}`}
           </button>
         </div>
       </div>
@@ -3249,10 +3276,10 @@ function OptionGroupsPanel({ itemId }: { itemId: string }) {
         />
       )}
 
-      {groups === null && !error && <div className="text-xs text-muted-foreground">読み込み中…</div>}
+      {groups === null && !error && <div className="text-xs text-muted-foreground">{t('common.loadingEllipsis')}</div>}
       {groups?.length === 0 && (
         <div className="rounded-lg border border-dashed border-border p-3 text-[12px] text-muted-foreground">
-          オプショングループが未登録です。トッピングや量目選択などが必要な場合は「テンプレートから追加」か「＋ グループを追加」から登録してください。
+          {t('settings.menu.optionGroupsEmpty')}
         </div>
       )}
 
@@ -3274,6 +3301,7 @@ function ApplyTemplatePicker({
   onApplied: () => void;
   onCancel: () => void;
 }) {
+  const { t } = useLanguage();
   const [templates, setTemplates] = useState<PosMenuOptionGroupTemplate[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [applyingId, setApplyingId] = useState<string | null>(null);
@@ -3281,8 +3309,8 @@ function ApplyTemplatePicker({
   useEffect(() => {
     listMenuOptionTemplates()
       .then((res) => setTemplates(res.templates))
-      .catch((err) => setError(err instanceof PosMenuApiError ? err.message : 'テンプレートの取得に失敗しました'));
-  }, []);
+      .catch((err) => setError(err instanceof PosMenuApiError ? err.message : t('settings.menu.templateFetchError')));
+  }, [t]);
 
   async function handleApply(templateId: string) {
     setApplyingId(templateId);
@@ -3291,7 +3319,7 @@ function ApplyTemplatePicker({
       await applyMenuOptionTemplate(itemId, templateId);
       onApplied();
     } catch (err) {
-      setError(err instanceof PosMenuApiError ? err.message : '適用に失敗しました');
+      setError(err instanceof PosMenuApiError ? err.message : t('settings.menu.applyError'));
     } finally {
       setApplyingId(null);
     }
@@ -3300,31 +3328,29 @@ function ApplyTemplatePicker({
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-border bg-secondary/40 p-3">
       {error && <div className="text-xs text-destructive">{error}</div>}
-      {templates === null && !error && <div className="text-xs text-muted-foreground">読み込み中…</div>}
+      {templates === null && !error && <div className="text-xs text-muted-foreground">{t('common.loadingEllipsis')}</div>}
       {templates?.length === 0 && (
-        <div className="text-[12px] text-muted-foreground">
-          テンプレートが未登録です。設定画面上部の「オプションテンプレート」から先に登録してください。
-        </div>
+        <div className="text-[12px] text-muted-foreground">{t('settings.menu.noTemplatesYet')}</div>
       )}
-      {templates?.map((t) => (
-        <div key={t.id} className="flex items-center justify-between gap-2 rounded-lg border border-border bg-card px-2.5 py-1.5">
+      {templates?.map((tpl) => (
+        <div key={tpl.id} className="flex items-center justify-between gap-2 rounded-lg border border-border bg-card px-2.5 py-1.5">
           <div className="min-w-0">
-            <div className="truncate text-[12.5px] font-semibold">{t.label}</div>
+            <div className="truncate text-[12.5px] font-semibold">{tpl.label}</div>
             <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
-              {t.choices.length > 0 ? t.choices.map((c) => c.label).join(' / ') : '選択肢なし'}
+              {tpl.choices.length > 0 ? tpl.choices.map((c) => c.label).join(' / ') : t('settings.menu.noChoices')}
             </div>
           </div>
           <button
-            onClick={() => handleApply(t.id)}
+            onClick={() => handleApply(tpl.id)}
             disabled={applyingId !== null}
             className="h-7 flex-shrink-0 rounded-lg bg-primary px-2.5 text-[11.5px] font-semibold text-primary-foreground disabled:opacity-60"
           >
-            {applyingId === t.id ? '適用中…' : 'この商品に適用'}
+            {applyingId === tpl.id ? t('settings.menu.applyingEllipsis') : t('settings.menu.applyToThisItem')}
           </button>
         </div>
       ))}
       <button type="button" onClick={onCancel} className="h-7 w-fit rounded-lg border border-border px-2.5 text-[11.5px] font-semibold">
-        閉じる
+        {t('common.close')}
       </button>
     </div>
   );
@@ -3339,6 +3365,7 @@ function AddOptionGroupForm({
   onCreated: () => void;
   onCancel: () => void;
 }) {
+  const { t } = useLanguage();
   const [key, setKey] = useState('');
   const [label, setLabel] = useState('');
   const [required, setRequired] = useState(true);
@@ -3354,7 +3381,7 @@ function AddOptionGroupForm({
       await createMenuOptionGroup(itemId, { key: key.trim(), label: label.trim(), required });
       onCreated();
     } catch (err) {
-      setError(err instanceof PosMenuApiError ? err.message : '登録に失敗しました');
+      setError(err instanceof PosMenuApiError ? err.message : t('common.registerError'));
     } finally {
       setSubmitting(false);
     }
@@ -3366,18 +3393,18 @@ function AddOptionGroupForm({
         <input
           value={key}
           onChange={(e) => setKey(e.target.value)}
-          placeholder="キー (例: weight)"
+          placeholder={t('settings.menu.groupKeyPlaceholder')}
           className="h-8 w-32 rounded-lg border border-border px-2.5 text-[12.5px]"
         />
         <input
           value={label}
           onChange={(e) => setLabel(e.target.value)}
-          placeholder="表示名 (例: 量目を選択)"
+          placeholder={t('settings.menu.groupLabelPlaceholder')}
           className="h-8 flex-1 rounded-lg border border-border px-2.5 text-[12.5px]"
         />
         <label className="flex items-center gap-1.5 whitespace-nowrap text-[11.5px] text-muted-foreground">
           <input type="checkbox" checked={required} onChange={(e) => setRequired(e.target.checked)} />
-          必須
+          {t('settings.menu.required')}
         </label>
       </div>
       {error && <div className="text-xs text-destructive">{error}</div>}
@@ -3387,10 +3414,10 @@ function AddOptionGroupForm({
           disabled={submitting || !key.trim() || !label.trim()}
           className="h-8 w-fit rounded-lg bg-primary px-3 text-[12px] font-semibold text-primary-foreground disabled:opacity-60"
         >
-          {submitting ? '登録中…' : '登録する'}
+          {submitting ? t('common.registering') : t('settings.staff.registerSubmit')}
         </button>
         <button type="button" onClick={onCancel} className="h-8 rounded-lg border border-border px-3 text-[12px] font-semibold">
-          キャンセル
+          {t('common.cancel')}
         </button>
       </div>
     </form>
@@ -3408,6 +3435,7 @@ function OptionGroupCard({
   onChanged: () => void;
   onDeleteGroup: () => void;
 }) {
+  const { t } = useLanguage();
   const [editing, setEditing] = useState(false);
   const [label, setLabel] = useState(group.label);
   const [required, setRequired] = useState(group.required);
@@ -3425,7 +3453,7 @@ function OptionGroupCard({
       setEditing(false);
       onChanged();
     } catch (err) {
-      setError(err instanceof PosMenuApiError ? err.message : '更新に失敗しました');
+      setError(err instanceof PosMenuApiError ? err.message : t('common.updateError'));
     } finally {
       setSubmitting(false);
     }
@@ -3436,7 +3464,7 @@ function OptionGroupCard({
       await deleteMenuOptionChoice(itemId, group.id, choiceId);
       onChanged();
     } catch (err) {
-      setError(err instanceof PosMenuApiError ? err.message : '選択肢の削除に失敗しました');
+      setError(err instanceof PosMenuApiError ? err.message : t('settings.menu.choiceDeleteError'));
     }
   }
 
@@ -3453,14 +3481,14 @@ function OptionGroupCard({
             />
             <label className="flex items-center gap-1.5 whitespace-nowrap text-[11.5px] text-muted-foreground">
               <input type="checkbox" checked={required} onChange={(e) => setRequired(e.target.checked)} />
-              必須
+              {t('settings.menu.required')}
             </label>
             <button
               type="submit"
               disabled={submitting}
               className="h-8 rounded-lg bg-primary px-2.5 text-[11.5px] font-semibold text-primary-foreground disabled:opacity-60"
             >
-              保存
+              {t('common.save')}
             </button>
             <button
               type="button"
@@ -3471,7 +3499,7 @@ function OptionGroupCard({
               }}
               className="h-8 rounded-lg border border-border px-2.5 text-[11.5px] font-semibold"
             >
-              キャンセル
+              {t('common.cancel')}
             </button>
           </form>
         ) : (
@@ -3481,7 +3509,9 @@ function OptionGroupCard({
                 {group.label}
               </button>
               {group.required && (
-                <span className="rounded bg-secondary px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">必須</span>
+                <span className="rounded bg-secondary px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
+                  {t('settings.menu.required')}
+                </span>
               )}
             </div>
             <div className="mt-0.5 text-[11px] text-muted-foreground">key: {group.key}</div>
@@ -3489,7 +3519,7 @@ function OptionGroupCard({
         )}
         {!editing && (
           <button onClick={onDeleteGroup} className="flex-shrink-0 text-[11.5px] font-semibold text-destructive">
-            グループを削除
+            {t('settings.menu.deleteGroup')}
           </button>
         )}
       </div>
@@ -3498,7 +3528,7 @@ function OptionGroupCard({
 
       <div className="mt-2.5 flex flex-col gap-1.5">
         {group.choices.length === 0 && !showAddChoice && (
-          <div className="text-[11.5px] text-muted-foreground">選択肢が未登録です。</div>
+          <div className="text-[11.5px] text-muted-foreground">{t('settings.menu.choicesEmpty')}</div>
         )}
         {group.choices.map((c) => (
           <OptionChoiceRow
@@ -3527,7 +3557,7 @@ function OptionGroupCard({
           onClick={() => setShowAddChoice(true)}
           className="mt-2 h-7 w-fit rounded-lg border border-dashed border-brand px-2.5 text-[11px] font-semibold text-brand"
         >
-          ＋ 選択肢を追加
+          ＋ {t('settings.menu.addChoice')}
         </button>
       )}
     </div>
@@ -3547,6 +3577,7 @@ function OptionChoiceRow({
   onChanged: () => void;
   onDelete: () => void;
 }) {
+  const { t } = useLanguage();
   const [editing, setEditing] = useState(false);
   const [label, setLabel] = useState(choice.label);
   const [priceDelta, setPriceDelta] = useState(String(choice.price_delta));
@@ -3589,7 +3620,7 @@ function OptionChoiceRow({
           disabled={submitting}
           className="h-7 rounded bg-primary px-2 text-[11px] font-semibold text-primary-foreground disabled:opacity-60"
         >
-          保存
+          {t('common.save')}
         </button>
         <button
           type="button"
@@ -3600,7 +3631,7 @@ function OptionChoiceRow({
           }}
           className="h-7 rounded border border-border px-2 text-[11px] font-semibold"
         >
-          キャンセル
+          {t('common.cancel')}
         </button>
       </form>
     );
@@ -3612,7 +3643,7 @@ function OptionChoiceRow({
         {choice.label} <span className="text-muted-foreground">({choice.price_delta >= 0 ? '+' : ''}${choice.price_delta.toFixed(2)})</span>
       </button>
       <button onClick={onDelete} className="text-[11px] font-semibold text-destructive">
-        削除
+        {t('common.delete')}
       </button>
     </div>
   );
@@ -3629,6 +3660,7 @@ function AddOptionChoiceForm({
   onCreated: () => void;
   onCancel: () => void;
 }) {
+  const { t } = useLanguage();
   const [choiceKey, setChoiceKey] = useState('');
   const [label, setLabel] = useState('');
   const [priceDelta, setPriceDelta] = useState('0');
@@ -3645,7 +3677,7 @@ function AddOptionChoiceForm({
       await createMenuOptionChoice(itemId, groupId, { choiceKey: choiceKey.trim(), label: label.trim(), priceDelta: value });
       onCreated();
     } catch (err) {
-      setError(err instanceof PosMenuApiError ? err.message : '登録に失敗しました');
+      setError(err instanceof PosMenuApiError ? err.message : t('common.registerError'));
     } finally {
       setSubmitting(false);
     }
@@ -3657,20 +3689,20 @@ function AddOptionChoiceForm({
         <input
           value={choiceKey}
           onChange={(e) => setChoiceKey(e.target.value)}
-          placeholder="キー (例: 100g)"
+          placeholder={t('settings.menu.choiceKeyExamplePlaceholder')}
           className="h-7 w-24 rounded border border-border px-2 text-[12px]"
         />
         <input
           value={label}
           onChange={(e) => setLabel(e.target.value)}
-          placeholder="表示名 (例: 100g)"
+          placeholder={t('settings.menu.choiceLabelExamplePlaceholder')}
           className="h-7 flex-1 rounded border border-border px-2 text-[12px]"
         />
         <input
           value={priceDelta}
           onChange={(e) => setPriceDelta(e.target.value)}
           inputMode="decimal"
-          placeholder="追加料金 ($)"
+          placeholder={t('settings.menu.extraChargePlaceholder')}
           className="h-7 w-24 rounded border border-border px-2 text-[12px]"
         />
       </div>
@@ -3681,10 +3713,10 @@ function AddOptionChoiceForm({
           disabled={submitting || !choiceKey.trim() || !label.trim()}
           className="h-7 w-fit rounded bg-primary px-2.5 text-[11.5px] font-semibold text-primary-foreground disabled:opacity-60"
         >
-          {submitting ? '登録中…' : '登録する'}
+          {submitting ? t('common.registering') : t('settings.staff.registerSubmit')}
         </button>
         <button type="button" onClick={onCancel} className="h-7 rounded border border-border px-2.5 text-[11.5px] font-semibold">
-          キャンセル
+          {t('common.cancel')}
         </button>
       </div>
     </form>
@@ -3696,16 +3728,15 @@ function AddOptionChoiceForm({
 // cambodia-pos のサーバー側からは見えず、API 側で認可できない (multi-tenant-productization-spec.md §3.4)。
 function PinLoginRequiredNote() {
   const router = useRouter();
+  const { t } = useLanguage();
   return (
     <div className="flex flex-col gap-2 rounded-xl border border-amber-300 bg-amber-50 p-4">
-      <div className="text-[13px] leading-relaxed text-amber-900">
-        この機能はPINログインでのみご利用いただけます。現在 Telegram (matsunoya-dine) 連携ログインでアクセスしているため、一度PINでログインし直してください。
-      </div>
+      <div className="text-[13px] leading-relaxed text-amber-900">{t('settings.pinRequired.body')}</div>
       <button
         onClick={() => router.push('/login')}
         className="mt-1 h-[38px] w-fit rounded-lg bg-primary px-4 text-[12.5px] font-semibold text-primary-foreground"
       >
-        PINでログインし直す
+        {t('settings.pinRequired.cta')}
       </button>
     </div>
   );
@@ -3775,16 +3806,22 @@ function InfoNote({ title, body, cta, onCta }: { title: string; body: string; ct
 // 日本語名に対する英語/クメール語/中国語/韓国語の翻訳を一覧編集する。
 // 「AI下書きを生成」で Gemini API による下書きを一括生成 (既存の入力済みの言語は上書きしない)、
 // その後この画面で1件ずつ内容を確認・修正して保存する。
-const TRANSLATION_LANG_LABEL: Record<MenuTranslationLang, string> = { en: '英語', km: 'クメール語', zh: '中国語', ko: '韓国語' };
-const TRANSLATION_TYPE_LABEL: Record<MenuTranslationEntry['type'], string> = {
-  category: 'カテゴリー',
-  item: '商品',
-  option_group: 'オプション (グループ名)',
-  option_choice: 'オプション (選択肢)',
-};
+function translationLangLabel(t: TFunc, lang: MenuTranslationLang): string {
+  if (lang === 'en') return t('settings.translations.lang.en');
+  if (lang === 'km') return t('settings.translations.lang.km');
+  if (lang === 'zh') return t('settings.translations.lang.zh');
+  return t('settings.translations.lang.ko');
+}
+function translationTypeLabel(t: TFunc, type: MenuTranslationEntry['type']): string {
+  if (type === 'category') return t('settings.translations.type.category');
+  if (type === 'item') return t('settings.translations.type.item');
+  if (type === 'option_group') return t('settings.translations.type.optionGroup');
+  return t('settings.translations.type.optionChoice');
+}
 const TRANSLATION_TYPE_ORDER: MenuTranslationEntry['type'][] = ['category', 'item', 'option_group', 'option_choice'];
 
 function TranslationTab() {
+  const { t } = useLanguage();
   const me = useStaff();
   const isPosNative = me.authMode === 'pos_native';
   const canManage = isPosNative && (me.role === 'owner' || me.role === 'manager');
@@ -3800,8 +3837,8 @@ function TranslationTab() {
     setLoadError(null);
     listMenuTranslations()
       .then((r) => setEntries(r.entries))
-      .catch(() => setLoadError('翻訳データの取得に失敗しました'));
-  }, []);
+      .catch(() => setLoadError(t('settings.translations.fetchError')));
+  }, [t]);
 
   useEffect(() => {
     if (canManage) load();
@@ -3810,7 +3847,7 @@ function TranslationTab() {
   if (!isPosNative) {
     return (
       <div className="flex max-w-[560px] flex-col gap-3.5">
-        <div className="text-[15px] font-bold">翻訳</div>
+        <div className="text-[15px] font-bold">{t('settings.nav.translations')}</div>
         <PinLoginRequiredNote />
       </div>
     );
@@ -3819,8 +3856,8 @@ function TranslationTab() {
   if (!canManage) {
     return (
       <div className="flex max-w-[560px] flex-col gap-3.5">
-        <div className="text-[15px] font-bold">翻訳</div>
-        <div className="rounded-xl border border-border p-4 text-[13px] text-muted-foreground">翻訳の管理には manager 以上の権限が必要です。</div>
+        <div className="text-[15px] font-bold">{t('settings.nav.translations')}</div>
+        <div className="rounded-xl border border-border p-4 text-[13px] text-muted-foreground">{t('settings.translations.managerRequired')}</div>
       </div>
     );
   }
@@ -3831,10 +3868,12 @@ function TranslationTab() {
     setLoadError(null);
     try {
       const r = await generateMenuTranslationDrafts();
-      setGenerateResult(r.updated > 0 ? `${r.updated}/${r.total}件の下書きを生成しました。内容を確認してください。` : '未翻訳の項目はありませんでした。');
+      setGenerateResult(
+        r.updated > 0 ? t('settings.translations.generateResult', { updated: r.updated, total: r.total }) : t('settings.translations.generateNoneNeeded'),
+      );
       load();
     } catch (err) {
-      setLoadError(err instanceof Error ? err.message : 'AI翻訳の生成に失敗しました');
+      setLoadError(err instanceof Error ? err.message : t('settings.translations.generateError'));
     } finally {
       setGenerating(false);
     }
@@ -3848,7 +3887,7 @@ function TranslationTab() {
       await saveMenuTranslation(entry.type, entry.id, nextTranslations);
       setEntries((prev) => (prev ? prev.map((e) => (e.type === entry.type && e.id === entry.id ? { ...e, translations: nextTranslations } : e)) : prev));
     } catch {
-      setLoadError('保存に失敗しました。もう一度お試しください。');
+      setLoadError(t('settings.translations.saveError'));
     } finally {
       setSavingKey((k) => (k === key ? null : k));
     }
@@ -3859,12 +3898,8 @@ function TranslationTab() {
 
   return (
     <div className="flex max-w-[960px] flex-col gap-3.5">
-      <div className="text-[15px] font-bold">翻訳</div>
-      <div className="rounded-xl border border-border p-3.5 text-[12px] text-muted-foreground">
-        カテゴリー・商品・オプション名の英語・クメール語・中国語・韓国語への翻訳を管理します。「AI下書きを生成」を押すと、まだ翻訳が無い項目だけ
-        Gemini AI が下書きを作成します(すでに入力済みの内容は上書きされません)。生成後は下の一覧で内容を確認し、必要に応じて修正してください。
-        QRセルフオーダー画面・レジ画面はここで保存した翻訳を使って表示されます。
-      </div>
+      <div className="text-[15px] font-bold">{t('settings.nav.translations')}</div>
+      <div className="rounded-xl border border-border p-3.5 text-[12px] text-muted-foreground">{t('settings.translations.intro')}</div>
 
       {loadError && <div className="rounded-lg bg-destructive/10 p-2.5 text-[12.5px] text-destructive">{loadError}</div>}
       {generateResult && <div className="rounded-lg bg-primary/10 p-2.5 text-[12.5px] text-primary">{generateResult}</div>}
@@ -3876,29 +3911,33 @@ function TranslationTab() {
           disabled={generating}
           className="h-[38px] rounded-lg bg-primary px-4 text-[12.5px] font-semibold text-primary-foreground disabled:opacity-60"
         >
-          {generating ? 'AI翻訳を生成中...' : 'AI下書きを生成'}
+          {generating ? t('settings.translations.generatingEllipsis') : t('settings.translations.generateDraft')}
         </button>
-        {entries && <span className="text-[12px] text-muted-foreground">未翻訳(いずれかの言語が空欄): {untranslatedCount}件 / 全{entries.length}件</span>}
+        {entries && (
+          <span className="text-[12px] text-muted-foreground">
+            {t('settings.translations.untranslatedCount', { count: untranslatedCount, total: entries.length })}
+          </span>
+        )}
       </div>
 
       <div className="flex flex-wrap gap-1.5">
-        {(['all', ...TRANSLATION_TYPE_ORDER] as const).map((t) => (
+        {(['all', ...TRANSLATION_TYPE_ORDER] as const).map((ft) => (
           <button
-            key={t}
+            key={ft}
             type="button"
-            onClick={() => setFilterType(t)}
+            onClick={() => setFilterType(ft)}
             className={`h-8 rounded-full border px-3 text-[12px] font-semibold ${
-              filterType === t ? 'border-primary bg-primary text-primary-foreground' : 'border-border text-muted-foreground'
+              filterType === ft ? 'border-primary bg-primary text-primary-foreground' : 'border-border text-muted-foreground'
             }`}
           >
-            {t === 'all' ? 'すべて' : TRANSLATION_TYPE_LABEL[t]}
+            {ft === 'all' ? t('settings.translations.filterAll') : translationTypeLabel(t, ft)}
           </button>
         ))}
       </div>
 
-      {!entries && !loadError && <div className="text-[12.5px] text-muted-foreground">読み込み中...</div>}
+      {!entries && !loadError && <div className="text-[12.5px] text-muted-foreground">{t('settings.translations.loadingEllipsis')}</div>}
 
-      {entries && visibleEntries.length === 0 && <div className="text-[12.5px] text-muted-foreground">対象の項目がありません。</div>}
+      {entries && visibleEntries.length === 0 && <div className="text-[12.5px] text-muted-foreground">{t('settings.translations.noEntries')}</div>}
 
       <div className="flex flex-col gap-2.5">
         {visibleEntries.map((entry) => {
@@ -3906,15 +3945,17 @@ function TranslationTab() {
           return (
             <div key={key} className="rounded-xl border border-border p-3">
               <div className="mb-2 flex flex-wrap items-baseline gap-2">
-                <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">{TRANSLATION_TYPE_LABEL[entry.type]}</span>
+                <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
+                  {translationTypeLabel(t, entry.type)}
+                </span>
                 <span className="text-[13.5px] font-bold">{entry.ja}</span>
                 {entry.context && <span className="text-[11.5px] text-muted-foreground">({entry.context})</span>}
-                {savingKey === key && <span className="text-[11px] text-muted-foreground">保存中...</span>}
+                {savingKey === key && <span className="text-[11px] text-muted-foreground">{t('settings.translations.savingEllipsis')}</span>}
               </div>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
                 {(['en', 'km', 'zh', 'ko'] as MenuTranslationLang[]).map((lang) => (
                   <label key={lang} className="flex flex-col gap-1">
-                    <span className="text-[11px] text-muted-foreground">{TRANSLATION_LANG_LABEL[lang]}</span>
+                    <span className="text-[11px] text-muted-foreground">{translationLangLabel(t, lang)}</span>
                     <input
                       defaultValue={entry.translations[lang] ?? ''}
                       onBlur={(e) => {
@@ -3937,6 +3978,7 @@ function TranslationTab() {
 // 連携設定タブ: pos.integrations.menu_source の ON/OFF 切り替え (Phase C)。
 // owner のみ操作可能。行が無い店舗は 'dine_live' (matsunoya-dine 連携、現状維持) 扱い。
 function IntegrationTab() {
+  const { t } = useLanguage();
   const me = useStaff();
   const isPosNative = me.authMode === 'pos_native';
 
@@ -3950,9 +3992,9 @@ function IntegrationTab() {
     getIntegrationSettings()
       .then(({ menuSource }) => setMode(menuSource))
       .catch((err) => {
-        setLoadError(err instanceof PosSettingsApiError ? err.message : '連携設定の取得に失敗しました');
+        setLoadError(err instanceof PosSettingsApiError ? err.message : t('settings.integration.fetchError'));
       });
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     if (isPosNative && me.role === 'owner') load();
@@ -3961,7 +4003,7 @@ function IntegrationTab() {
   if (!isPosNative) {
     return (
       <div className="flex max-w-[560px] flex-col gap-3.5">
-        <div className="text-[15px] font-bold">連携設定</div>
+        <div className="text-[15px] font-bold">{t('settings.nav.integration')}</div>
         <PinLoginRequiredNote />
       </div>
     );
@@ -3970,10 +4012,8 @@ function IntegrationTab() {
   if (me.role !== 'owner') {
     return (
       <div className="flex max-w-[560px] flex-col gap-3.5">
-        <div className="text-[15px] font-bold">連携設定</div>
-        <div className="rounded-xl border border-border p-4 text-[13px] text-muted-foreground">
-          連携設定の変更には owner 権限が必要です。
-        </div>
+        <div className="text-[15px] font-bold">{t('settings.nav.integration')}</div>
+        <div className="rounded-xl border border-border p-4 text-[13px] text-muted-foreground">{t('settings.integration.ownerRequired')}</div>
       </div>
     );
   }
@@ -3986,7 +4026,7 @@ function IntegrationTab() {
       const { menuSource } = await updateIntegrationSettings(next);
       setMode(menuSource);
     } catch (err) {
-      setSwitchError(err instanceof PosSettingsApiError ? err.message : '切り替えに失敗しました');
+      setSwitchError(err instanceof PosSettingsApiError ? err.message : t('settings.integration.switchError'));
     } finally {
       setSwitching(false);
     }
@@ -3995,30 +4035,27 @@ function IntegrationTab() {
   return (
     <div className="flex max-w-[640px] flex-col gap-5">
       <div>
-        <div className="text-[15px] font-bold">連携設定</div>
-        <div className="mt-1 text-[11.5px] text-muted-foreground">
-          レジ画面 (会計・注文) がどちらのメニュー・設定データを使うかを切り替えます。切り替えても過去の注文データや
-          matsunoya-dine 側の予約・スタンプ機能には影響しません。
-        </div>
+        <div className="text-[15px] font-bold">{t('settings.nav.integration')}</div>
+        <div className="mt-1 text-[11.5px] text-muted-foreground">{t('settings.integration.intro')}</div>
       </div>
 
       {loadError && <div className="text-xs text-destructive">{loadError}</div>}
       {switchError && <div className="text-xs text-destructive">{switchError}</div>}
 
-      {mode === null && !loadError && <div className="text-xs text-muted-foreground">読み込み中…</div>}
+      {mode === null && !loadError && <div className="text-xs text-muted-foreground">{t('common.loadingEllipsis')}</div>}
 
       {mode !== null && (
         <div className="flex flex-col gap-3">
           <IntegrationOption
-            title="matsunoya-dine 連携 (現状維持)"
-            desc="メニュー・VAT率・決済手段などは matsunoya-dine 管理画面で編集したものをそのまま使います。"
+            title={t('settings.integration.dineLiveTitle')}
+            desc={t('settings.integration.dineLiveDesc')}
             selected={mode === 'dine_live'}
             disabled={switching}
             onSelect={() => handleSwitch('dine_live')}
           />
           <IntegrationOption
-            title="POS単体運用"
-            desc="この画面の「メニュー・商品オプション」「一般設定」「決済設定」タブで登録したデータを使います。matsunoya-dine とは独立して運用できます。"
+            title={t('settings.integration.posNativeTitle')}
+            desc={t('settings.integration.posNativeDesc')}
             selected={mode === 'pos_native'}
             disabled={switching}
             onSelect={() => handleSwitch('pos_native')}
@@ -4042,6 +4079,7 @@ function IntegrationOption({
   disabled?: boolean;
   onSelect: () => void;
 }) {
+  const { t } = useLanguage();
   return (
     <button
       onClick={onSelect}
@@ -4061,7 +4099,7 @@ function IntegrationOption({
           {selected && <span className="h-1.5 w-1.5 rounded-full bg-brand-foreground" />}
         </span>
         {title}
-        {selected && <span className="text-[11px] font-semibold text-brand">使用中</span>}
+        {selected && <span className="text-[11px] font-semibold text-brand">{t('settings.integration.inUse')}</span>}
       </div>
       <div className="pl-6 text-[11.5px] leading-relaxed text-muted-foreground">{desc}</div>
     </button>
