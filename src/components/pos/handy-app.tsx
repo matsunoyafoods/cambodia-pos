@@ -20,6 +20,7 @@ import {
   enqueueKitchenPrintJob,
   getOpenOrder,
   resetTable,
+  triggerPassPrntJobs,
   updateConfirmedItemQty,
   PosOrderOrdersApiError,
   type OpenOrderRecord,
@@ -340,7 +341,9 @@ function HandyAppInner() {
         orderId: currentOrder.id,
         tableCode: selectedTable,
         items: items.map((it) => ({ name: it.menu_name, qty: it.qty })),
-      }).catch(() => {});
+      })
+        .then(triggerPassPrntJobs)
+        .catch(() => {});
       return true;
     } catch (err) {
       setConfirmError(err instanceof PosOrderOrdersApiError ? err.message : t('handyApp.confirmError'));
@@ -474,6 +477,9 @@ function HandyAppInner() {
                 </div>
                 <button onClick={() => router.push('/pos')} className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary">
                   {t('handyApp.goToRegister')}
+                </button>
+                <button onClick={() => router.push('/pos/kitchen')} className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary">
+                  {t('posApp.menuKitchen')}
                 </button>
                 {me.authMode === 'pos_native' && (
                   <button

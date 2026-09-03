@@ -11,6 +11,40 @@ export function columnsForPaperWidth(paperWidthMm: number): number {
   return paperWidthMm >= 70 ? 46 : 32;
 }
 
+// PassPRNT (2026-09-03 追加。中継PC不要でレジ端末に直接印刷する方式) 用のドット幅。
+// Starプリンターの一般的な印字可能幅: 58mm系=384ドット、80mm系=576ドット
+// (columnsForPaperWidth の閾値と揃えている)。
+export function sizeDotsForPaperWidth(paperWidthMm: number): number {
+  return paperWidthMm >= 70 ? 576 : 384;
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// formatReceiptText/formatInvoiceText/formatKitchenTicketText が返す整形済みプレーンテキストを、
+// PassPRNTのURLスキーム (html パラメータ) にそのまま渡せるHTMLへ変換する (2026-09-03 追加)。
+// 等幅フォント + プリンターのドット幅と揃えたページ幅で、テキスト整形時の桁位置がそのまま
+// 見た目の位置に対応するようにしている。ロゴは (ESC/POSラスター変換ではなく) 画像としてそのまま
+// 埋め込むだけでよい。
+export function wrapAsPassPrntHtml(
+  text: string,
+  opts: { paperWidthMm: number; logoPngBase64?: string | null },
+): string {
+  const widthPx = sizeDotsForPaperWidth(opts.paperWidthMm);
+  const logoHtml = opts.logoPngBase64
+    ? `<div style="text-align:center;margin-bottom:6px;"><img src="data:image/png;base64,${opts.logoPngBase64}" style="max-width:100%;" /></div>`
+    : '';
+  return [
+    '<!doctype html><html><head><meta charset="utf-8" />',
+    `<style>body{margin:0;padding:0;width:${widthPx}px;}pre{margin:0;font-family:"MS Gothic","Courier New",monospace;font-size:24px;line-height:1.3;white-space:pre-wrap;word-break:break-all;}</style>`,
+    '</head><body>',
+    logoHtml,
+    `<pre>${escapeHtml(text)}</pre>`,
+    '</body></html>',
+  ].join('');
+}
+
 function padRight(s: string, width: number): string {
   return s.length >= width ? s.slice(0, width) : s + ' '.repeat(width - s.length);
 }

@@ -23,6 +23,7 @@
 
 import { spawn } from 'node:child_process';
 import net from 'node:net';
+import fs from 'node:fs';
 
 const API_BASE = process.env.POS_API_BASE;
 const TOKEN = process.env.POS_AGENT_TOKEN;
@@ -121,6 +122,54 @@ function printViaUsbAgent(deviceName, data) {
   });
 }
 
+// Bluetooth接続 (2026-09-03 追加)。有線工事なしでレジ運用したい店舗向け。プリンターとこの
+// エージェントが動くPC/中継機をあらかじめOSのBluetooth設定でペアリングしておくと (SPPプロファイル)、
+// OSがそのプリンターを「シリアルポート/デバイスファイル」として割り当てる。以後は普通のファイルの
+// ように生バイト列を書き込むだけで印刷できる (macOS/Linuxの場合。ペアリング手順は README.md 参照)。
+//   例: macOS → /dev/tty.TSP650II , /dev/cu.TSP650II
+//       Linux (rfcomm) → /dev/rfcomm0
+// Windows は上記のようなデバイスファイルが無く、ペアリング後に割り当てられる COM ポート
+// (例: COM5) へは Node 標準のファイルAPIでは書き込めないため、`serialport` パッケージが
+// 別途必要 (未インストールなら Windows 環境でのみエラーになる。README.md 参照)。
+function printViaBluetoothAgent(devicePath, data) {
+  return new Promise((resolve, reject) => {
+    if (!devicePath) {
+      reject(new Error('device_name (ペアリング後のデバイスパス) が設定されていません'));
+      return;
+    }
+    if (/^com\d+$/i.test(devicePath.trim())) {
+      // Windows の COM ポート: serialport パッケージが入っていれば使う。
+      import('serialport')
+        .then(({ SerialPort }) => {
+          const port = new SerialPort({ path: devicePath, baudRate: 9600 }, (err) => {
+            if (err) return reject(err);
+          });
+          port.write(data, (err) => {
+            if (err) return reject(err);
+            port.drain((err2) => {
+              port.close();
+              if (err2) reject(err2);
+              else resolve();
+            });
+          });
+        })
+        .catch(() => {
+          reject(
+            new Error(
+              `Windows で COM ポート (${devicePath}) へ印刷するには 'npm install serialport' が必要です (print-agent フォルダ内で実行してください)`,
+            ),
+          );
+        });
+      return;
+    }
+    // macOS/Linux: ペアリング済みのデバイスファイルへ生バイトをそのまま書き込む。
+    fs.writeFile(devicePath, data, (err) => {
+      if (err) reject(err);
+      else resolve();
+    });
+  });
+}
+
 async function processJob(job) {
   const printer = printerMap.get(job.printerId);
   if (!printer) {
@@ -131,6 +180,8 @@ async function processJob(job) {
   try {
     if (printer.connectionType === 'lan') {
       await printViaLan(printer.lanIp, printer.lanPort, data);
+    } else if (printer.connectionType === 'bluetooth') {
+      await printViaBluetoothAgent(printer.deviceName, data);
     } else {
       await printViaUsbAgent(printer.deviceName, data);
     }

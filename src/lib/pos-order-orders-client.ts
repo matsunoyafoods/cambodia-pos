@@ -192,7 +192,40 @@ export function resetTable(tableCode: string): Promise<{ ok: true; hadOpenOrder:
 // 変更したため、整形済みテキストではなく元データを渡す形に変更)。該当ロールのプリンターが
 // 設定・有効化されていなくても静かに printersQueued:0 を返すだけなので、レジ操作の失敗として
 // 扱わなくてよい (呼び出し側は catch で握りつぶして良い)。
-type PrintJobResult = { ok: true; printersQueued: number };
+// passprnt (2026-09-03 追加): 中継PC不要でレジ端末に直接印刷する方式。この端末自体が
+// Star Micronics純正の無料アプリ「PassPRNT」経由でプリンターとBluetoothペアリングされている
+// 前提で、starpassprnt:// URLスキームを開いてPassPRNTへ印刷を渡す。
+export type PassPrntJob = { printerId: string; html: string; sizeDots: number; cut: string };
+type PrintJobResult = { ok: true; printersQueued: number; passPrntJobs?: PassPrntJob[] };
+
+// PassPRNT (https://star-m.jp) のURLスキーム仕様に沿って starpassprnt:// のURLを組み立てる。
+// back (呼び出し元へ戻るURLスキーム) は、このWebアプリ自身がカスタムURLスキームを持たない
+// (ネイティブアプリではなくブラウザで動く) ため指定しない — 印刷後はスタッフが手動で
+// ブラウザ (Safari/Chrome) に戻る運用になる。popup=disable でPassPRNT側のエラーダイアログを
+// 抑制し (エラー時は単に印刷されないだけになる。何度も失敗する場合はテスト印刷で確認)。
+function buildPassPrntUrl(job: PassPrntJob): string {
+  const params = new URLSearchParams({
+    html: job.html,
+    size: String(job.sizeDots),
+    cut: job.cut,
+    popup: 'disable',
+  });
+  return `starpassprnt://v1/print/nopreview?${params.toString()}`;
+}
+
+// レジ端末自体がプリンターとペアリングされている (passprnt) 場合、enqueueXxxPrintJob の
+// レスポンスに passPrntJobs が含まれるので、それぞれについてURLスキームを開いてPassPRNTへ
+// 印刷を渡す。PassPRNTアプリが端末に入っていない場合、OSが「開けません」等を表示するだけで
+// Webアプリ側の他の処理には影響しない (2026-09-03 追加)。
+// 注意: passprnt 方式のプリンターは通常1台 (レジ端末自体) を想定しており、同時に複数台
+// あるとURLスキーム遷移が後勝ちになり最初の1件しか実行されない。複数台運用が必要になったら
+// setTimeout等での逐次実行に変更すること。
+export function triggerPassPrntJobs(result: PrintJobResult): void {
+  if (typeof window === 'undefined') return;
+  const jobs = result.passPrntJobs ?? [];
+  if (jobs.length === 0) return;
+  window.location.href = buildPassPrntUrl(jobs[0]);
+}
 
 export function enqueueKitchenPrintJob(input: {
   orderId?: string;

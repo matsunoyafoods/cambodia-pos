@@ -35,7 +35,7 @@ function toPrinterConfig(row: PrinterRow): PrinterConfig {
 const patchSchema = z.object({
   name: z.string().min(1).max(60).optional(),
   role: z.enum(['receipt', 'kitchen']).optional(),
-  connectionType: z.enum(['usb_agent', 'lan']).optional(),
+  connectionType: z.enum(['usb_agent', 'lan', 'bluetooth', 'passprnt']).optional(),
   paperWidthMm: z.number().int().positive().optional(),
   deviceName: z.string().max(120).nullable().optional(),
   lanIp: z.string().max(64).nullable().optional(),

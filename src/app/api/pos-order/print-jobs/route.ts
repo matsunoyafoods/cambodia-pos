@@ -1,7 +1,13 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createPosAdminClient, getPosStoreId } from '@/lib/supabase/admin';
-import { formatInvoiceText, formatKitchenTicketText, formatReceiptText } from '@/lib/receipt-format';
+import {
+  formatInvoiceText,
+  formatKitchenTicketText,
+  formatReceiptText,
+  sizeDotsForPaperWidth,
+  wrapAsPassPrntHtml,
+} from '@/lib/receipt-format';
 import { pngBase64ToEscPosRasterBase64 } from '@/lib/escpos-logo';
 import type { ReceiptFormatSettings } from '@/lib/pos-types';
 
@@ -73,7 +79,7 @@ export async function POST(req: Request) {
   const [{ data: printers, error: printersError }, { data: store, error: storeError }] = await Promise.all([
     supabase
       .from('printers')
-      .select('id, paper_width_mm')
+      .select('id, paper_width_mm, connection_type')
       .eq('store_id', storeId)
       .eq('role', role)
       .eq('enabled', true),
@@ -82,7 +88,17 @@ export async function POST(req: Request) {
   if (printersError) return NextResponse.json({ error: printersError.message }, { status: 500 });
   if (storeError) return NextResponse.json({ error: storeError.message }, { status: 500 });
   if (!printers || printers.length === 0) {
-    return NextResponse.json({ ok: true, printersQueued: 0 });
+    return NextResponse.json({ ok: true, printersQueued: 0, passPrntJobs: [] });
+  }
+
+  // passprnt (2026-09-03 追加、中継PC不要でレジ端末に直接印刷する方式) のプリンターは
+  // print_jobs キューに積んでも誰も拾わない (ポーリングするエージェントが存在しない)。
+  // そのためHTMLを組み立ててレスポンスで返し、呼び出し元 (レジ画面、この端末自体が
+  // プリンターとペアリングされている) がその場で starpassprnt:// URLスキームを開く。
+  const queuePrinters = printers.filter((p) => p.connection_type !== 'passprnt');
+  const passPrntPrinters = printers.filter((p) => p.connection_type === 'passprnt');
+  if (queuePrinters.length === 0 && passPrntPrinters.length === 0) {
+    return NextResponse.json({ ok: true, printersQueued: 0, passPrntJobs: [] });
   }
 
   const storeName = store?.name ?? "I'mHungry";
@@ -94,17 +110,14 @@ export async function POST(req: Request) {
   const footerText = receiptFormat.footerText ?? '';
   const logoPngBase64 = receiptFormat.logoPngBase64 ?? null;
 
-  const rows = printers.map((p) => {
-    let content: string;
+  // プリンター(用紙幅)ごとに整形済みプレーンテキストを組み立てる。queuePrinters (中継エージェント
+  // 方式) ・passPrntPrinters (レジ端末直接印刷方式) の両方で共通して使う。
+  function buildContent(paperWidthMm: number): string {
     if (d.kind === 'kitchen') {
-      content = formatKitchenTicketText({
-        tableCode: d.tableCode,
-        items: d.items,
-        paperWidthMm: p.paper_width_mm,
-        confirmedAt: now,
-      });
-    } else if (d.kind === 'receipt') {
-      content = formatReceiptText({
+      return formatKitchenTicketText({ tableCode: d.tableCode, items: d.items, paperWidthMm, confirmedAt: now });
+    }
+    if (d.kind === 'receipt') {
+      return formatReceiptText({
         storeName,
         headerText,
         footerText,
@@ -120,27 +133,28 @@ export async function POST(req: Request) {
         orderDiscount: d.orderDiscount,
         total: d.total,
         payments: d.payments,
-        paperWidthMm: p.paper_width_mm,
-        paidAt: now,
-      });
-    } else {
-      content = formatInvoiceText({
-        storeName,
-        headerText,
-        footerText,
-        recipientName: d.recipientName,
-        description: d.description,
-        total: d.total,
-        invoiceNo: d.invoiceNo,
-        paperWidthMm: p.paper_width_mm,
+        paperWidthMm,
         paidAt: now,
       });
     }
+    return formatInvoiceText({
+      storeName,
+      headerText,
+      footerText,
+      recipientName: d.recipientName,
+      description: d.description,
+      total: d.total,
+      invoiceNo: d.invoiceNo,
+      paperWidthMm,
+      paidAt: now,
+    });
+  }
 
+  const rows = queuePrinters.map((p) => {
+    const content = buildContent(p.paper_width_mm);
     // ロゴはレシート・領収書のみ (厨房伝票には付けない)。未設定・変換失敗時は静かに無し扱い。
     const logoBase64 =
       d.kind !== 'kitchen' && logoPngBase64 ? pngBase64ToEscPosRasterBase64(logoPngBase64, p.paper_width_mm) : null;
-
     return {
       store_id: storeId,
       printer_id: p.id,
@@ -151,7 +165,21 @@ export async function POST(req: Request) {
     };
   });
 
-  const { error: insertError } = await supabase.from('print_jobs').insert(rows);
-  if (insertError) return NextResponse.json({ error: insertError.message }, { status: 500 });
-  return NextResponse.json({ ok: true, printersQueued: printers.length });
+  if (rows.length > 0) {
+    const { error: insertError } = await supabase.from('print_jobs').insert(rows);
+    if (insertError) return NextResponse.json({ error: insertError.message }, { status: 500 });
+  }
+
+  const passPrntJobs = passPrntPrinters.map((p) => {
+    const content = buildContent(p.paper_width_mm);
+    const logoForHtml = d.kind !== 'kitchen' ? logoPngBase64 : null;
+    return {
+      printerId: p.id,
+      html: wrapAsPassPrntHtml(content, { paperWidthMm: p.paper_width_mm, logoPngBase64: logoForHtml }),
+      sizeDots: sizeDotsForPaperWidth(p.paper_width_mm),
+      cut: 'full' as const,
+    };
+  });
+
+  return NextResponse.json({ ok: true, printersQueued: rows.length, passPrntJobs });
 }

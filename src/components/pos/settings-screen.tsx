@@ -109,6 +109,8 @@ const PRINTER_ROLE_LABEL: Record<PrinterConfig['role'], string> = { receipt: '�
 const PRINTER_CONNECTION_LABEL: Record<PrinterConfig['connectionType'], string> = {
   usb_agent: 'USB接続 (ローカルエージェント経由)',
   lan: 'LAN接続 (IPアドレス指定)',
+  bluetooth: 'Bluetooth接続 (中継PCとペアリング、ローカルエージェント経由)',
+  passprnt: 'Bluetooth接続 (レジ端末に直接ペアリング、PassPRNTアプリ使用・中継機不要)',
 };
 
 // プリンター追加フォーム。接続方法によって必要な入力 (USBのキュー名 or LANのIP:ポート) が
@@ -144,7 +146,7 @@ function AddPrinterForm({ onAdd, disabled }: { onAdd: (input: CreatePrinterInput
         role,
         connectionType,
         paperWidthMm,
-        deviceName: connectionType === 'usb_agent' ? deviceName.trim() || undefined : undefined,
+        deviceName: connectionType === 'usb_agent' || connectionType === 'bluetooth' ? deviceName.trim() || undefined : undefined,
         lanIp: connectionType === 'lan' ? lanIp.trim() || undefined : undefined,
         lanPort: connectionType === 'lan' ? parseInt(lanPort, 10) || 9100 : undefined,
       });
@@ -201,6 +203,8 @@ function AddPrinterForm({ onAdd, disabled }: { onAdd: (input: CreatePrinterInput
           >
             <option value="usb_agent">USB接続 (ローカルエージェント経由)</option>
             <option value="lan">LAN接続 (IPアドレス指定)</option>
+            <option value="passprnt">Bluetooth接続 (レジ端末に直接ペアリング・中継機不要)</option>
+            <option value="bluetooth">Bluetooth接続 (中継PCとペアリング)</option>
           </select>
         </div>
         <div>
@@ -226,6 +230,25 @@ function AddPrinterForm({ onAdd, disabled }: { onAdd: (input: CreatePrinterInput
             placeholder="M502_Thermal_Receipt_Printer"
             className="h-9 w-full rounded-lg border border-border px-3 text-[13px]"
           />
+        </div>
+      ) : connectionType === 'bluetooth' ? (
+        <div>
+          <div className="mb-1 text-[11px] text-muted-foreground">
+            ペアリング後にOSが割り当てるデバイスパス (例: macOSの `/dev/tty.TSP650II`、Windowsの `COM5`。print-agent/README.md 参照)
+          </div>
+          <input
+            value={deviceName}
+            onChange={(e) => setDeviceName(e.target.value)}
+            placeholder="/dev/tty.TSP650II"
+            className="h-9 w-full rounded-lg border border-border px-3 text-[13px]"
+          />
+        </div>
+      ) : connectionType === 'passprnt' ? (
+        <div className="rounded-lg bg-muted/50 p-3 text-[11.5px] leading-relaxed text-muted-foreground">
+          追加設定は不要です。このプリンターを使う端末 (レジ端末) 自体に、App Store /
+          Google Playから無料アプリ「PassPRNT」をインストールし、端末のBluetooth設定でプリンターと
+          直接ペアリングしてください。会計・テスト印刷時、その端末のブラウザがPassPRNTを自動的に
+          呼び出して印刷します。別に中継用のPC等を用意する必要はありません。
         </div>
       ) : (
         <div className="flex gap-3">
@@ -1408,7 +1431,7 @@ export function SettingsScreen() {
                           </div>
                           <div className="mt-0.5 text-[11.5px] text-muted-foreground">
                             {PRINTER_CONNECTION_LABEL[p.connectionType]} ・ {p.paperWidthMm}mm
-                            {p.connectionType === 'usb_agent' && p.deviceName ? ` ・ ${p.deviceName}` : ''}
+                            {(p.connectionType === 'usb_agent' || p.connectionType === 'bluetooth') && p.deviceName ? ` ・ ${p.deviceName}` : ''}
                             {p.connectionType === 'lan' && p.lanIp ? ` ・ ${p.lanIp}:${p.lanPort ?? 9100}` : ''}
                           </div>
                         </div>

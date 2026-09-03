@@ -49,7 +49,7 @@ export const GET = withPosStaff('staff', async () => {
 const createSchema = z.object({
   name: z.string().min(1).max(60),
   role: z.enum(['receipt', 'kitchen']),
-  connectionType: z.enum(['usb_agent', 'lan']),
+  connectionType: z.enum(['usb_agent', 'lan', 'bluetooth', 'passprnt']),
   paperWidthMm: z.number().int().positive().default(58),
   deviceName: z.string().max(120).optional(),
   lanIp: z.string().max(64).optional(),

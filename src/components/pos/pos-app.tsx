@@ -35,6 +35,7 @@ import {
   moveTable,
   recordGuestDemographics,
   resetTable,
+  triggerPassPrntJobs,
   updateConfirmedItemDiscount,
   updateConfirmedItemQty,
   PosOrderOrdersApiError,
@@ -692,9 +693,11 @@ function PosAppInner() {
         orderId: currentOrder.id,
         tableCode: selectedTable,
         items: items.map((it) => ({ name: it.menu_name, qty: it.qty })),
-      }).catch(() => {
-        /* プリンター未接続でも注文確定自体は成功させる */
-      });
+      })
+        .then(triggerPassPrntJobs)
+        .catch(() => {
+          /* プリンター未接続でも注文確定自体は成功させる */
+        });
       return true;
     } catch (err) {
       setConfirmError(err instanceof PosOrderOrdersApiError ? err.message : t('handyApp.confirmError'));
@@ -818,9 +821,11 @@ function PosAppInner() {
         orderDiscount: totals.orderDiscount,
         total: totals.total,
         payments: snapshotPayments,
-      }).catch(() => {
-        /* プリンター未接続でも会計完了自体は成功させる */
-      });
+      })
+        .then(triggerPassPrntJobs)
+        .catch(() => {
+          /* プリンター未接続でも会計完了自体は成功させる */
+        });
       // レシート画面での「再印刷」「領収書を発行」用に、確定済み品目・合計をクリアする前の
       // 内容をスナップショットとして残しておく (2026-08-31 追加)。
       setLastCompletedOrder({
@@ -886,7 +891,7 @@ function PosAppInner() {
     if (!lastCompletedOrder || reprintBusy) return;
     setReprintBusy(true);
     try {
-      await enqueueReceiptPrintJob({
+      const result = await enqueueReceiptPrintJob({
         orderId: lastCompletedOrder.orderId ?? undefined,
         tableCode: lastCompletedOrder.tableCode,
         items: lastCompletedOrder.items,
@@ -901,6 +906,7 @@ function PosAppInner() {
         total: lastCompletedOrder.total,
         payments: lastCompletedOrder.payments,
       });
+      triggerPassPrntJobs(result);
     } catch {
       /* レシート画面には出さず、印刷が来なければスタッフがテスト印刷等で気づく想定 */
     } finally {
@@ -922,13 +928,14 @@ function PosAppInner() {
     setInvoiceBusy(true);
     setInvoiceError(null);
     try {
-      await enqueueInvoicePrintJob({
+      const result = await enqueueInvoicePrintJob({
         orderId: lastCompletedOrder.orderId ?? undefined,
         recipientName,
         description,
         total: lastCompletedOrder.total,
         invoiceNo: makeInvoiceNo(lastCompletedOrder.orderId, new Date()),
       });
+      triggerPassPrntJobs(result);
       setInvoiceIssued(true);
     } catch (err) {
       setInvoiceError(err instanceof PosOrderOrdersApiError ? err.message : t('posApp.invoiceFailed'));
@@ -1044,6 +1051,12 @@ function PosAppInner() {
                     className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary"
                   >
                     {t('handyApp.title')}
+                  </button>
+                  <button
+                    onClick={() => router.push('/pos/kitchen')}
+                    className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary"
+                  >
+                    {t('posApp.menuKitchen')}
                   </button>
                   <button
                     onClick={() => router.push('/pos/qr-codes')}

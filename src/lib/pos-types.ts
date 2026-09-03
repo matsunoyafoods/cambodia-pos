@@ -168,7 +168,16 @@ export type PosSettings = {
 export type PrinterRole = 'receipt' | 'kitchen';
 // usb_agent: エージェントが動くPCにUSB接続 (レシートプリンター等、OSのプリンターキュー経由で印刷)
 // lan: 店舗LAN上のIPアドレスへエージェントが直接TCP接続 (キッチンプリンター等)
-export type PrinterConnectionType = 'usb_agent' | 'lan';
+// bluetooth (2026-09-03 追加): エージェントが動くPC/中継機とプリンターをOSのBluetooth(SPP)で
+// ペアリングし、割り当てられたシリアルポート/デバイスパスへ直接送信 (常時稼働のPC/中継機が
+// 店舗にある場合向け。print-agentを動かすPCが要る)
+// passprnt (2026-09-03 追加。店内にPCが無く、レジ端末(iPad/Android)そのものと直接ペアリングする
+// 運用向け): Star Micronics純正の無料アプリ「PassPRNT」をレジ端末にインストールし、その端末の
+// OS標準Bluetooth設定でプリンターと直接ペアリングする。中継PC・print-agent不要。レジ画面が
+// 会計完了時にURLスキーム (starpassprnt://) でレシートHTMLをPassPRNTへ渡し、PassPRNTが印刷して
+// 元のブラウザに戻る。この方式は「ブラウザとプリンターが同一端末」であることが前提 (iOS Safari は
+// Web Bluetooth 非対応だが、PassPRNT はネイティブアプリなのでこの制約を受けない)。
+export type PrinterConnectionType = 'usb_agent' | 'lan' | 'bluetooth' | 'passprnt';
 
 export type PrinterConfig = {
   id: string;
@@ -176,7 +185,9 @@ export type PrinterConfig = {
   role: PrinterRole;
   connectionType: PrinterConnectionType;
   paperWidthMm: number;
-  /** usb_agent の場合: エージェント側のプリンターキュー名 (例: macOSの `lpstat -p` で確認できる名前) */
+  /** usb_agent の場合: エージェント側のプリンターキュー名 (例: macOSの `lpstat -p` で確認できる名前)。
+   * bluetooth の場合: OSでペアリング後に割り当てられるデバイスパス (例: macOSの `/dev/tty.TSP650II`、
+   * Windowsの `COM5` 等)。usb_agent と同じカラムを意味だけ変えて流用している。 */
   deviceName: string | null;
   /** lan の場合の接続先 */
   lanIp: string | null;

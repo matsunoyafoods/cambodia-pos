@@ -68,8 +68,23 @@ export async function deletePrinter(id: string): Promise<void> {
   await request(`/api/settings/printers/${id}`, { method: 'DELETE' });
 }
 
+// passprnt (2026-09-03 追加、中継機不要でこの端末に直接印刷する方式) の場合、サーバーは
+// キューに積まずHTMLをそのまま返してくる。その場で starpassprnt:// URLスキームを開いて
+// PassPRNTへ渡す (この端末自体がプリンターとペアリングされている前提)。
 export async function testPrint(id: string): Promise<void> {
-  await request(`/api/settings/printers/${id}/test`, { method: 'POST' });
+  const res = await request<{ ok: true; passPrntJob?: { printerId: string; html: string; sizeDots: number; cut: string } }>(
+    `/api/settings/printers/${id}/test`,
+    { method: 'POST' },
+  );
+  if (res.passPrntJob && typeof window !== 'undefined') {
+    const params = new URLSearchParams({
+      html: res.passPrntJob.html,
+      size: String(res.passPrntJob.sizeDots),
+      cut: res.passPrntJob.cut,
+      popup: 'disable',
+    });
+    window.location.href = `starpassprnt://v1/print/nopreview?${params.toString()}`;
+  }
 }
 
 export async function getPrintAgentToken(): Promise<string | null> {

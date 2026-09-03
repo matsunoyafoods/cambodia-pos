@@ -1,13 +1,17 @@
 import { NextResponse } from 'next/server';
 import { createPosAdminClient, getPosStoreId } from '@/lib/supabase/admin';
 import { withPosStaff } from '@/lib/pos-auth';
-import { columnsForPaperWidth } from '@/lib/receipt-format';
+import { columnsForPaperWidth, sizeDotsForPaperWidth, wrapAsPassPrntHtml } from '@/lib/receipt-format';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
-// 設定画面の「テスト印刷」ボタン。指定したプリンター宛にテスト伝票を1件キューに積む。
-// 実際の印字はローカル印刷エージェントが /api/print-agent/jobs をポーリングして行う
-// (2026-08-31 プリンター実装で追加)。
+// 設定画面の「テスト印刷」ボタン。
+// - usb_agent/lan/bluetooth (中継PC方式): テスト伝票を1件キューに積む。実際の印字は
+//   ローカル印刷エージェントが /api/print-agent/jobs をポーリングして行う (2026-08-31 追加)。
+// - passprnt (レジ端末に直接ペアリングする方式、2026-09-03 追加): キューには積まず、
+//   PassPRNT用のHTMLをそのままレスポンスで返す。呼び出し元 (設定画面) がその場で
+//   starpassprnt:// URLスキームを開いて印刷する (この端末自体がプリンターとペアリング
+//   されている前提)。
 export const POST = withPosStaff('manager', async (_session, _req, ctx: RouteContext) => {
   const { id } = await ctx.params;
   const supabase = createPosAdminClient();
@@ -15,7 +19,7 @@ export const POST = withPosStaff('manager', async (_session, _req, ctx: RouteCon
 
   const { data: printer, error: printerError } = await supabase
     .from('printers')
-    .select('id, name, paper_width_mm')
+    .select('id, name, paper_width_mm, connection_type')
     .eq('id', id)
     .eq('store_id', storeId)
     .maybeSingle();
@@ -33,6 +37,14 @@ export const POST = withPosStaff('manager', async (_session, _req, ctx: RouteCon
     '',
     '',
   ].join('\n');
+
+  if (printer.connection_type === 'passprnt') {
+    const html = wrapAsPassPrntHtml(content, { paperWidthMm: printer.paper_width_mm });
+    return NextResponse.json({
+      ok: true,
+      passPrntJob: { printerId: printer.id, html, sizeDots: sizeDotsForPaperWidth(printer.paper_width_mm), cut: 'full' },
+    });
+  }
 
   const { error: insertError } = await supabase.from('print_jobs').insert({
     store_id: storeId,

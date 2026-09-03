@@ -1,0 +1,63 @@
+/**
+ * キッチンモニター (2026-09-03 追加) 向け、公開 (認証なし) API クライアント。
+ * /api/pos-order/kitchen-tickets/* は withPosStaff を使わない (理由は pos-order-orders-client.ts と同じ)。
+ */
+
+import type { CartLine } from '@/lib/pos-types';
+
+export class PosOrderKitchenApiError extends Error {
+  constructor(
+    message: string,
+    public status: number,
+  ) {
+    super(message);
+    this.name = 'PosOrderKitchenApiError';
+  }
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(path, {
+    ...init,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(init?.headers ?? {}),
+    },
+  });
+
+  if (!res.ok) {
+    let message = `Request failed (${res.status})`;
+    try {
+      const body = (await res.json()) as { error?: string };
+      if (body?.error) message = body.error;
+    } catch {
+      // ignore JSON parse failure
+    }
+    throw new PosOrderKitchenApiError(message, res.status);
+  }
+
+  return res.json() as Promise<T>;
+}
+
+export type KitchenTicketItem = {
+  id: string;
+  order_id: string;
+  table_code: string | null;
+  menu_name: string;
+  qty: number;
+  selected_options: CartLine['selectedOptions'];
+  sent_to_kitchen_at: string;
+  kitchen_done_at: string | null;
+  kitchen_done_by_name: string | null;
+};
+
+export function getKitchenTickets(): Promise<{ pending: KitchenTicketItem[]; recentlyDone: KitchenTicketItem[] }> {
+  return request('/api/pos-order/kitchen-tickets');
+}
+
+export function markKitchenTicketDone(itemId: string, staffName?: string): Promise<{ item: KitchenTicketItem }> {
+  return request(`/api/pos-order/kitchen-tickets/${itemId}`, { method: 'PATCH', body: JSON.stringify({ done: true, staffName }) });
+}
+
+export function undoKitchenTicketDone(itemId: string): Promise<{ item: KitchenTicketItem }> {
+  return request(`/api/pos-order/kitchen-tickets/${itemId}`, { method: 'PATCH', body: JSON.stringify({ done: false }) });
+}
