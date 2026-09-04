@@ -59,6 +59,46 @@ function loadFontSize(storageKey: string): FontSize {
   return v === 'sm' || v === 'md' || v === 'lg' ? v : 'md';
 }
 
+// 新規注文チャイム (2026-09-04 追加。Tom「注文が入った時に音が鳴らないと気づきません」への
+// 対応)。外部音声ファイルを持ち込まず Web Audio API のオシレーターで「ピンポン」の2音を
+// 鳴らすだけの軽量な実装。タブレット画面を常時見ていなくても、新しい品目が届いたことに
+// 気づけるようにする。ブラウザの自動再生制限により、そのタブレットで一度も画面操作
+// (「調理完了」ボタン等のタップ) をしていない状態だと最初の1回は鳴らないことがあるが、
+// このモニター画面は常に操作しながら使う前提のため実運用上は問題にならない。
+function playNewOrderChime() {
+  try {
+    type AudioContextCtor = typeof AudioContext;
+    const AudioCtx: AudioContextCtor | undefined =
+      window.AudioContext ?? (window as unknown as { webkitAudioContext?: AudioContextCtor }).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const now = ctx.currentTime;
+    [880, 1320].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      const start = now + i * 0.16;
+      gain.gain.setValueAtTime(0, start);
+      gain.gain.linearRampToValueAtTime(0.35, start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, start + 0.3);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(start);
+      osc.stop(start + 0.32);
+    });
+    setTimeout(() => ctx.close(), 800);
+  } catch {
+    // 音声再生に失敗しても画面表示自体は継続する
+  }
+}
+
+function loadSoundEnabled(storageKey: string): boolean {
+  if (typeof window === 'undefined') return true;
+  const v = window.localStorage.getItem(storageKey);
+  return v !== 'off'; // 未設定 (初回) は ON をデフォルトにする
+}
+
 // テーブルごとにカードをまとめる (2026-09-04 変更。Tomからの要望「商品ごとではなくて
 // テーブルごとで分けて欲しい。商品の横に提供済みボタンがあって押したら提供完了になる」
 // への対応)。以前は品目1件につき1カードだったが、同じテーブルの品目を1枚のカードに
@@ -104,15 +144,41 @@ export function TicketMonitorScreen({ kind, ns, fontSizeStorageKey }: { kind: 'f
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
   const [, setTick] = useState(0);
   const [fontSize, setFontSize] = useState<FontSize>('md');
+  const soundStorageKey = `posMonitorSound:${ns}`;
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  const soundEnabledRef = useRef(true);
+  // このモニター (kind) がこれまでに見た保留中の品目ID。null のうちは「初回読み込み前」の
+  // 意味で、初回取得時に鳴らさないようにするためのガード。
+  const knownPendingIdsRef = useRef<Set<string> | null>(null);
 
   useEffect(() => {
     setFontSize(loadFontSize(fontSizeStorageKey));
   }, [fontSizeStorageKey]);
 
+  useEffect(() => {
+    const enabled = loadSoundEnabled(soundStorageKey);
+    setSoundEnabled(enabled);
+    soundEnabledRef.current = enabled;
+    // 画面 (kind) が変わったら「初回読み込み」扱いに戻す。
+    knownPendingIdsRef.current = null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [soundStorageKey]);
+
   function changeFontSize(size: FontSize) {
     setFontSize(size);
     try {
       window.localStorage.setItem(fontSizeStorageKey, size);
+    } catch {
+      // localStorage が使えない環境でも画面表示自体は継続する
+    }
+  }
+
+  function toggleSound() {
+    const next = !soundEnabled;
+    setSoundEnabled(next);
+    soundEnabledRef.current = next;
+    try {
+      window.localStorage.setItem(soundStorageKey, next ? 'on' : 'off');
     } catch {
       // localStorage が使えない環境でも画面表示自体は継続する
     }
@@ -129,9 +195,25 @@ export function TicketMonitorScreen({ kind, ns, fontSizeStorageKey }: { kind: 'f
         setAllPending(r.pending);
         setAllRecentlyDone(r.recentlyDone);
         setError(null);
+
+        // このモニター (kind) にとって新規の品目が増えていたらチャイムを鳴らす。初回読み込み時
+        // (knownPendingIdsRef.current === null) は既存の保留品目全部が「新規」に見えてしまうため
+        // 対象外にする。
+        const idsForKind = new Set(r.pending.filter((it) => it.kind === kind).map((it) => it.id));
+        if (knownPendingIdsRef.current !== null) {
+          let hasNew = false;
+          for (const id of idsForKind) {
+            if (!knownPendingIdsRef.current.has(id)) {
+              hasNew = true;
+              break;
+            }
+          }
+          if (hasNew && soundEnabledRef.current) playNewOrderChime();
+        }
+        knownPendingIdsRef.current = idsForKind;
       })
       .catch((err) => setError(err instanceof PosOrderKitchenApiError ? err.message : t(`${ns}.loadError`)));
-  }, [t, ns]);
+  }, [t, ns, kind]);
 
   useEffect(() => {
     load();
@@ -239,6 +321,18 @@ export function TicketMonitorScreen({ kind, ns, fontSizeStorageKey }: { kind: 'f
         </button>
         <div className="text-[15px] font-bold">{t(`${ns}.title`)}</div>
         <div className="ml-auto flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={toggleSound}
+            title={t(soundEnabled ? 'monitor.soundOnHint' : 'monitor.soundOffHint')}
+            className={
+              'flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-[11.5px] font-semibold ' +
+              (soundEnabled ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border text-muted-foreground')
+            }
+          >
+            <span>{soundEnabled ? '🔔' : '🔕'}</span>
+            {t(soundEnabled ? 'monitor.soundOn' : 'monitor.soundOff')}
+          </button>
           <span className="text-[11px] text-muted-foreground">{t('monitor.fontSizeLabel')}</span>
           <div className="flex gap-1 rounded-lg bg-secondary p-0.5">
             {(['sm', 'md', 'lg'] as const).map((size) => (
