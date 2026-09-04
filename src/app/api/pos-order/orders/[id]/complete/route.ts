@@ -66,6 +66,23 @@ export async function POST(req: Request, ctx: RouteContext) {
     return NextResponse.json({ error: 'この注文は既に会計済み・取消済みです' }, { status: 409 });
   }
 
+  // 提供済みになっていないと会計できないようにする (2026-09-04 追加。Tom「会計についてですが
+  // 提供済みになっていないと会計ができないようにしてください」)。フロント (checkout-screen.tsx)
+  // 側でもボタンを disabled にしているが、直接 API を叩かれた場合の抜け道を防ぐためこちらでも
+  // 必ずチェックする (権限制御をフロントだけで完結させない方針)。
+  const { data: unservedItems, error: unservedError } = await supabase
+    .from('order_items')
+    .select('id')
+    .eq('order_id', id)
+    .is('kitchen_done_at', null);
+  if (unservedError) return NextResponse.json({ error: unservedError.message }, { status: 500 });
+  if ((unservedItems ?? []).length > 0) {
+    return NextResponse.json(
+      { error: `提供済みになっていない商品が ${unservedItems!.length} 点あります。提供済みにしてから会計してください。` },
+      { status: 409 },
+    );
+  }
+
   const nowIso = new Date().toISOString();
   const { error: updateError } = await supabase
     .from('orders')

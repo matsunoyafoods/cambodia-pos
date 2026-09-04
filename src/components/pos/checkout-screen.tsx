@@ -173,6 +173,12 @@ export function CheckoutScreen({
   const remaining = Math.max(0, totals.total - paidSoFar);
   const remainingSettled = remaining <= 0.005;
 
+  // 未提供の商品があるうちは会計できないようにする (2026-09-04 追加。Tom「会計についてですが
+  // 提供済みになっていないと会計ができないようにしてください」)。判定はレジ/キッチン/ドリンク
+  // モニターと同じ item.kitchen_done_at (null なら未提供)。
+  const unservedCount = confirmedItems.filter((item) => !item.kitchen_done_at).length;
+  const allServed = unservedCount === 0;
+
   // 決済方法は店舗が自由に追加できるため (2026-08-31 変更)、固定の 'cash'|'qr'|'card' ではなく
   // 選択中の決済方法IDを持つ。paymentMethods が非同期で届く/変わった時に選択が消えていたら
   // 先頭 (通常は現金) を選び直す。
@@ -264,8 +270,13 @@ export function CheckoutScreen({
         <div className="flex flex-1 flex-col gap-2 overflow-auto px-4.5 py-3.5">
           {confirmedItems.map((line) => (
             <div key={line.id} className="flex justify-between text-[13px]">
-              <span>
+              <span className="flex items-center gap-1.5">
                 {line.menu_name} × {line.qty}
+                {!line.kitchen_done_at && (
+                  <span className="rounded-full bg-destructive/10 px-1.5 py-0.5 text-[10px] font-semibold text-destructive">
+                    {t('checkout.unservedBadge')}
+                  </span>
+                )}
               </span>
               <span className="text-muted-foreground">${money(line.line_total)}</span>
             </div>
@@ -534,13 +545,19 @@ export function CheckoutScreen({
           </div>
         )}
 
+        {!allServed && (
+          <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3.5 text-[12.5px] font-semibold text-destructive">
+            {t('checkout.unservedWarning', { count: unservedCount })}
+          </div>
+        )}
+
         {completeError && <div className="text-[12px] text-destructive">{completeError}</div>}
         <button
           onClick={onComplete}
-          disabled={completing || !remainingSettled}
+          disabled={completing || !remainingSettled || !allServed}
           className={
             'mt-auto h-[54px] rounded-xl text-[15px] font-bold ' +
-            (remainingSettled && !completing ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground')
+            (remainingSettled && allServed && !completing ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground')
           }
         >
           {completing ? t('common.processing') : t('checkout.completeButton')}
