@@ -1214,6 +1214,7 @@ function SettingsScreenInner() {
           happyHourEnd,
           menuImageStyle,
           themeColor,
+          backgroundColor,
         } = settings;
         const s = await updateGeneralSettings({
           vatRate,
@@ -1228,6 +1229,7 @@ function SettingsScreenInner() {
           happyHourEnd,
           menuImageStyle,
           themeColor,
+          backgroundColor,
         });
         setSettings((prev) => ({ ...prev, ...s }));
       } else {
@@ -1412,6 +1414,34 @@ function SettingsScreenInner() {
                     )}
                   </div>
                   <div className="mt-1.5 text-[11px] text-muted-foreground">{t('settings.general.themeColorDesc')}</div>
+                </Field>
+              )}
+
+              {isPosNative && (
+                <Field label={t('settings.general.backgroundColorLabel')}>
+                  <div className="flex items-center gap-2.5">
+                    <input
+                      type="color"
+                      value={settings.backgroundColor ?? '#ffffff'}
+                      disabled={!canManageSettings}
+                      onChange={(e) => update('backgroundColor', e.target.value)}
+                      className="h-10 w-14 cursor-pointer rounded-lg border border-border p-1 disabled:opacity-60"
+                    />
+                    <span className="text-[12.5px] text-muted-foreground">
+                      {settings.backgroundColor ?? t('settings.general.backgroundColorDefault')}
+                    </span>
+                    {settings.backgroundColor && (
+                      <button
+                        type="button"
+                        disabled={!canManageSettings}
+                        onClick={() => update('backgroundColor', null)}
+                        className="h-8 rounded-lg border border-border px-3 text-[11.5px] font-semibold disabled:opacity-60"
+                      >
+                        {t('settings.general.backgroundColorReset')}
+                      </button>
+                    )}
+                  </div>
+                  <div className="mt-1.5 text-[11px] text-muted-foreground">{t('settings.general.backgroundColorDesc')}</div>
                 </Field>
               )}
 

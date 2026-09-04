@@ -30,6 +30,7 @@ function toPosSettings(storeId: string, raw: unknown): PosSettings {
         ? stored.menuImageStyle
         : DEFAULT_SETTINGS.menuImageStyle,
     themeColor: typeof stored.themeColor === 'string' ? stored.themeColor : DEFAULT_SETTINGS.themeColor,
+    backgroundColor: typeof stored.backgroundColor === 'string' ? stored.backgroundColor : DEFAULT_SETTINGS.backgroundColor,
   };
 }
 
@@ -60,6 +61,11 @@ const patchSchema = z.object({
   happyHourEnd: z.string().regex(HHMM_RE, 'HH:MM 形式で入力してください').optional(),
   menuImageStyle: z.enum(['compact', 'full']).optional(),
   themeColor: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/, '#rrggbb 形式で指定してください')
+    .nullable()
+    .optional(),
+  backgroundColor: z
     .string()
     .regex(/^#[0-9a-fA-F]{6}$/, '#rrggbb 形式で指定してください')
     .nullable()

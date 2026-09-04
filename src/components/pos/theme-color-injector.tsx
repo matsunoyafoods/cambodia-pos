@@ -8,9 +8,14 @@ import { getPosOrderSettings } from '@/lib/pos-order-client';
 // ボタン・アクセント色 (--primary / --brand の各CSS変数) がその色に置き換わる。未設定 (null) なら
 // 何もせず、globals.css のデフォルト配色 (紺の --primary、赤の --brand) のまま。
 //
-// 新規マイグレーション・APIは追加していない — 既存の pos.stores.settings (jsonb) に themeColor
-// を1項目追加しただけで、レジ画面が起動時に必ず読む /api/pos-order/settings (認証なし公開API)
-// に相乗りして配信している。
+// 2026-09-04 追加: 背景色 (backgroundColor) も同様にカスタムできるようにした
+// (Tom「背景もカスタムできるようにしましょう」)。--background に反映し、暗い背景色を選んだ場合に
+// 文字が読めなくならないよう --foreground (本文の文字色) も明度に応じて自動で白/濃紺に切り替える。
+// カード等の上面 (--card) はあえて変更していない (背景の上に浮くカードとして区別がつくように)。
+//
+// 新規マイグレーション・APIは追加していない — 既存の pos.stores.settings (jsonb) に themeColor /
+// backgroundColor を項目追加しただけで、レジ画面が起動時に必ず読む /api/pos-order/settings
+// (認証なし公開API) に相乗りして配信している。
 
 function hexToHsl(hex: string): string | null {
   const m = /^#([0-9a-fA-F]{6})$/.exec(hex);
@@ -71,6 +76,15 @@ export function ThemeColorInjector() {
           root.removeProperty('--primary-foreground');
           root.removeProperty('--brand');
           root.removeProperty('--brand-foreground');
+        }
+
+        const bgHsl = s.backgroundColor ? hexToHsl(s.backgroundColor) : null;
+        if (bgHsl && s.backgroundColor) {
+          root.setProperty('--background', bgHsl);
+          root.setProperty('--foreground', foregroundHslFor(s.backgroundColor));
+        } else {
+          root.removeProperty('--background');
+          root.removeProperty('--foreground');
         }
       })
       .catch(() => {

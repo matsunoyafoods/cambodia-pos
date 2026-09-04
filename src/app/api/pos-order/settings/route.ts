@@ -35,6 +35,7 @@ export async function GET() {
         ? stored.menuImageStyle
         : DEFAULT_SETTINGS.menuImageStyle,
     themeColor: typeof stored.themeColor === 'string' ? stored.themeColor : DEFAULT_SETTINGS.themeColor,
+    backgroundColor: typeof stored.backgroundColor === 'string' ? stored.backgroundColor : DEFAULT_SETTINGS.backgroundColor,
   };
   return NextResponse.json(settings);
 }

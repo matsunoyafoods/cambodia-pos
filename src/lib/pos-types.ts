@@ -164,6 +164,11 @@ export type PosSettings = {
    * '#rrggbb' 形式のHEX。未設定 (null) = デフォルトの配色のまま。/pos/* 全体のボタン・アクセント色
    * (--primary, --brand の各CSS変数) に反映される (theme-color-injector.tsx 参照)。 */
   themeColor: string | null;
+  /** 画面の背景色 (2026-09-04 追加。Tom「背景もカスタムできるようにしましょう」への対応)。
+   * '#rrggbb' 形式のHEX。未設定 (null) = デフォルトの配色 (白) のまま。/pos/* 全体の背景色
+   * (--background のCSS変数) に反映される。文字色 (--foreground) も自動でコントラスト調整する
+   * (theme-color-injector.tsx 参照)。 */
+  backgroundColor: string | null;
 };
 
 // プリンター実装 (2026-08-31 追加)。レジ画面 (Vercel/クラウド) から店舗LAN内のプリンターへ
@@ -257,6 +262,7 @@ export const DEFAULT_SETTINGS: PosSettings = {
   happyHourEnd: '19:00',
   menuImageStyle: 'compact',
   themeColor: null,
+  backgroundColor: null,
 };
 
 // ---------- 経費管理 (2026-08-31 追加。データ収集・AI分析機能 第一弾) ----------
