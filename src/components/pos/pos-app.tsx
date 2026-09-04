@@ -42,6 +42,7 @@ import {
   type OpenOrderRecord,
   type OrderItemRecord,
 } from '@/lib/pos-order-orders-client';
+import { markKitchenTicketDone, undoKitchenTicketDone } from '@/lib/pos-order-kitchen-client';
 import type { TableLayoutItemRecord } from '@/lib/table-layout-client';
 import {
   clearTableSession,
@@ -621,6 +622,19 @@ function PosAppInner() {
     setConfirmedItems((prev) => prev.filter((it) => it.id !== itemId));
   }
 
+  // 確定済み品目の「提供完了」トグル (2026-09-04 追加。Tomからの要望「レジでも提供完了ボタンを
+  // 押して提供済みにできるようにして欲しい」)。キッチンモニター/ドリンカーモニターと同じ
+  // order_items.kitchen_done_at を直接操作するAPI (pos-order-kitchen-client.ts) を使うため、
+  // 両モニターの「最近完了」にもこの操作が反映される。
+  async function toggleConfirmedItemServed(itemId: string) {
+    const target = confirmedItems.find((it) => it.id === itemId);
+    if (!target) return;
+    const { item } = target.kitchen_done_at ? await undoKitchenTicketDone(itemId) : await markKitchenTicketDone(itemId, me.display_name);
+    setConfirmedItems((prev) =>
+      prev.map((it) => (it.id === itemId ? { ...it, kitchen_done_at: item.kitchen_done_at, kitchen_done_by_name: item.kitchen_done_by_name } : it)),
+    );
+  }
+
   // オプション選択が必要な商品ならモーダルを開き、不要ならそのままカートに追加する。
   // 客層記録が既に済んでいる (currentOrder がある) ことが前提。
   function proceedAddItem(item: MenuItem) {
@@ -1059,6 +1073,12 @@ function PosAppInner() {
                     {t('posApp.menuKitchen')}
                   </button>
                   <button
+                    onClick={() => router.push('/pos/drinks')}
+                    className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary"
+                  >
+                    {t('posApp.menuDrinkMonitor')}
+                  </button>
+                  <button
                     onClick={() => router.push('/pos/qr-codes')}
                     className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary"
                   >
@@ -1153,6 +1173,7 @@ function PosAppInner() {
           onIncConfirmedItem={incConfirmedItemQty}
           onDecConfirmedItem={decConfirmedItemQty}
           onRemoveConfirmedItem={removeConfirmedItem}
+          onToggleServedConfirmedItem={toggleConfirmedItemServed}
           onConfirmOrder={confirmPendingCart}
           confirming={confirming}
           confirmError={confirmError}

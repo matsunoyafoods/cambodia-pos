@@ -11,9 +11,10 @@ export const GET = withPosStaff('manager', async () => {
 
   // translations (2026-09-03 追加): 「翻訳」タブで入力済みの多言語名を、このカテゴリー
   // ツリーの表示 (menuText 経由) でも使うために select に含める。
+  // kind (2026-09-04 追加): ドリンカーモニター対応の「フード/ドリンク」区分。
   const { data, error } = await supabase
     .from('menu_categories')
-    .select('id, name, sort_order, parent_id, translations')
+    .select('id, name, sort_order, parent_id, translations, kind')
     .eq('store_id', storeId)
     .order('sort_order')
     .order('name');
@@ -76,7 +77,7 @@ export const POST = withPosStaff('manager', async (_session, req) => {
   const { data, error } = await supabase
     .from('menu_categories')
     .insert({ store_id: storeId, name: parsed.data.name, sort_order: nextSortOrder, parent_id: parentId })
-    .select('id, name, sort_order, parent_id')
+    .select('id, name, sort_order, parent_id, kind')
     .single();
 
   if (error) {

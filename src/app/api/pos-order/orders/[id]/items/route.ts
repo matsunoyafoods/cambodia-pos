@@ -66,7 +66,7 @@ export async function POST(req: Request, ctx: RouteContext) {
   const { data, error } = await supabase
     .from('order_items')
     .insert(rows)
-    .select('id, menu_id, menu_name, qty, unit_price, selected_options, line_total, sent_to_kitchen_at');
+    .select('id, menu_id, menu_name, qty, unit_price, selected_options, line_total, sent_to_kitchen_at, kitchen_done_at, kitchen_done_by_name');
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ items: data ?? [] }, { status: 201 });

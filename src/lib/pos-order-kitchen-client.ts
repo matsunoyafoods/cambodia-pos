@@ -48,6 +48,8 @@ export type KitchenTicketItem = {
   sent_to_kitchen_at: string;
   kitchen_done_at: string | null;
   kitchen_done_by_name: string | null;
+  /** フード/ドリンク区分 (2026-09-04 追加)。キッチンモニター/ドリンカーモニターの出し分けに使う。 */
+  kind: 'food' | 'drink';
 };
 
 export function getKitchenTickets(): Promise<{ pending: KitchenTicketItem[]; recentlyDone: KitchenTicketItem[] }> {

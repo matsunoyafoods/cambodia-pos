@@ -39,6 +39,7 @@ import {
   listMenuItems,
   listMenuOptionGroups,
   renameMenuCategory,
+  setMenuCategoryKind,
   reorderMenuCategory,
   updateMenuItem,
   updateMenuOptionChoice,
@@ -2471,6 +2472,8 @@ function CategoryChip({
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(category.name);
   const [submitting, setSubmitting] = useState(false);
+  // フード/ドリンク区分の切り替え (2026-09-04 追加。ドリンカーモニター対応)。
+  const [kindSaving, setKindSaving] = useState(false);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -2488,6 +2491,18 @@ function CategoryChip({
       setName(category.name);
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function toggleKind() {
+    setKindSaving(true);
+    try {
+      await setMenuCategoryKind(category.id, category.kind === 'drink' ? 'food' : 'drink');
+      onRenamed();
+    } catch {
+      // 失敗時は静かに諦める (他のカテゴリー操作と同じ簡易エラー処理)
+    } finally {
+      setKindSaving(false);
     }
   }
 
@@ -2509,6 +2524,17 @@ function CategoryChip({
     <div className="flex items-center gap-1 rounded-full border border-border bg-card py-1 pl-3 pr-1.5">
       <button onClick={() => setEditing(true)} disabled={submitting} className="text-[12.5px] font-semibold">
         {menuText(category.name, category.translations)}
+      </button>
+      <button
+        onClick={toggleKind}
+        disabled={kindSaving}
+        title={t('settings.menu.categoryKindToggleTitle')}
+        className={
+          'rounded-full px-1.5 py-0.5 text-[10.5px] font-semibold disabled:opacity-50 ' +
+          (category.kind === 'drink' ? 'bg-brand/15 text-brand' : 'bg-secondary text-muted-foreground')
+        }
+      >
+        {category.kind === 'drink' ? `🍹 ${t('settings.menu.categoryKindDrink')}` : `🍽 ${t('settings.menu.categoryKindFood')}`}
       </button>
       <button
         onClick={onDelete}

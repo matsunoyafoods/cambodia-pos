@@ -46,6 +46,9 @@ export type PosMenuCategory = {
   /** 翻訳タブで入力済みの多言語名 (2026-09-03 追加。カテゴリーツリーの表示言語切り替えに使う。
    * 並び替え・検索・リネーム入力など内部ロジックは従来通り日本語の name を使う) */
   translations?: TranslationMap;
+  /** フード/ドリンク区分 (2026-09-04 追加)。ドリンクに設定すると、配下の商品はキッチンモニター
+   * ではなくドリンカーモニターに表示される。既存カテゴリーは全て 'food' (デフォルト)。 */
+  kind: 'food' | 'drink';
 };
 
 export type PosMenuItemRecord = {
@@ -80,6 +83,11 @@ export function reparentMenuCategory(id: string, parentId: string | null): Promi
 
 export function reorderMenuCategory(id: string, sortOrder: number): Promise<{ category: PosMenuCategory }> {
   return request(`/api/menu/categories/${id}`, { method: 'PATCH', body: JSON.stringify({ sortOrder }) });
+}
+
+// フード/ドリンク区分の切り替え (2026-09-04 追加)。
+export function setMenuCategoryKind(id: string, kind: 'food' | 'drink'): Promise<{ category: PosMenuCategory }> {
+  return request(`/api/menu/categories/${id}`, { method: 'PATCH', body: JSON.stringify({ kind }) });
 }
 
 export function deleteMenuCategory(id: string): Promise<{ ok: boolean }> {

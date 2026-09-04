@@ -80,7 +80,7 @@ export async function PATCH(req: Request, ctx: RouteContext) {
     .from('order_items')
     .update({ menu_name: newMenuName, qty: effectiveQty, line_total: newLineTotal })
     .eq('id', itemId)
-    .select('id, menu_id, menu_name, qty, unit_price, selected_options, line_total, sent_to_kitchen_at')
+    .select('id, menu_id, menu_name, qty, unit_price, selected_options, line_total, sent_to_kitchen_at, kitchen_done_at, kitchen_done_by_name')
     .maybeSingle();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

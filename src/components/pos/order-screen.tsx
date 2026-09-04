@@ -248,6 +248,7 @@ function ConfirmedItemRow({
   onInc,
   onDec,
   onRemove,
+  onToggleServed,
 }: {
   item: OrderItemRecord;
   onSetDiscount: (
@@ -257,6 +258,7 @@ function ConfirmedItemRow({
   onInc: (itemId: string) => Promise<void>;
   onDec: (itemId: string) => Promise<void>;
   onRemove: (itemId: string) => Promise<void>;
+  onToggleServed: (itemId: string) => Promise<void>;
 }) {
   const { t } = useLanguage();
   const parsed = parseOrderItemDiscount(item.menu_name);
@@ -265,6 +267,22 @@ function ConfirmedItemRow({
   const [value, setValue] = useState(parsed ? String(parsed.value) : '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 提供完了トグル (2026-09-04 追加。「レジでも提供完了ボタンを押して提供済みにできるように
+  // して欲しい」)。qty+/-・値引き編集とは別の busy 状態にして、片方の操作中にもう片方が
+  // 押せてしまわないようにする。
+  const [servedSaving, setServedSaving] = useState(false);
+
+  async function toggleServed() {
+    setServedSaving(true);
+    setError(null);
+    try {
+      await onToggleServed(item.id);
+    } catch {
+      setError(t('kitchen.actionError'));
+    } finally {
+      setServedSaving(false);
+    }
+  }
 
   const baseName = stripDiscountLabel(item.menu_name);
   const gross = item.unit_price * item.qty;
@@ -386,6 +404,19 @@ function ConfirmedItemRow({
           </button>
         </div>
       </div>
+      <div className="mt-1.5 flex items-center gap-1.5">
+        <button
+          type="button"
+          onClick={toggleServed}
+          disabled={servedSaving}
+          className={
+            'h-6 rounded-full border px-2 text-[10.5px] font-semibold disabled:opacity-50 ' +
+            (item.kitchen_done_at ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border text-muted-foreground')
+          }
+        >
+          {item.kitchen_done_at ? `✓ ${t('serve.doneLabel')}` : t('serve.markDone')}
+        </button>
+      </div>
       {editing && (
         <div className="mt-2 flex items-center gap-1.5 border-t border-dashed border-border pt-2">
           <div className="flex rounded-md border border-border p-0.5">
@@ -466,6 +497,7 @@ export function OrderScreen({
   onIncConfirmedItem,
   onDecConfirmedItem,
   onRemoveConfirmedItem,
+  onToggleServedConfirmedItem,
   onConfirmOrder,
   confirming,
   confirmError,
@@ -501,6 +533,7 @@ export function OrderScreen({
   onIncConfirmedItem: (itemId: string) => Promise<void>;
   onDecConfirmedItem: (itemId: string) => Promise<void>;
   onRemoveConfirmedItem: (itemId: string) => Promise<void>;
+  onToggleServedConfirmedItem: (itemId: string) => Promise<void>;
   onConfirmOrder: () => void;
   confirming: boolean;
   confirmError: string | null;
@@ -667,6 +700,7 @@ export function OrderScreen({
                   onInc={onIncConfirmedItem}
                   onDec={onDecConfirmedItem}
                   onRemove={onRemoveConfirmedItem}
+                  onToggleServed={onToggleServedConfirmedItem}
                 />
               ))}
             </div>

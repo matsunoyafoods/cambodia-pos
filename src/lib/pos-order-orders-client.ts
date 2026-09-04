@@ -58,6 +58,10 @@ export type OrderItemRecord = {
   selected_options: CartLine['selectedOptions'];
   line_total: number;
   sent_to_kitchen_at: string | null;
+  /** 調理・提供完了時刻 (2026-09-04 追加。キッチンモニター/ドリンカーモニターと同じ列を
+   * レジ画面からも直接操作できるようにした。null = 未提供)。 */
+  kitchen_done_at: string | null;
+  kitchen_done_by_name: string | null;
 };
 
 export function getOpenOrder(tableCode: string): Promise<{ order: OpenOrderRecord | null; items: OrderItemRecord[] }> {

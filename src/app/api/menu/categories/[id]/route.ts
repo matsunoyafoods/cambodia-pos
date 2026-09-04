@@ -11,6 +11,8 @@ const updateSchema = z.object({
   sortOrder: z.number().int().optional(),
   // 親カテゴリーの付け替え。null = 大カテゴリーに昇格。
   parentId: z.string().uuid().nullable().optional(),
+  // フード/ドリンク区分 (2026-09-04 追加。ドリンカーモニター対応)。
+  kind: z.enum(['food', 'drink']).optional(),
 });
 
 // カテゴリ更新 (名前 / 並び順 / 親カテゴリーの付け替え)。manager 以上のみ。
@@ -18,7 +20,13 @@ export const PATCH = withPosStaff('manager', async (_session, req, ctx: RouteCon
   const { id } = await ctx.params;
   const json = await req.json().catch(() => null);
   const parsed = updateSchema.safeParse(json);
-  if (!parsed.success || (parsed.data.name === undefined && parsed.data.sortOrder === undefined && parsed.data.parentId === undefined)) {
+  if (
+    !parsed.success ||
+    (parsed.data.name === undefined &&
+      parsed.data.sortOrder === undefined &&
+      parsed.data.parentId === undefined &&
+      parsed.data.kind === undefined)
+  ) {
     return NextResponse.json({ error: 'invalid_request' }, { status: 400 });
   }
 
@@ -27,6 +35,7 @@ export const PATCH = withPosStaff('manager', async (_session, req, ctx: RouteCon
   const patch: Record<string, unknown> = {};
   if (parsed.data.name !== undefined) patch.name = parsed.data.name;
   if (parsed.data.sortOrder !== undefined) patch.sort_order = parsed.data.sortOrder;
+  if (parsed.data.kind !== undefined) patch.kind = parsed.data.kind;
 
   if (parsed.data.parentId !== undefined) {
     const newParentId = parsed.data.parentId;
@@ -75,7 +84,7 @@ export const PATCH = withPosStaff('manager', async (_session, req, ctx: RouteCon
     .update(patch)
     .eq('id', id)
     .eq('store_id', storeId)
-    .select('id, name, sort_order, parent_id')
+    .select('id, name, sort_order, parent_id, kind')
     .maybeSingle();
 
   if (error) {

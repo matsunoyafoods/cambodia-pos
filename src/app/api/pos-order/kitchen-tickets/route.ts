@@ -10,10 +10,32 @@ import { createPosAdminClient, getPosStoreId } from '@/lib/supabase/admin';
 // 認証なしは他の /api/pos-order/* と同じ理由 (dine連携ログインのCookieは別オリジンのため
 // このサーバーから見えず、withPosStaff を使うとキッチンモニター画面自体が読めなくなる)。
 
-const orderItemSelect = 'id, order_id, menu_name, qty, selected_options, sent_to_kitchen_at, kitchen_done_at, kitchen_done_by_name';
+const orderItemSelect =
+  'id, order_id, menu_id, menu_name, qty, selected_options, sent_to_kitchen_at, kitchen_done_at, kitchen_done_by_name';
+
+// フード/ドリンク区分 (2026-09-04 追加。ドリンカーモニター対応)。品目の menu_id →
+// menu_items.category_id → menu_categories.kind で判定する。中カテゴリー自身に
+// kind='drink' が設定されていればそれを優先し、未設定 (food のまま) なら親の大カテゴリーの
+// kind を見る (大カテゴリーごと「ドリンク」に設定すれば配下もまとめて出せるようにするため)。
+// menu_id が無い/カテゴリーが未設定/カテゴリーが見つからない場合は 'food' 扱い (従来通り
+// キッチンモニターに表示。挙動に影響を与えないためのデフォルト)。
+type CategoryKindRow = { id: string; parent_id: string | null; kind: string };
+
+function resolveKind(categoryId: string | null, categoriesById: Map<string, CategoryKindRow>): 'food' | 'drink' {
+  if (!categoryId) return 'food';
+  const cat = categoriesById.get(categoryId);
+  if (!cat) return 'food';
+  if (cat.kind === 'drink') return 'drink';
+  if (cat.parent_id) {
+    const parent = categoriesById.get(cat.parent_id);
+    if (parent?.kind === 'drink') return 'drink';
+  }
+  return 'food';
+}
 
 // GET /api/pos-order/kitchen-tickets : 未対応 (厨房送信済み・調理未完了) の品目一覧と、
-// 直近10分以内に完了した品目一覧 (誤操作時の「元に戻す」用) を返す。
+// 直近10分以内に完了した品目一覧 (誤操作時の「元に戻す」用) を返す。各品目に kind
+// ('food' | 'drink') を付与し、キッチンモニター/ドリンカーモニターはこれで絞り込んで表示する。
 export async function GET() {
   const supabase = createPosAdminClient();
   const storeId = getPosStoreId();
@@ -35,7 +57,25 @@ export async function GET() {
     .order('sent_to_kitchen_at', { ascending: true });
   if (itemsError) return NextResponse.json({ error: itemsError.message }, { status: 500 });
 
-  const withTable = (items ?? []).map((it) => ({ ...it, table_code: tableCodeByOrderId.get(it.order_id) ?? null }));
+  const menuIds = Array.from(new Set((items ?? []).map((it) => it.menu_id).filter((id): id is string => !!id)));
+  const categoryIdByMenuId = new Map<string, string | null>();
+  if (menuIds.length > 0) {
+    const { data: menuItems, error: menuItemsError } = await supabase.from('menu_items').select('id, category_id').in('id', menuIds);
+    if (menuItemsError) return NextResponse.json({ error: menuItemsError.message }, { status: 500 });
+    for (const mi of menuItems ?? []) categoryIdByMenuId.set(mi.id, mi.category_id);
+  }
+  const { data: categories, error: categoriesError } = await supabase
+    .from('menu_categories')
+    .select('id, parent_id, kind')
+    .eq('store_id', storeId);
+  if (categoriesError) return NextResponse.json({ error: categoriesError.message }, { status: 500 });
+  const categoriesById = new Map((categories ?? []).map((c) => [c.id, c as CategoryKindRow]));
+
+  const withTable = (items ?? []).map((it) => ({
+    ...it,
+    table_code: tableCodeByOrderId.get(it.order_id) ?? null,
+    kind: resolveKind(it.menu_id ? (categoryIdByMenuId.get(it.menu_id) ?? null) : null, categoriesById),
+  }));
   const pending = withTable.filter((it) => !it.kitchen_done_at);
 
   const recentThreshold = new Date(Date.now() - 10 * 60 * 1000).toISOString();

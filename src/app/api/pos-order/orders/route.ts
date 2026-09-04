@@ -16,7 +16,8 @@ import { createPosAdminClient, getPosStoreId } from '@/lib/supabase/admin';
 // POST /api/pos-order/orders/[id]/guest で別途記録するよう変更した。ハンディ (会計機能を
 // 持たない) はこの卓を開くだけで、客層記録を一切行わない。
 
-const orderItemSelect = 'id, menu_id, menu_name, qty, unit_price, selected_options, line_total, sent_to_kitchen_at';
+const orderItemSelect =
+  'id, menu_id, menu_name, qty, unit_price, selected_options, line_total, sent_to_kitchen_at, kitchen_done_at, kitchen_done_by_name';
 const orderSelect = 'id, table_code, status, guest_ethnicity, guest_kids_count, guest_recorded_at, created_at';
 
 // GET /api/pos-order/orders?tableCode=T1 : その卓の open 注文と、確定済み品目を返す。無ければ order: null。
