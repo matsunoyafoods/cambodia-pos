@@ -3,7 +3,7 @@
  * /api/pos-order/kitchen-tickets/* は withPosStaff を使わない (理由は pos-order-orders-client.ts と同じ)。
  */
 
-import type { CartLine } from '@/lib/pos-types';
+import type { CartLine, TranslationMap } from '@/lib/pos-types';
 
 export class PosOrderKitchenApiError extends Error {
   constructor(
@@ -44,12 +44,17 @@ export type KitchenTicketItem = {
   table_code: string | null;
   menu_name: string;
   qty: number;
-  selected_options: CartLine['selectedOptions'];
+  /** 各選択肢に、現在の翻訳 (menu_option_choices.translations) をサーバー側で付与したもの
+   * (2026-09-04 追加)。choiceLabel 自体は注文確定時点の日本語スナップショットのまま。 */
+  selected_options: (CartLine['selectedOptions'][number] & { translations: TranslationMap | null })[];
   sent_to_kitchen_at: string;
   kitchen_done_at: string | null;
   kitchen_done_by_name: string | null;
   /** フード/ドリンク区分 (2026-09-04 追加)。キッチンモニター/ドリンカーモニターの出し分けに使う。 */
   kind: 'food' | 'drink';
+  /** 商品名の現在の翻訳 (menu_items.translations, 2026-09-04 追加)。menu_name はスナップショット
+   * のままなので、表示側で menuText(menu_name, menu_translations) として使う。 */
+  menu_translations: TranslationMap | null;
 };
 
 export function getKitchenTickets(): Promise<{ pending: KitchenTicketItem[]; recentlyDone: KitchenTicketItem[] }> {
