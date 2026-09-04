@@ -85,16 +85,52 @@ export async function GET() {
   if (categoriesError) return NextResponse.json({ error: categoriesError.message }, { status: 500 });
   const categoriesById = new Map((categories ?? []).map((c) => [c.id, c as CategoryKindRow]));
 
-  const choiceIds = Array.from(
-    new Set(
-      (items ?? []).flatMap((it) => ((it.selected_options as SelectedOption[] | null) ?? []).map((o) => o.choiceId).filter(Boolean)),
-    ),
-  );
-  const choiceTranslationsById = new Map<string, TranslationMap | null>();
-  if (choiceIds.length > 0) {
-    const { data: choiceRows, error: choicesError } = await supabase.from('menu_option_choices').select('id, translations').in('id', choiceIds);
-    if (choicesError) return NextResponse.json({ error: choicesError.message }, { status: 500 });
-    for (const c of choiceRows ?? []) choiceTranslationsById.set(c.id, (c.translations as TranslationMap | null) ?? null);
+  // 注意: SelectedOption.choiceId は menu_option_choices.id (uuid) ではなく choice_key
+  // (例: "200g", "single") のスナップショット (pos-types.ts の OptionChoice.id 参照。
+  // src/app/api/pos-order/menu/route.ts が choice_key をそのまま id として返している)。
+  // choice_key は group_id ごとにしか一意でないため、まず menu_id + groupKey で
+  // menu_option_groups から group_id を引き、それから group_id + choice_key で
+  // menu_option_choices を引く必要がある (choiceId をそのまま uuid として照合すると
+  // "invalid input syntax for type uuid" になる — 2026-09-04 に実際に発生した不具合)。
+  const groupKeysByMenuId = new Map<string, Set<string>>();
+  for (const it of items ?? []) {
+    if (!it.menu_id) continue;
+    for (const o of (it.selected_options as SelectedOption[] | null) ?? []) {
+      if (!o.groupKey) continue;
+      const set = groupKeysByMenuId.get(it.menu_id) ?? new Set<string>();
+      set.add(o.groupKey);
+      groupKeysByMenuId.set(it.menu_id, set);
+    }
+  }
+
+  const groupIdByMenuIdAndKey = new Map<string, string>();
+  const translationsByGroupIdAndChoiceKey = new Map<string, TranslationMap | null>();
+  if (groupKeysByMenuId.size > 0) {
+    const { data: groupRows, error: groupsError } = await supabase
+      .from('menu_option_groups')
+      .select('id, menu_id, key')
+      .in('menu_id', Array.from(groupKeysByMenuId.keys()));
+    if (groupsError) return NextResponse.json({ error: groupsError.message }, { status: 500 });
+    for (const g of groupRows ?? []) groupIdByMenuIdAndKey.set(`${g.menu_id}::${g.key}`, g.id);
+
+    const groupIds = Array.from(new Set((groupRows ?? []).map((g) => g.id)));
+    if (groupIds.length > 0) {
+      const { data: choiceRows, error: choicesError } = await supabase
+        .from('menu_option_choices')
+        .select('group_id, choice_key, translations')
+        .in('group_id', groupIds);
+      if (choicesError) return NextResponse.json({ error: choicesError.message }, { status: 500 });
+      for (const c of choiceRows ?? []) {
+        translationsByGroupIdAndChoiceKey.set(`${c.group_id}::${c.choice_key}`, (c.translations as TranslationMap | null) ?? null);
+      }
+    }
+  }
+
+  function choiceTranslations(menuId: string | null, o: SelectedOption): TranslationMap | null {
+    if (!menuId) return null;
+    const groupId = groupIdByMenuIdAndKey.get(`${menuId}::${o.groupKey}`);
+    if (!groupId) return null;
+    return translationsByGroupIdAndChoiceKey.get(`${groupId}::${o.choiceId}`) ?? null;
   }
 
   const withTable = (items ?? []).map((it) => ({
@@ -104,7 +140,7 @@ export async function GET() {
     menu_translations: it.menu_id ? (menuTranslationsByMenuId.get(it.menu_id) ?? null) : null,
     selected_options: ((it.selected_options as SelectedOption[] | null) ?? []).map((o) => ({
       ...o,
-      translations: choiceTranslationsById.get(o.choiceId) ?? null,
+      translations: choiceTranslations(it.menu_id, o),
     })),
   }));
   const pending = withTable.filter((it) => !it.kitchen_done_at);

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CartLine, MenuImageStyle, MenuItem } from '@/lib/pos-types';
 import { money } from '@/lib/money';
 import type { TableSessionRecord } from '@/lib/table-session-client';
@@ -249,6 +249,33 @@ export function HandyOrderScreen({
     return map;
   }, [menu]);
 
+  // 商品タップ時のフィードバック (2026-09-04 追加。Tomからの指摘「オプションがない商品を
+  // 押すと押されているのに気づかないで何回も押してしまいます」への対応。order-screen.tsx
+  // と同じロジック。この画面はハンディ端末とQRセルフオーダー (guestMode) 両方で使われる)。
+  const TAP_FEEDBACK_MS = 450;
+  const TAP_GUARD_MS = 400;
+  const [justAddedId, setJustAddedId] = useState<string | null>(null);
+  const lastTapAtRef = useRef<Map<string, number>>(new Map());
+  const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function handleMenuItemTap(m: MenuItem) {
+    const now = Date.now();
+    const lastTap = lastTapAtRef.current.get(m.id) ?? 0;
+    if (now - lastTap < TAP_GUARD_MS) return;
+    lastTapAtRef.current.set(m.id, now);
+
+    onAddItem(m);
+    setJustAddedId(m.id);
+    if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
+    flashTimerRef.current = setTimeout(() => setJustAddedId(null), TAP_FEEDBACK_MS);
+  }
+
+  useEffect(() => {
+    return () => {
+      if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
+    };
+  }, []);
+
   return (
     <div className="relative flex h-full flex-col overflow-hidden">
       <div className="flex items-center justify-between gap-2 border-b border-border px-3.5 py-2.5">
@@ -304,15 +331,22 @@ export function HandyOrderScreen({
                   const maxDelta = m.optionGroups!.reduce((s, gr) => s + Math.max(...gr.choices.map((c) => c.priceDelta)), 0);
                   priceLabel = minDelta === maxDelta ? money(basePrice + minDelta) : `${money(basePrice + minDelta)}〜${money(basePrice + maxDelta)}`;
                 }
+                const justAdded = justAddedId === m.id;
                 return (
                   <button
                     key={m.id}
-                    onClick={() => onAddItem(m)}
+                    onClick={() => handleMenuItemTap(m)}
                     className={
-                      'flex flex-col gap-3 rounded-xl border p-2.5 text-left ' +
+                      'relative flex flex-col gap-3 rounded-xl border p-2.5 text-left transition-transform duration-150 ' +
+                      (justAdded ? 'scale-[0.97] ring-2 ring-primary ' : '') +
                       (isHappyHourItem ? 'border-amber-300 bg-amber-50' : 'border-border bg-card')
                     }
                   >
+                    {justAdded && (
+                      <div className="pointer-events-none absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-primary text-[12px] font-bold text-primary-foreground shadow">
+                        ✓
+                      </div>
+                    )}
                     <div
                       className={
                         'flex items-center justify-center overflow-hidden rounded-lg bg-secondary text-muted-foreground ' +
