@@ -20,9 +20,12 @@ function todayPhnomPenh(): string {
 }
 
 // GET /api/sales-report/today : 本日 (Phnom Penh時間) の売上合計・件数。
-// manager以上限定・sub_manager除外 (他の売上関連APIと同じ権限)。
+// 2026-09-04: レジ画面ヘッダーの常時表示用に、全スタッフ (part_time含む) が読めるよう開放。
+// (Tom「売上の数字が大きくはっきり見えた方がスタッフ的には達成感がある」への対応。
+// /pos/sales-report の詳細画面自体は引き続き owner/manager限定のまま、こちらは合計値だけの
+// 軽量エンドポイントなので開放しても支障ない、という判断)。
 export const GET = withPosStaff(
-  'manager',
+  'part_time',
   async () => {
     const supabase = createPosAdminClient();
     const storeId = getPosStoreId();
@@ -43,5 +46,4 @@ export const GET = withPosStaff(
 
     return NextResponse.json({ date, total, orderCount });
   },
-  { deny: ['sub_manager'] },
 );

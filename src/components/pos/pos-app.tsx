@@ -126,9 +126,13 @@ function PosAppInner() {
   const [loadToken, setLoadToken] = useState(0);
 
   // レジ画面ヘッダーの「本日の売上」常時表示 (2026-09-04 追加。Tom「POSレジなのに今の売上が
-  // 分からない」への対応)。売上レポート画面 (/pos/sales-report) と同じく owner/manager限定
-  // (sub_manager 以下は非表示。API 側も withPosStaff('manager', ..., {deny:['sub_manager']}))。
-  const canViewSales = me.authMode === 'pos_native' && (me.role === 'owner' || me.role === 'manager');
+  // 分からない」への対応)。
+  // 2026-09-04 追加(その2): 元々は owner/manager限定だったが、Tom「ロゴを消して売上の数字を
+  // 大きくはっきり見せた方がスタッフ的にも達成感がある」への対応で、POSネイティブ運用の
+  // 全スタッフ (sub_manager/employee/part_time含む) に開放した。dine連携ログイン (authMode
+  // が 'dine') はそもそも pos_staff_session Cookie を持たず API が読めないため対象外。
+  // API 側も合わせて withPosStaff('part_time', ...) に緩和済み (詳細は該当 route.ts のコメント)。
+  const canViewSales = me.authMode === 'pos_native';
   const [todaySales, setTodaySales] = useState<TodaySales | null>(null);
   const refreshTodaySales = useCallback(() => {
     if (!canViewSales) return;
@@ -1025,30 +1029,26 @@ function PosAppInner() {
   return (
     <div className="relative flex h-[800px] w-[1280px] flex-col overflow-hidden bg-background">
       <div className="flex h-16 flex-shrink-0 items-center justify-between border-b border-border px-5">
-        <div className="flex items-center gap-2.5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand text-sm font-bold text-brand-foreground">
-            住
-          </div>
-          <div className="text-base font-bold tracking-tight">I&apos;mHungry POS</div>
-        </div>
-        <div className="flex items-center gap-3.5">
+        <div className="flex items-center">
           {canViewSales && (
             <button
               onClick={() => router.push('/pos/sales-report')}
-              className="flex items-center gap-2 rounded-lg border border-border bg-secondary/40 px-3 py-1.5 text-left hover:bg-secondary"
+              className="flex items-baseline gap-2.5 rounded-lg px-2 py-1 hover:bg-secondary/50"
               title={t('posApp.todaySalesHint')}
             >
-              <span className="text-[10.5px] text-muted-foreground">{t('posApp.todaySalesLabel')}</span>
-              <span className="text-[14px] font-bold">
+              <span className="text-[11.5px] font-semibold text-muted-foreground">{t('posApp.todaySalesLabel')}</span>
+              <span className="text-[30px] font-extrabold leading-none tracking-tight text-brand">
                 {todaySales ? `$${todaySales.total.toFixed(2)}` : '—'}
               </span>
               {todaySales && (
-                <span className="text-[10.5px] text-muted-foreground">
+                <span className="text-[11.5px] text-muted-foreground">
                   {t('posApp.todaySalesOrderCount', { count: todaySales.orderCount })}
                 </span>
               )}
             </button>
           )}
+        </div>
+        <div className="flex items-center gap-3.5">
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
             {t('posApp.online')}
