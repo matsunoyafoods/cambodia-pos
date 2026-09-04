@@ -397,15 +397,20 @@ export function CheckoutScreen({
 
         {!remainingSettled && paymentMethods.length > 0 && (
           <div className="flex flex-col gap-3.5 rounded-xl border border-border p-4.5">
-            <div className="flex items-center justify-between">
-              <div className="flex w-fit flex-wrap gap-1.5 rounded-lg bg-secondary p-1">
+            <div className="flex flex-col gap-2.5">
+              {/* 決済方法選択 (2026-09-04 拡大。Tom「現金やQRなど選ぶところが小さすぎて押しずらい
+                  もっと大きくして」) — タップミス防止のため、タブ風の小さいピルから独立した
+                  大ボタンに変更。1本あたりの高さ・文字サイズをほぼ倍にしてある。 */}
+              <div className="flex flex-wrap gap-2">
                 {paymentMethods.map((m) => (
                   <button
                     key={m.id}
                     onClick={() => setSelectedMethodId(m.id)}
                     className={
-                      'h-8 rounded-md px-4.5 text-[12.5px] font-semibold ' +
-                      (selectedMethodId === m.id ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground')
+                      'h-14 min-w-[96px] rounded-xl border-2 px-5 text-[16px] font-bold ' +
+                      (selectedMethodId === m.id
+                        ? 'border-primary bg-primary text-primary-foreground shadow-sm'
+                        : 'border-border bg-card text-foreground')
                     }
                   >
                     {m.name}
