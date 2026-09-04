@@ -44,12 +44,18 @@ export async function POST(req: Request) {
   const supabase = createPosAdminClient();
   const storeId = getPosStoreId();
 
+  // table_code + status='open' が本来1件のはずでも、過去の二重タップ等で稀に複数件残っている
+  // ケースがある (orders/route.ts の GET/POST 同様の防御)。.maybeSingle() だけだと2件以上
+  // ヒットした時に "JSON object requested, multiple (or no) rows returned" で丸ごと失敗するため、
+  // 最新の1件だけを見るようにする (2026-09-04 追加。Tomの報告した合算エラーの原因)。
   const { data: targetOrder, error: targetError } = await supabase
     .from('orders')
     .select('id, guest_ethnicity, guest_kids_count')
     .eq('store_id', storeId)
     .eq('table_code', targetTableCode)
     .eq('status', 'open')
+    .order('created_at', { ascending: false })
+    .limit(1)
     .maybeSingle();
   if (targetError) return NextResponse.json({ error: targetError.message }, { status: 500 });
   if (!targetOrder) return NextResponse.json({ error: '合算先のテーブルに開いている伝票がありません' }, { status: 400 });
@@ -60,30 +66,33 @@ export async function POST(req: Request) {
   const skipped: string[] = [];
 
   for (const code of sources) {
-    const { data: sourceOrder, error: sourceError } = await supabase
+    const { data: sourceOrders, error: sourceError } = await supabase
       .from('orders')
       .select('id, guest_ethnicity, guest_kids_count')
       .eq('store_id', storeId)
       .eq('table_code', code)
       .eq('status', 'open')
-      .maybeSingle();
+      .order('created_at', { ascending: false });
     if (sourceError) return NextResponse.json({ error: sourceError.message }, { status: 500 });
-    if (!sourceOrder) {
+    if (!sourceOrders || sourceOrders.length === 0) {
       skipped.push(code);
       continue;
     }
 
-    const { error: moveItemsError } = await supabase
-      .from('order_items')
-      .update({ order_id: targetOrder.id })
-      .eq('order_id', sourceOrder.id);
-    if (moveItemsError) return NextResponse.json({ error: moveItemsError.message }, { status: 500 });
+    // 同卓に open 注文が複数残っていた場合は全て合算元として処理する (取りこぼし防止)。
+    for (const sourceOrder of sourceOrders) {
+      const { error: moveItemsError } = await supabase
+        .from('order_items')
+        .update({ order_id: targetOrder.id })
+        .eq('order_id', sourceOrder.id);
+      if (moveItemsError) return NextResponse.json({ error: moveItemsError.message }, { status: 500 });
 
-    mergedEthnicity = mergeEthnicity(mergedEthnicity, (sourceOrder.guest_ethnicity ?? {}) as GuestEthnicity);
-    mergedKidsCount += sourceOrder.guest_kids_count ?? 0;
+      mergedEthnicity = mergeEthnicity(mergedEthnicity, (sourceOrder.guest_ethnicity ?? {}) as GuestEthnicity);
+      mergedKidsCount += sourceOrder.guest_kids_count ?? 0;
 
-    const { error: voidError } = await supabase.from('orders').update({ status: 'void' }).eq('id', sourceOrder.id);
-    if (voidError) return NextResponse.json({ error: voidError.message }, { status: 500 });
+      const { error: voidError } = await supabase.from('orders').update({ status: 'void' }).eq('id', sourceOrder.id);
+      if (voidError) return NextResponse.json({ error: voidError.message }, { status: 500 });
+    }
 
     const { error: sessionError } = await supabase
       .from('table_sessions')
