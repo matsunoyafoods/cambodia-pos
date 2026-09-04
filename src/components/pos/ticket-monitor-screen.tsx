@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useStaff } from './staff-context';
 import {
@@ -59,6 +59,40 @@ function loadFontSize(storageKey: string): FontSize {
   return v === 'sm' || v === 'md' || v === 'lg' ? v : 'md';
 }
 
+// テーブルごとにカードをまとめる (2026-09-04 変更。Tomからの要望「商品ごとではなくて
+// テーブルごとで分けて欲しい。商品の横に提供済みボタンがあって押したら提供完了になる」
+// への対応)。以前は品目1件につき1カードだったが、同じテーブルの品目を1枚のカードに
+// まとめ、カード内の各品目に個別の「調理完了/提供完了」ボタンを置く形に変更した。
+// テーブル未設定 (table_code が null、例: テイクアウト) の品目は品目ごとに別カードとして扱う。
+type TableGroup = {
+  key: string;
+  tableCode: string | null;
+  items: KitchenTicketItem[];
+  oldestSentAt: string;
+};
+
+function groupByTable(items: KitchenTicketItem[]): TableGroup[] {
+  const map = new Map<string, TableGroup>();
+  for (const item of items) {
+    const key = item.table_code ?? `__no_table_${item.id}`;
+    let group = map.get(key);
+    if (!group) {
+      group = { key, tableCode: item.table_code, items: [], oldestSentAt: item.sent_to_kitchen_at };
+      map.set(key, group);
+    }
+    group.items.push(item);
+    if (new Date(item.sent_to_kitchen_at).getTime() < new Date(group.oldestSentAt).getTime()) {
+      group.oldestSentAt = item.sent_to_kitchen_at;
+    }
+  }
+  const groups = Array.from(map.values());
+  for (const group of groups) {
+    group.items.sort((a, b) => new Date(a.sent_to_kitchen_at).getTime() - new Date(b.sent_to_kitchen_at).getTime());
+  }
+  groups.sort((a, b) => new Date(a.oldestSentAt).getTime() - new Date(b.oldestSentAt).getTime());
+  return groups;
+}
+
 export function TicketMonitorScreen({ kind, ns, fontSizeStorageKey }: { kind: 'food' | 'drink'; ns: 'kitchen' | 'drink'; fontSizeStorageKey: string }) {
   const { t } = useLanguage();
   const router = useRouter();
@@ -87,6 +121,7 @@ export function TicketMonitorScreen({ kind, ns, fontSizeStorageKey }: { kind: 'f
   const pending = allPending.filter((item) => item.kind === kind);
   const recentlyDone = allRecentlyDone.filter((item) => item.kind === kind);
   const cls = FONT_SIZE_CLASSES[fontSize];
+  const tableGroups = useMemo(() => groupByTable(pending), [pending]);
 
   const load = useCallback(() => {
     getKitchenTickets()
@@ -179,29 +214,42 @@ export function TicketMonitorScreen({ kind, ns, fontSizeStorageKey }: { kind: 'f
               <div className="rounded-xl border border-border bg-card p-5 text-[13px] text-muted-foreground">{t(`${ns}.emptyPending`)}</div>
             ) : (
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {pending.map((item) => {
-                  const minutes = elapsedMinutes(item.sent_to_kitchen_at);
-                  const optionsLabel = item.selected_options.map((o) => o.choiceLabel).join(' / ');
+                {tableGroups.map((group) => {
+                  const minutes = elapsedMinutes(group.oldestSentAt);
                   return (
-                    <div key={item.id} className={`flex flex-col gap-2 rounded-xl border-2 p-4 ${urgencyClass(minutes)}`}>
+                    <div key={group.key} className={`flex flex-col gap-2.5 rounded-xl border-2 p-4 ${urgencyClass(minutes)}`}>
                       <div className="flex items-center justify-between">
-                        <div className={`font-bold ${cls.table}`}>{item.table_code ?? t(`${ns}.noTable`)}</div>
+                        <div className={`font-bold ${cls.table}`}>{group.tableCode ?? t(`${ns}.noTable`)}</div>
                         <div className={`rounded-full px-2 py-0.5 font-semibold ${cls.badge} ${urgencyBadgeClass(minutes)}`}>
                           {minutes === 0 ? t(`${ns}.justNow`) : t(`${ns}.elapsedMinutes`, { minutes: String(minutes) })}
                         </div>
                       </div>
-                      <div className={`font-semibold leading-snug ${cls.name}`}>
-                        {item.menu_name} × {item.qty}
+                      <div className="flex flex-col gap-2">
+                        {group.items.map((item) => {
+                          const optionsLabel = item.selected_options.map((o) => o.choiceLabel).join(' / ');
+                          return (
+                            <div
+                              key={item.id}
+                              className="flex items-center justify-between gap-2.5 border-t border-border/60 pt-2 first:border-t-0 first:pt-0"
+                            >
+                              <div className="min-w-0 flex-1">
+                                <div className={`font-semibold leading-snug ${cls.name}`}>
+                                  {item.menu_name} × {item.qty}
+                                </div>
+                                {optionsLabel && <div className={`text-muted-foreground ${cls.options}`}>{optionsLabel}</div>}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleDone(item)}
+                                disabled={busyIds.has(item.id)}
+                                className="h-10 shrink-0 rounded-lg bg-primary px-3 text-[13px] font-bold text-primary-foreground disabled:opacity-50"
+                              >
+                                {t(`${ns}.doneButton`)}
+                              </button>
+                            </div>
+                          );
+                        })}
                       </div>
-                      {optionsLabel && <div className={`text-muted-foreground ${cls.options}`}>{optionsLabel}</div>}
-                      <button
-                        type="button"
-                        onClick={() => handleDone(item)}
-                        disabled={busyIds.has(item.id)}
-                        className="mt-1 h-10 rounded-lg bg-primary text-[13px] font-bold text-primary-foreground disabled:opacity-50"
-                      >
-                        {t(`${ns}.doneButton`)}
-                      </button>
                     </div>
                   );
                 })}
