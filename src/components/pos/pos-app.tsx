@@ -1114,6 +1114,12 @@ function PosAppInner() {
                   >
                     {t('posApp.menuRegisterClosing')}
                   </button>
+                  <button
+                    onClick={() => router.push('/pos/payroll')}
+                    className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary"
+                  >
+                    {t('posApp.menuPayroll')}
+                  </button>
                   {me.authMode === 'pos_native' && (
                     <button
                       onClick={() => {

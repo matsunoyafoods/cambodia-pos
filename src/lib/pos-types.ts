@@ -332,3 +332,169 @@ export const DEFAULT_TIMECARD_ROUNDING: TimecardRoundingSettings = {
   unitMinutes: 15,
   direction: 'nearest',
 };
+
+// ---------- 給与計算 (2026-09-04 追加) ----------
+// 計算ロジック本体は src/lib/payroll/calc.ts (画面から独立した純粋関数・自動テスト付き)。
+// ここでは API レスポンス・画面で使う型のみを定義する。
+
+export type EmploymentType = 'employee' | 'part_time';
+
+export type PayrollStaffProfile = {
+  id: string;
+  displayName: string;
+  role: 'owner' | 'manager' | 'staff';
+  active?: boolean;
+  employmentType: EmploymentType;
+  positionTitle: string | null;
+  basePayUsd: number | null;
+  standardDailyHours: number;
+  monthlyHolidayDays: number;
+  paidLeaveEligible: boolean;
+  paidLeaveAnnualDays: number;
+  paidLeaveStartDate: string | null;
+  hireDate: string | null;
+  resignationDate: string | null;
+};
+
+export type PayrollAllowanceKind = 'allowance' | 'deduction';
+
+export type PayrollAllowance = {
+  id: string;
+  staffId: string;
+  name: string;
+  kind: PayrollAllowanceKind;
+  amountUsd: number;
+  startDate: string;
+  endDate: string | null;
+  monthly: boolean;
+  note: string | null;
+};
+
+export type AttendanceCategory =
+  | 'normal'
+  | 'scheduled_off'
+  | 'paid_leave'
+  | 'unpaid_absence'
+  | 'late'
+  | 'early_leave'
+  | 'half_day'
+  | 'am_only'
+  | 'pm_only'
+  | 'other';
+
+export type PayrollAttendanceDay = {
+  id: string;
+  staffId: string;
+  workDate: string; // 'YYYY-MM-DD'
+  category: AttendanceCategory;
+  scheduledAmStart: string | null;
+  scheduledAmEnd: string | null;
+  actualAmStart: string | null;
+  actualAmEnd: string | null;
+  scheduledPmStart: string | null;
+  scheduledPmEnd: string | null;
+  actualPmStart: string | null;
+  actualPmEnd: string | null;
+  lateMinutes: number;
+  earlyLeaveMinutes: number;
+  workedHours: number;
+  manualOverride: boolean;
+  overrideReason: string | null;
+  note: string | null;
+  source: 'manual' | 'timecard_import';
+  editedBy: string | null;
+  editedAt: string | null;
+};
+
+export type LeaveLedgerEntryType = 'grant' | 'use' | 'expire' | 'adjustment';
+
+export type PayrollLeaveEntry = {
+  id: string;
+  staffId: string;
+  entryType: LeaveLedgerEntryType;
+  entryDate: string;
+  days: number;
+  fiscalYearStartYear: number;
+  note: string | null;
+  createdAt: string;
+};
+
+export type PayrollRunStatus = 'draft' | 'pending_review' | 'confirmed';
+
+export type PayrollCalculationSnapshot = {
+  employmentType: EmploymentType;
+  year: number;
+  month: number;
+  calendarDays: number;
+  standardWorkDays: number;
+  basePayUsd: number;
+  dailyRate: number;
+  hourlyRate: number;
+  quarterHourRate: number;
+  normalWorkDays: number;
+  scheduledOffDays: number;
+  paidLeaveDays: number;
+  unpaidAbsenceDays: number;
+  workedHours: number;
+  lateMinutes: number;
+  earlyLeaveMinutes: number;
+  absenceDeduction: number;
+  latenessDeduction: number;
+  earlyLeaveDeduction: number;
+  grossPay: number;
+  fixedAllowanceTotal: number;
+  fixedDeductionTotal: number;
+  otherAllowance: number;
+  otherDeduction: number;
+  totalAllowance: number;
+  totalDeduction: number;
+  finalPay: number;
+  scheduledOffExceeded: boolean;
+};
+
+export type PayrollRun = {
+  id: string;
+  staffId: string;
+  staffName: string;
+  yearMonth: string; // 'YYYY-MM'
+  status: PayrollRunStatus;
+  calc: PayrollCalculationSnapshot;
+  confirmedBy: string | null;
+  confirmedAt: string | null;
+  updatedAt: string;
+};
+
+export type PayrollRunAmendment = {
+  id: string;
+  runId: string;
+  beforeJson: PayrollCalculationSnapshot;
+  afterJson: PayrollCalculationSnapshot;
+  reason: string;
+  changedBy: string | null;
+  changedAt: string;
+};
+
+export type PayrollRoundingDirection = 'up' | 'down' | 'nearest';
+export type PayrollLeaveGrantMethod = 'lump_sum' | 'monthly_accrual';
+export type PayrollLeaveUsageUnit = 'day' | 'half_day' | 'hour';
+export type PayrollLeaveCarryover = 'none' | 'unlimited' | 'capped';
+
+export type PayrollSettings = {
+  latenessUnitMinutes: 15 | 10 | 5;
+  latenessDirection: PayrollRoundingDirection;
+  leaveGrantMethod: PayrollLeaveGrantMethod;
+  leaveUsageUnit: PayrollLeaveUsageUnit;
+  leaveCarryover: PayrollLeaveCarryover;
+  leaveCarryoverCapDays: number | null;
+  leaveFiscalYearStartMonth: number; // 1-12、既定4
+};
+
+export const DEFAULT_PAYROLL_SETTINGS: PayrollSettings = {
+  latenessUnitMinutes: 15,
+  latenessDirection: 'up',
+  leaveGrantMethod: 'lump_sum',
+  leaveUsageUnit: 'day',
+  leaveCarryover: 'none',
+  leaveCarryoverCapDays: null,
+  leaveFiscalYearStartMonth: 4,
+};
