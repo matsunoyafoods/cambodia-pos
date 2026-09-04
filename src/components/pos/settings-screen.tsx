@@ -3031,7 +3031,7 @@ function OptionTemplateCard({
   onChanged: () => void;
   onDeleteTemplate: () => void;
 }) {
-  const { t } = useLanguage();
+  const { t, menuText } = useLanguage();
   const [editing, setEditing] = useState(false);
   const [label, setLabel] = useState(template.label);
   const [required, setRequired] = useState(template.required);
@@ -3102,7 +3102,7 @@ function OptionTemplateCard({
           <div className="min-w-0">
             <div className="flex items-center gap-1.5">
               <button onClick={() => setEditing(true)} className="text-[13px] font-semibold">
-                {template.label}
+                {menuText(template.label, template.translations)}
               </button>
               {template.required && (
                 <span className="rounded bg-secondary px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
@@ -3173,7 +3173,7 @@ function OptionTemplateChoiceRow({
   const [label, setLabel] = useState(choice.label);
   const [priceDelta, setPriceDelta] = useState(String(choice.price_delta));
   const [submitting, setSubmitting] = useState(false);
-  const { t } = useLanguage();
+  const { t, menuText } = useLanguage();
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -3232,7 +3232,8 @@ function OptionTemplateChoiceRow({
   return (
     <div className="flex items-center justify-between rounded-lg px-2.5 py-1.5 hover:bg-secondary/40">
       <button onClick={() => setEditing(true)} className="text-left text-[12.5px]">
-        {choice.label} <span className="text-muted-foreground">({choice.price_delta >= 0 ? '+' : ''}${choice.price_delta.toFixed(2)})</span>
+        {menuText(choice.label, choice.translations)}{' '}
+        <span className="text-muted-foreground">({choice.price_delta >= 0 ? '+' : ''}${choice.price_delta.toFixed(2)})</span>
       </button>
       <button onClick={onDelete} className="text-[11px] font-semibold text-destructive">
         {t('common.delete')}
@@ -3545,7 +3546,7 @@ function OptionGroupCard({
   onChanged: () => void;
   onDeleteGroup: () => void;
 }) {
-  const { t } = useLanguage();
+  const { t, menuText } = useLanguage();
   const [editing, setEditing] = useState(false);
   const [label, setLabel] = useState(group.label);
   const [required, setRequired] = useState(group.required);
@@ -3616,7 +3617,7 @@ function OptionGroupCard({
           <div className="min-w-0">
             <div className="flex items-center gap-1.5">
               <button onClick={() => setEditing(true)} className="text-[13px] font-semibold">
-                {group.label}
+                {menuText(group.label, group.translations)}
               </button>
               {group.required && (
                 <span className="rounded bg-secondary px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
@@ -3687,7 +3688,7 @@ function OptionChoiceRow({
   onChanged: () => void;
   onDelete: () => void;
 }) {
-  const { t } = useLanguage();
+  const { t, menuText } = useLanguage();
   const [editing, setEditing] = useState(false);
   const [label, setLabel] = useState(choice.label);
   const [priceDelta, setPriceDelta] = useState(String(choice.price_delta));
@@ -3750,7 +3751,8 @@ function OptionChoiceRow({
   return (
     <div className="flex items-center justify-between rounded-lg px-2.5 py-1.5 hover:bg-secondary/40">
       <button onClick={() => setEditing(true)} className="text-left text-[12.5px]">
-        {choice.label} <span className="text-muted-foreground">({choice.price_delta >= 0 ? '+' : ''}${choice.price_delta.toFixed(2)})</span>
+        {menuText(choice.label, choice.translations)}{' '}
+        <span className="text-muted-foreground">({choice.price_delta >= 0 ? '+' : ''}${choice.price_delta.toFixed(2)})</span>
       </button>
       <button onClick={onDelete} className="text-[11px] font-semibold text-destructive">
         {t('common.delete')}
@@ -3926,9 +3928,18 @@ function translationTypeLabel(t: TFunc, type: MenuTranslationEntry['type']): str
   if (type === 'category') return t('settings.translations.type.category');
   if (type === 'item') return t('settings.translations.type.item');
   if (type === 'option_group') return t('settings.translations.type.optionGroup');
-  return t('settings.translations.type.optionChoice');
+  if (type === 'option_choice') return t('settings.translations.type.optionChoice');
+  if (type === 'option_template') return t('settings.translations.type.optionTemplate');
+  return t('settings.translations.type.optionTemplateChoice');
 }
-const TRANSLATION_TYPE_ORDER: MenuTranslationEntry['type'][] = ['category', 'item', 'option_group', 'option_choice'];
+const TRANSLATION_TYPE_ORDER: MenuTranslationEntry['type'][] = [
+  'category',
+  'item',
+  'option_group',
+  'option_choice',
+  'option_template',
+  'option_template_choice',
+];
 
 function TranslationTab() {
   const { t } = useLanguage();

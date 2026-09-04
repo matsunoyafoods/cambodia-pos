@@ -12,7 +12,7 @@ export const GET = withPosStaff('manager', async () => {
 
   const { data: templates, error: templatesError } = await supabase
     .from('menu_option_group_templates')
-    .select('id, key, label, required, sort_order')
+    .select('id, key, label, required, sort_order, translations')
     .eq('store_id', storeId)
     .order('sort_order')
     .order('label');
@@ -29,11 +29,12 @@ export const GET = withPosStaff('manager', async () => {
     label: string;
     price_delta: number;
     sort_order: number;
+    translations: Record<string, string> | null;
   }[] = [];
   if (templateIds.length > 0) {
     const { data: choiceRows, error: choicesError } = await supabase
       .from('menu_option_choice_templates')
-      .select('id, template_id, choice_key, label, price_delta, sort_order')
+      .select('id, template_id, choice_key, label, price_delta, sort_order, translations')
       .in('template_id', templateIds)
       .order('sort_order')
       .order('label');

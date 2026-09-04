@@ -24,7 +24,7 @@ export const GET = withPosStaff('manager', async (_session, _req, ctx: RouteCont
 
   const { data: groups, error: groupsError } = await supabase
     .from('menu_option_groups')
-    .select('id, key, label, required, sort_order')
+    .select('id, key, label, required, sort_order, translations')
     .eq('menu_id', itemId)
     .order('sort_order')
     .order('label');
@@ -34,11 +34,19 @@ export const GET = withPosStaff('manager', async (_session, _req, ctx: RouteCont
   }
 
   const groupIds = (groups ?? []).map((g) => g.id);
-  let choices: { id: string; group_id: string; choice_key: string; label: string; price_delta: number; sort_order: number }[] = [];
+  let choices: {
+    id: string;
+    group_id: string;
+    choice_key: string;
+    label: string;
+    price_delta: number;
+    sort_order: number;
+    translations: Record<string, string> | null;
+  }[] = [];
   if (groupIds.length > 0) {
     const { data: choiceRows, error: choicesError } = await supabase
       .from('menu_option_choices')
-      .select('id, group_id, choice_key, label, price_delta, sort_order')
+      .select('id, group_id, choice_key, label, price_delta, sort_order, translations')
       .in('group_id', groupIds)
       .order('sort_order')
       .order('label');

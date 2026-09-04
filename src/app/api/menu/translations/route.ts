@@ -9,7 +9,13 @@ import type { MenuLang } from '@/lib/pos-types';
 // 4テーブルに追加した translations (jsonb) 列を、設定画面「翻訳」タブから横断的に一覧・編集するための
 // フラットなAPI。個々のテーブルのCRUD (menu-client.ts) とは別に、翻訳作業だけに特化させている。
 
-export type TranslationEntryType = 'category' | 'item' | 'option_group' | 'option_choice';
+export type TranslationEntryType =
+  | 'category'
+  | 'item'
+  | 'option_group'
+  | 'option_choice'
+  | 'option_template'
+  | 'option_template_choice';
 
 export type TranslationEntry = {
   type: TranslationEntryType;
@@ -72,6 +78,33 @@ async function loadEntries(storeId: string): Promise<TranslationEntry[]> {
     }
   }
 
+  // オプションテンプレート (「ライスorパン」等、複数商品で使い回すひな形。商品ごとの実データとは
+  // 別テーブル。2026-09-04追加、Tom「オプションが翻訳されていない」への対応)。store_id で絞り込む。
+  const { data: templates } = await supabase
+    .from('menu_option_group_templates')
+    .select('id, label, translations, menu_option_choice_templates ( id, label, translations, sort_order )')
+    .eq('store_id', storeId);
+
+  type TemplateRow = {
+    id: string;
+    label: string;
+    translations: Record<string, string> | null;
+    menu_option_choice_templates: { id: string; label: string; translations: Record<string, string> | null; sort_order: number }[];
+  };
+
+  for (const tpl of (templates ?? []) as unknown as TemplateRow[]) {
+    entries.push({ type: 'option_template', id: tpl.id, ja: tpl.label, context: null, translations: tpl.translations ?? {} });
+    for (const choice of (tpl.menu_option_choice_templates ?? []).slice().sort((a, b) => a.sort_order - b.sort_order)) {
+      entries.push({
+        type: 'option_template_choice',
+        id: choice.id,
+        ja: choice.label,
+        context: tpl.label,
+        translations: choice.translations ?? {},
+      });
+    }
+  }
+
   return entries;
 }
 
@@ -87,10 +120,12 @@ const TABLE_BY_TYPE: Record<TranslationEntryType, string> = {
   item: 'menu_items',
   option_group: 'menu_option_groups',
   option_choice: 'menu_option_choices',
+  option_template: 'menu_option_group_templates',
+  option_template_choice: 'menu_option_choice_templates',
 };
 
 const patchSchema = z.object({
-  type: z.enum(['category', 'item', 'option_group', 'option_choice']),
+  type: z.enum(['category', 'item', 'option_group', 'option_choice', 'option_template', 'option_template_choice']),
   id: z.string().uuid(),
   translations: z.object({
     en: z.string().optional(),

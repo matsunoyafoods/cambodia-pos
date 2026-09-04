@@ -13,13 +13,22 @@ const TABLE_BY_TYPE: Record<string, string> = {
   item: 'menu_items',
   option_group: 'menu_option_groups',
   option_choice: 'menu_option_choices',
+  option_template: 'menu_option_group_templates',
+  option_template_choice: 'menu_option_choice_templates',
 };
 
 type RawRow = { id: string; ja: string; translations: Record<string, string> | null };
 
 async function fetchUntranslated(storeId: string): Promise<Record<string, RawRow[]>> {
   const supabase = createPosAdminClient();
-  const result: Record<string, RawRow[]> = { category: [], item: [], option_group: [], option_choice: [] };
+  const result: Record<string, RawRow[]> = {
+    category: [],
+    item: [],
+    option_group: [],
+    option_choice: [],
+    option_template: [],
+    option_template_choice: [],
+  };
 
   const { data: categories } = await supabase.from('menu_categories').select('id, name, translations').eq('store_id', storeId);
   result.category = (categories ?? []).map((c) => ({ id: c.id, ja: c.name, translations: c.translations as Record<string, string> | null }));
@@ -39,6 +48,23 @@ async function fetchUntranslated(storeId: string): Promise<Record<string, RawRow
       for (const c of g.menu_option_choices ?? []) {
         result.option_choice.push({ id: c.id, ja: c.label, translations: c.translations });
       }
+    }
+  }
+
+  const { data: templates } = await supabase
+    .from('menu_option_group_templates')
+    .select('id, label, translations, menu_option_choice_templates ( id, label, translations )')
+    .eq('store_id', storeId);
+  type TemplateRow = {
+    id: string;
+    label: string;
+    translations: Record<string, string> | null;
+    menu_option_choice_templates: { id: string; label: string; translations: Record<string, string> | null }[];
+  };
+  for (const tpl of (templates ?? []) as unknown as TemplateRow[]) {
+    result.option_template.push({ id: tpl.id, ja: tpl.label, translations: tpl.translations });
+    for (const c of tpl.menu_option_choice_templates ?? []) {
+      result.option_template_choice.push({ id: c.id, ja: c.label, translations: c.translations });
     }
   }
 

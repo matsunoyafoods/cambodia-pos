@@ -148,6 +148,8 @@ export type PosMenuOptionChoice = {
   label: string;
   price_delta: number;
   sort_order: number;
+  /** 翻訳タブで入力済みの多言語名 (2026-09-04 追加。表示のみに使用、編集は従来通り日本語の label) */
+  translations?: TranslationMap;
 };
 
 export type PosMenuOptionGroup = {
@@ -157,6 +159,8 @@ export type PosMenuOptionGroup = {
   required: boolean;
   sort_order: number;
   choices: PosMenuOptionChoice[];
+  /** 翻訳タブで入力済みの多言語名 (2026-09-04 追加。表示のみに使用、編集は従来通り日本語の label) */
+  translations?: TranslationMap;
 };
 
 export function listMenuOptionGroups(itemId: string): Promise<{ groups: PosMenuOptionGroup[] }> {
@@ -217,6 +221,8 @@ export type PosMenuOptionChoiceTemplate = {
   label: string;
   price_delta: number;
   sort_order: number;
+  /** 翻訳タブで入力済みの多言語名 (2026-09-04 追加。表示のみに使用、編集は従来通り日本語の label) */
+  translations?: TranslationMap;
 };
 
 export type PosMenuOptionGroupTemplate = {
@@ -226,6 +232,8 @@ export type PosMenuOptionGroupTemplate = {
   required: boolean;
   sort_order: number;
   choices: PosMenuOptionChoiceTemplate[];
+  /** 翻訳タブで入力済みの多言語名 (2026-09-04 追加。表示のみに使用、編集は従来通り日本語の label) */
+  translations?: TranslationMap;
 };
 
 export function listMenuOptionTemplates(): Promise<{ templates: PosMenuOptionGroupTemplate[] }> {
@@ -284,7 +292,13 @@ export function applyMenuOptionTemplate(itemId: string, templateId: string): Pro
 // ---------- 多言語化 (2026-09-02 追加): カテゴリー・商品・オプション名の翻訳管理 ----------
 
 export type MenuTranslationLang = 'en' | 'km' | 'zh' | 'ko';
-export type MenuTranslationEntryType = 'category' | 'item' | 'option_group' | 'option_choice';
+export type MenuTranslationEntryType =
+  | 'category'
+  | 'item'
+  | 'option_group'
+  | 'option_choice'
+  | 'option_template'
+  | 'option_template_choice';
 
 export type MenuTranslationEntry = {
   type: MenuTranslationEntryType;
