@@ -12,7 +12,14 @@ import { NextResponse } from 'next/server';
 const COOKIE_NAME = 'pos_staff_session';
 const SESSION_TTL_SECONDS = 60 * 60 * 12; // 12時間 (長めのシフトでも切れないように)
 
-export type PosStaffRole = 'owner' | 'manager' | 'staff';
+// 2026-09-04: 4段階の権限を追加 (Tom「スタッフタブの中でスタッフ権限をつけられるように
+// してください。マネージャー／サブマネージャー／社員／バイトにしてください。マネージャーは
+// 全て観覧できます。サブマネージャーはスタッフの給料とAI診断と売上レポートは見ることが
+// できません。」)。sub_manager は ROLE_RANK 上は manager と同格 (linear rank では表現できない
+// 「manager 相当だが特定3領域だけ見れない」という制約は withPosStaff の deny リストで別途表現する)。
+// employee / part_time は旧 'staff' を分割したもの (今回の要望では挙動差の指定は無し、
+// 将来の細分化に備えて別値にしておく)。
+export type PosStaffRole = 'owner' | 'manager' | 'sub_manager' | 'employee' | 'part_time';
 
 export type PosStaffSessionPayload = {
   staffId: string;
@@ -50,7 +57,7 @@ export async function issueStaffSessionToken(payload: PosStaffSessionPayload): P
 }
 
 function isPosStaffRole(value: unknown): value is PosStaffRole {
-  return value === 'owner' || value === 'manager' || value === 'staff';
+  return value === 'owner' || value === 'manager' || value === 'sub_manager' || value === 'employee' || value === 'part_time';
 }
 
 export async function verifyStaffSessionToken(token: string): Promise<PosStaffSessionPayload | null> {
@@ -100,15 +107,26 @@ export async function getStaffSessionFromCookies(): Promise<PosStaffSessionPaylo
 
 // ---------- Route Handler 用ガード ----------
 
-const ROLE_RANK: Record<PosStaffRole, number> = { staff: 0, manager: 1, owner: 2 };
+const ROLE_RANK: Record<PosStaffRole, number> = {
+  part_time: 0,
+  employee: 0,
+  sub_manager: 1,
+  manager: 1,
+  owner: 2,
+};
 
 /**
  * matsunoya-dine の withAdmin/requireAdmin と同じ役割の POS ネイティブ版。
  * Cookie のセッションを検証し、role が minRole 未満なら 403 を返す。
+ *
+ * opts.deny: sub_manager のように「rank は manager と同格だが特定の画面/API は見せない」
+ * ロールを個別に締め出すための追加チェック (2026-09-04 追加)。rank チェックを通過した後、
+ * session.role が deny リストに含まれていれば 403。
  */
 export function withPosStaff<Args extends unknown[]>(
   minRole: PosStaffRole,
   handler: (session: PosStaffSessionPayload, req: Request, ...args: Args) => Promise<Response>,
+  opts?: { deny?: PosStaffRole[] },
 ) {
   return async function (req: Request, ...args: Args): Promise<Response> {
     const session = await getStaffSessionFromCookies();
@@ -116,6 +134,9 @@ export function withPosStaff<Args extends unknown[]>(
       return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
     }
     if (ROLE_RANK[session.role] < ROLE_RANK[minRole]) {
+      return NextResponse.json({ error: 'forbidden' }, { status: 403 });
+    }
+    if (opts?.deny?.includes(session.role)) {
       return NextResponse.json({ error: 'forbidden' }, { status: 403 });
     }
     return handler(session, req, ...args);

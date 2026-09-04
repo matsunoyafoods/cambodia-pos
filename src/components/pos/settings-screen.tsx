@@ -22,6 +22,7 @@ import {
   listStaff,
   resetStaffPin,
   updateStaffWage,
+  updateStaffRole,
   PosStaffApiError,
   type PosStaffMember,
   type PosStaffRole,
@@ -1079,7 +1080,7 @@ function SettingsScreenInner() {
   const router = useRouter();
   const me = useStaff();
   const isPosNative = me.authMode === 'pos_native';
-  const canManageSettings = !isPosNative || me.role === 'owner' || me.role === 'manager';
+  const canManageSettings = !isPosNative || me.role === 'owner' || me.role === 'manager' || me.role === 'sub_manager';
 
   const [tab, setTab] = useState<Tab>('general');
   const [settings, setSettings] = useState<PosSettings>(DEFAULT_SETTINGS);
@@ -1622,13 +1623,17 @@ function StaffTab() {
   const { t } = useLanguage();
   const me = useStaff();
   const isPosNative = me.authMode === 'pos_native';
-  const canManage = isPosNative && (me.role === 'owner' || me.role === 'manager');
+  const canManage = isPosNative && (me.role === 'owner' || me.role === 'manager' || me.role === 'sub_manager');
+  // 給料 (時給) の閲覧・編集は sub_manager には許可しない (Tom「サブマネージャーはスタッフの
+  // 給料...は見ることができません」)。API 側 (staff/[id]/route.ts PATCH) でも同様に弾いている。
+  const canManageWage = isPosNative && (me.role === 'owner' || me.role === 'manager');
 
   const [staffList, setStaffList] = useState<PosStaffMember[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [resetTargetId, setResetTargetId] = useState<string | null>(null);
   const [wageTargetId, setWageTargetId] = useState<string | null>(null);
+  const [roleTargetId, setRoleTargetId] = useState<string | null>(null);
 
   const load = useCallback(() => {
     setLoadError(null);
@@ -1704,17 +1709,25 @@ function StaffTab() {
                 <div className="text-[11.5px] text-muted-foreground">
                   {roleLabel(t, s.role)}
                   {s.active === false && ` ・ ${t('settings.staff.inactive')}`}
-                  {s.hourly_wage_usd != null && ` ・ ${t('settings.staff.hourlyWage', { amount: s.hourly_wage_usd.toFixed(2) })}`}
+                  {canManageWage && s.hourly_wage_usd != null && ` ・ ${t('settings.staff.hourlyWage', { amount: s.hourly_wage_usd.toFixed(2) })}`}
                 </div>
               </div>
             </div>
             <div className="flex items-center gap-2">
               <button
-                onClick={() => setWageTargetId((v) => (v === s.id ? null : s.id))}
+                onClick={() => setRoleTargetId((v) => (v === s.id ? null : s.id))}
                 className="h-8 rounded-lg border border-border px-3 text-xs font-semibold"
               >
-                {t('settings.staff.setWage')}
+                {t('settings.staff.setRole')}
               </button>
+              {canManageWage && (
+                <button
+                  onClick={() => setWageTargetId((v) => (v === s.id ? null : s.id))}
+                  className="h-8 rounded-lg border border-border px-3 text-xs font-semibold"
+                >
+                  {t('settings.staff.setWage')}
+                </button>
+              )}
               <button
                 onClick={() => setResetTargetId((v) => (v === s.id ? null : s.id))}
                 className="h-8 rounded-lg border border-border px-3 text-xs font-semibold"
@@ -1723,7 +1736,18 @@ function StaffTab() {
               </button>
             </div>
           </div>
-          {wageTargetId === s.id && (
+          {roleTargetId === s.id && (
+            <RoleEditForm
+              staffId={s.id}
+              currentRole={s.role}
+              onDone={(updated) => {
+                setRoleTargetId(null);
+                setStaffList((prev) => (prev ? prev.map((x) => (x.id === updated.id ? updated : x)) : prev));
+              }}
+              onCancel={() => setRoleTargetId(null)}
+            />
+          )}
+          {wageTargetId === s.id && canManageWage && (
             <WageEditForm
               staffId={s.id}
               currentWage={s.hourly_wage_usd ?? null}
@@ -1807,10 +1831,76 @@ function WageEditForm({
   );
 }
 
+// 権限 (role) の変更フォーム (2026-09-04 追加。既存スタッフの権限を後から編集できるように)。
+// owner への変更はここからはできない (WageEditForm 同様、Supabase 側で直接設定する運用)。
+function RoleEditForm({
+  staffId,
+  currentRole,
+  onDone,
+  onCancel,
+}: {
+  staffId: string;
+  currentRole: PosStaffRole;
+  onDone: (updated: PosStaffMember) => void;
+  onCancel: () => void;
+}) {
+  const { t } = useLanguage();
+  const assignable = ASSIGNABLE_ROLES.includes(currentRole) ? ASSIGNABLE_ROLES : [currentRole, ...ASSIGNABLE_ROLES];
+  const [role, setRole] = useState<PosStaffRole>(currentRole);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      const { staff } = await updateStaffRole(staffId, role);
+      onDone(staff);
+    } catch (err) {
+      setError(err instanceof PosStaffApiError ? err.message : t('settings.staff.roleUpdateError'));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="mt-3 flex items-center gap-2 border-t border-border pt-3">
+      <select
+        value={role}
+        onChange={(e) => setRole(e.target.value as PosStaffRole)}
+        className="h-9 rounded-lg border border-border px-3 text-[13px]"
+      >
+        {assignable.map((r) => (
+          <option key={r} value={r}>
+            {t(`role.${r}`)}
+          </option>
+        ))}
+      </select>
+      <button
+        type="submit"
+        disabled={submitting || role === currentRole}
+        className="h-9 rounded-lg bg-primary px-3 text-xs font-semibold text-primary-foreground disabled:opacity-60"
+      >
+        {submitting ? t('settings.staff.updatingEllipsis') : t('settings.staff.updateButton')}
+      </button>
+      <button type="button" onClick={onCancel} className="h-9 rounded-lg border border-border px-3 text-xs font-semibold">
+        {t('common.cancel')}
+      </button>
+      {error && <div className="text-xs text-destructive">{error}</div>}
+    </form>
+  );
+}
+
+// 2026-09-04 追加: 権限 (role) の選択肢。owner はここでは選ばせない
+// (オーナー権限の付与はスタッフタブからの自己申告的な操作にすべきではないため、
+// 従来通り Supabase 側で直接設定する運用のまま)。
+const ASSIGNABLE_ROLES: PosStaffRole[] = ['manager', 'sub_manager', 'employee', 'part_time'];
+
 function AddStaffForm({ onCreated }: { onCreated: () => void }) {
   const { t } = useLanguage();
   const [displayName, setDisplayName] = useState('');
-  const [role, setRole] = useState<PosStaffRole>('staff');
+  const [role, setRole] = useState<PosStaffRole>('employee');
   const [pin, setPin] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1844,9 +1934,11 @@ function AddStaffForm({ onCreated }: { onCreated: () => void }) {
           onChange={(e) => setRole(e.target.value as PosStaffRole)}
           className="h-10 w-36 rounded-lg border border-border px-3 text-[13.5px]"
         >
-          <option value="staff">{t('role.staff')}</option>
-          <option value="manager">{t('role.manager')}</option>
-          <option value="owner">{t('role.owner')}</option>
+          {ASSIGNABLE_ROLES.map((r) => (
+            <option key={r} value={r}>
+              {t(`role.${r}`)}
+            </option>
+          ))}
         </select>
       </div>
       <input
@@ -1922,7 +2014,7 @@ function MenuTab() {
   const { t, menuText } = useLanguage();
   const me = useStaff();
   const isPosNative = me.authMode === 'pos_native';
-  const canManage = isPosNative && (me.role === 'owner' || me.role === 'manager');
+  const canManage = isPosNative && (me.role === 'owner' || me.role === 'manager' || me.role === 'sub_manager');
 
   const [categories, setCategories] = useState<PosMenuCategory[] | null>(null);
   const [items, setItems] = useState<PosMenuItemRecord[] | null>(null);
@@ -3945,7 +4037,7 @@ function TranslationTab() {
   const { t } = useLanguage();
   const me = useStaff();
   const isPosNative = me.authMode === 'pos_native';
-  const canManage = isPosNative && (me.role === 'owner' || me.role === 'manager');
+  const canManage = isPosNative && (me.role === 'owner' || me.role === 'manager' || me.role === 'sub_manager');
 
   const [entries, setEntries] = useState<MenuTranslationEntry[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);

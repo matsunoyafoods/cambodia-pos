@@ -34,7 +34,7 @@ function toPrinterConfig(row: PrinterRow): PrinterConfig {
   };
 }
 
-export const GET = withPosStaff('staff', async () => {
+export const GET = withPosStaff('part_time', async () => {
   const supabase = createPosAdminClient();
   const storeId = getPosStoreId();
   const { data, error } = await supabase

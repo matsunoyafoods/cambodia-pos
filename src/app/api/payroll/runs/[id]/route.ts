@@ -75,4 +75,4 @@ export const PATCH = withPosStaff('manager', async (session, req, ctx: RouteCont
       updatedAt: row.updated_at,
     },
   });
-});
+}, { deny: ['sub_manager'] });

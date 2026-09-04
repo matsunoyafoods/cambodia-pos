@@ -56,7 +56,7 @@ function RegisterClosingScreenInner() {
   const router = useRouter();
   const me = useStaff();
   const isPosNative = me.authMode === 'pos_native';
-  const canManage = me.role === 'owner' || me.role === 'manager';
+  const canManage = me.role === 'owner' || me.role === 'manager' || me.role === 'sub_manager';
 
   const [khrRate, setKhrRate] = useState(DEFAULT_SETTINGS.khrRate);
   useEffect(() => {

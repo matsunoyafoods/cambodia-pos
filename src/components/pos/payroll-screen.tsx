@@ -30,6 +30,7 @@ import type {
   PayrollRun,
   PayrollStaffProfile,
 } from '@/lib/pos-types';
+import { AttendanceReportTab } from './attendance-report-tab';
 
 // 給与計算システム (2026-09-04 追加)。Tomからの要望「スタッフごとの勤怠実績を入力すると
 // 給与を自動計算できるシステム」に対応。計算ロジック本体は src/lib/payroll/calc.ts
@@ -66,7 +67,11 @@ export function PayrollScreen() {
   );
 }
 
-type Tab = 'staff' | 'attendance' | 'leave' | 'runs';
+// 'timecardReport' サブタブ (2026-09-04 追加。Tomからの要望「退勤レポートは給料のタブに
+// 入れてください」)。既存の 'attendance' タブ (給与計算用の月次勤怠区分入力) とは別物 —
+// こちらは出勤/退勤/休憩の打刻記録から実働時間・概算人件費を集計する勤怠レポート
+// (旧 timecard-screen.tsx の TimecardReport、実装は attendance-report-tab.tsx に移設)。
+type Tab = 'staff' | 'attendance' | 'leave' | 'runs' | 'timecardReport';
 
 function PayrollScreenInner() {
   const { t } = useLanguage();
@@ -109,7 +114,7 @@ function PayrollScreenInner() {
       ) : (
         <>
           <div className="flex flex-shrink-0 gap-1.5 border-b border-border px-5 py-2 print:hidden">
-            {(['staff', 'attendance', 'leave', 'runs'] as Tab[]).map((tb) => (
+            {(['staff', 'attendance', 'leave', 'runs', 'timecardReport'] as Tab[]).map((tb) => (
               <button
                 key={tb}
                 onClick={() => setTab(tb)}
@@ -130,6 +135,7 @@ function PayrollScreenInner() {
               {staffList && tab === 'attendance' && <AttendanceTab staffList={staffList} />}
               {staffList && tab === 'leave' && <LeaveTab staffList={staffList} />}
               {staffList && tab === 'runs' && <RunsTab staffList={staffList} />}
+              {staffList && tab === 'timecardReport' && <AttendanceReportTab />}
             </div>
           </div>
         </>

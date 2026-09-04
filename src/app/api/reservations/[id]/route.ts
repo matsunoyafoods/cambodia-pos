@@ -43,7 +43,7 @@ const updateSchema = z.object({
 });
 
 // 現状はキャンセル(status切替)のみ対応。電話等でのキャンセル連絡を受けたときに使う。
-export const PATCH = withPosStaff('staff', async (_session, req, ctx: RouteContext) => {
+export const PATCH = withPosStaff('part_time', async (_session, req, ctx: RouteContext) => {
   const { id } = await ctx.params;
   // 'app:' プレフィックスは matsunoya-dine 側 (public.reservations) の予約を読み取り専用で
   // マージ表示しているだけの仮想ID。ここでは書き込めない (2026-08-31 追加)。

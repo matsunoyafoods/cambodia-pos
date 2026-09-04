@@ -13,7 +13,7 @@ function toCategory(row: { id: string; name: string; sort_order: number }): Expe
 }
 
 // 一覧。staff 以上で閲覧可 (経費入力は誰でもできるため候補一覧も見える必要がある)。
-export const GET = withPosStaff('staff', async () => {
+export const GET = withPosStaff('part_time', async () => {
   const supabase = createPosAdminClient();
   const storeId = getPosStoreId();
   const { data, error } = await supabase

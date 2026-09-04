@@ -101,7 +101,14 @@ export function PosApp() {
   );
 }
 
-const ROLE_LABEL_KEY = { owner: 'role.owner', manager: 'role.manager', staff: 'role.staff' } as const;
+const ROLE_LABEL_KEY = {
+  owner: 'role.owner',
+  manager: 'role.manager',
+  staff: 'role.staff',
+  sub_manager: 'role.sub_manager',
+  employee: 'role.employee',
+  part_time: 'role.part_time',
+} as const;
 
 function PosAppInner() {
   const { t, lang, setLang, menuText } = useLanguage();

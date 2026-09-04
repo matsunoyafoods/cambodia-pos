@@ -24,7 +24,7 @@ function toRounding(raw: unknown): TimecardRoundingSettings {
 }
 
 // 取得。staff 以上 (レポートを開く前提の manager 以上しか実際には使わないが、他の設定系と同様に閲覧は許可)。
-export const GET = withPosStaff('staff', async () => {
+export const GET = withPosStaff('part_time', async () => {
   const supabase = createPosAdminClient();
   const storeId = getPosStoreId();
   const { data, error } = await supabase.from('stores').select('settings').eq('id', storeId).maybeSingle();

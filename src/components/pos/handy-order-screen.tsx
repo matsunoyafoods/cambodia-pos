@@ -276,6 +276,14 @@ export function HandyOrderScreen({
     };
   }, []);
 
+  // 商品カードの画像右上に、今回のカート内の同じ商品の数量を表示する (2026-09-04 追加。
+  // order-screen.tsx と同じロジック)。
+  const cartQtyByMenuId = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const line of cart) map.set(line.menuId, (map.get(line.menuId) ?? 0) + line.qty);
+    return map;
+  }, [cart]);
+
   return (
     <div className="relative flex h-full flex-col overflow-hidden">
       <div className="flex items-center justify-between gap-2 border-b border-border px-3.5 py-2.5">
@@ -332,6 +340,7 @@ export function HandyOrderScreen({
                   priceLabel = minDelta === maxDelta ? money(basePrice + minDelta) : `${money(basePrice + minDelta)}〜${money(basePrice + maxDelta)}`;
                 }
                 const justAdded = justAddedId === m.id;
+                const cartQty = cartQtyByMenuId.get(m.id) ?? 0;
                 return (
                   <button
                     key={m.id}
@@ -349,7 +358,7 @@ export function HandyOrderScreen({
                     )}
                     <div
                       className={
-                        'flex items-center justify-center overflow-hidden rounded-lg bg-secondary text-muted-foreground ' +
+                        'relative flex items-center justify-center overflow-hidden rounded-lg bg-secondary text-muted-foreground ' +
                         (imageFull ? 'h-24' : 'h-12')
                       }
                     >
@@ -358,6 +367,11 @@ export function HandyOrderScreen({
                         <img src={m.imageUrl} alt="" className={'h-full w-full ' + (imageFull ? 'object-contain' : 'object-cover')} />
                       ) : (
                         '🍽'
+                      )}
+                      {cartQty > 0 && (
+                        <div className="pointer-events-none absolute right-1 top-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-foreground px-1 text-[10px] font-bold text-background shadow">
+                          {cartQty}
+                        </div>
                       )}
                     </div>
                     <div>

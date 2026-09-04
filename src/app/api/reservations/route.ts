@@ -157,7 +157,7 @@ async function fetchTableAssignments(storeId: string): Promise<Map<string, strin
   return map;
 }
 
-export const GET = withPosStaff('staff', async () => {
+export const GET = withPosStaff('part_time', async () => {
   const supabase = createPosAdminClient();
   const storeId = getPosStoreId();
 
@@ -201,7 +201,7 @@ const createSchema = z.object({
   notes: z.string().max(1000).optional(),
 });
 
-export const POST = withPosStaff('staff', async (session, req) => {
+export const POST = withPosStaff('part_time', async (session, req) => {
   const json = await req.json().catch(() => null);
   const parsed = createSchema.safeParse(json);
   if (!parsed.success) {

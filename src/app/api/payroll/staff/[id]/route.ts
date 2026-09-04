@@ -96,4 +96,4 @@ export const PATCH = withPosStaff('manager', async (_session, req, ctx: RouteCon
     resignationDate: row.resignation_date,
   };
   return NextResponse.json({ staff });
-});
+}, { deny: ['sub_manager'] });

@@ -19,7 +19,7 @@ function toConfig(row: {
 }
 
 // 一覧 (無効化されたものも含む。管理画面用)。staff 以上で閲覧可。
-export const GET = withPosStaff('staff', async () => {
+export const GET = withPosStaff('part_time', async () => {
   const supabase = createPosAdminClient();
   const storeId = getPosStoreId();
   const { data, error } = await supabase

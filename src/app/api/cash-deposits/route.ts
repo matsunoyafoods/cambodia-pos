@@ -54,7 +54,7 @@ const postSchema = z.object({
 });
 
 // 新規登録。staff 以上 (銀行に入金しに行った本人がその場で記録できるように、経費記録と同じ方針)。
-export const POST = withPosStaff('staff', async (session, req) => {
+export const POST = withPosStaff('part_time', async (session, req) => {
   const json = await req.json().catch(() => null);
   const parsed = postSchema.safeParse(json);
   if (!parsed.success) {

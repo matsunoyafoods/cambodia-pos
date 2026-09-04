@@ -42,7 +42,7 @@ export const GET = withPosStaff('manager', async (_session, req) => {
   const { data, error } = await query;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ entries: (data ?? []).map((r) => toEntry(r as unknown as Row)) });
-});
+}, { deny: ['sub_manager'] });
 
 const createSchema = z.object({
   staffId: z.string().uuid(),
@@ -85,4 +85,4 @@ export const POST = withPosStaff('manager', async (session, req) => {
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ entry: toEntry(data as unknown as Row) }, { status: 201 });
-});
+}, { deny: ['sub_manager'] });

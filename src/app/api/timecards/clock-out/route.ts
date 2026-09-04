@@ -8,7 +8,7 @@ import type { TimecardBreak } from '@/lib/pos-types';
 // 退勤時刻で自動的に終了させる (延々と「休憩中」のまま残ってしまうことを防ぐ)。
 // 2026-09-01: リクエストボディの staffId で対象スタッフを指定できるようにした (共有端末対応)。
 
-export const POST = withPosStaff('staff', async (session, req) => {
+export const POST = withPosStaff('part_time', async (session, req) => {
   const json = await req.json().catch(() => ({}) as { staffId?: string });
   const resolved = await resolveTargetStaffId(session, json?.staffId);
   if (resolved.error) return NextResponse.json({ error: resolved.error }, { status: 400 });

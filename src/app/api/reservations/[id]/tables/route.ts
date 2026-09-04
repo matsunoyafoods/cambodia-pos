@@ -14,7 +14,7 @@ const schema = z.object({
 // POS電話予約・matsunoya-dineアプリ予約のどちらも同じ id 空間 (ApiReservation.id) で扱える
 // 別テーブル (pos.reservation_table_assignments) に upsert する。時間は予約自体が持っている
 // reservation_time / reserved_at をそのまま使うので、ここでは卓コードの配列だけを保存する。
-export const PATCH = withPosStaff('staff', async (session, req, ctx: RouteContext) => {
+export const PATCH = withPosStaff('part_time', async (session, req, ctx: RouteContext) => {
   const { id } = await ctx.params;
   const json = await req.json().catch(() => null);
   const parsed = schema.safeParse(json);

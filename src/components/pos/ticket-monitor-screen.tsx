@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useStaff } from './staff-context';
 import {
@@ -94,7 +94,7 @@ function groupByTable(items: KitchenTicketItem[]): TableGroup[] {
 }
 
 export function TicketMonitorScreen({ kind, ns, fontSizeStorageKey }: { kind: 'food' | 'drink'; ns: 'kitchen' | 'drink'; fontSizeStorageKey: string }) {
-  const { t } = useLanguage();
+  const { t, menuText } = useLanguage();
   const router = useRouter();
   const me = useStaff();
 
@@ -162,6 +162,59 @@ export function TicketMonitorScreen({ kind, ns, fontSizeStorageKey }: { kind: 'f
     }
   }
 
+  // テーブルカードを2秒長押しすると、そのテーブルの品目を全て一括で完了にする
+  // (2026-09-04 追加。Tomからの要望「注文商品が5個の場合、5回注文完了を押さないと完了に
+  // なりません。なのでこの機能を残しつつ2秒長押ししたら5個全て提供完了になるように」への
+  // 対応)。品目ごとの個別ボタンはそのまま残し、カード見出し部分の長押しで一括完了できる
+  // ようにする。一括APIは無いため Promise.all で個別APIを並行実行する。
+  const HOLD_DURATION_MS = 2000;
+  const [holdingGroupKey, setHoldingGroupKey] = useState<string | null>(null);
+  const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function cancelHold() {
+    if (holdTimerRef.current) {
+      clearTimeout(holdTimerRef.current);
+      holdTimerRef.current = null;
+    }
+    setHoldingGroupKey(null);
+  }
+
+  function startHold(group: TableGroup) {
+    if (group.items.length < 2) return; // 1品だけなら個別ボタンで十分
+    setHoldingGroupKey(group.key);
+    holdTimerRef.current = setTimeout(() => {
+      handleBulkDone(group);
+      setHoldingGroupKey(null);
+    }, HOLD_DURATION_MS);
+  }
+
+  async function handleBulkDone(group: TableGroup) {
+    const ids = group.items.map((it) => it.id);
+    setBusyIds((s) => {
+      const next = new Set(s);
+      for (const id of ids) next.add(id);
+      return next;
+    });
+    try {
+      await Promise.all(ids.map((id) => markKitchenTicketDone(id, me.display_name)));
+      load();
+    } catch (err) {
+      setError(err instanceof PosOrderKitchenApiError ? err.message : t(`${ns}.actionError`));
+    } finally {
+      setBusyIds((s) => {
+        const next = new Set(s);
+        for (const id of ids) next.delete(id);
+        return next;
+      });
+    }
+  }
+
+  useEffect(() => {
+    return () => {
+      if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+    };
+  }, []);
+
   async function handleUndo(item: KitchenTicketItem) {
     setBusyIds((s) => new Set(s).add(item.id));
     try {
@@ -216,17 +269,42 @@ export function TicketMonitorScreen({ kind, ns, fontSizeStorageKey }: { kind: 'f
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {tableGroups.map((group) => {
                   const minutes = elapsedMinutes(group.oldestSentAt);
+                  const canBulkComplete = group.items.length >= 2;
+                  const isHolding = holdingGroupKey === group.key;
                   return (
                     <div key={group.key} className={`flex flex-col gap-2.5 rounded-xl border-2 p-4 ${urgencyClass(minutes)}`}>
-                      <div className="flex items-center justify-between">
-                        <div className={`font-bold ${cls.table}`}>{group.tableCode ?? t(`${ns}.noTable`)}</div>
-                        <div className={`rounded-full px-2 py-0.5 font-semibold ${cls.badge} ${urgencyBadgeClass(minutes)}`}>
-                          {minutes === 0 ? t(`${ns}.justNow`) : t(`${ns}.elapsedMinutes`, { minutes: String(minutes) })}
+                      <div
+                        className={'select-none ' + (canBulkComplete ? 'cursor-pointer' : '')}
+                        onPointerDown={canBulkComplete ? () => startHold(group) : undefined}
+                        onPointerUp={canBulkComplete ? cancelHold : undefined}
+                        onPointerLeave={canBulkComplete ? cancelHold : undefined}
+                        onPointerCancel={canBulkComplete ? cancelHold : undefined}
+                        title={canBulkComplete ? t(`${ns}.holdAllHint`) : undefined}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className={`font-bold ${cls.table}`}>{group.tableCode ?? t(`${ns}.noTable`)}</div>
+                          <div className={`rounded-full px-2 py-0.5 font-semibold ${cls.badge} ${urgencyBadgeClass(minutes)}`}>
+                            {minutes === 0 ? t(`${ns}.justNow`) : t(`${ns}.elapsedMinutes`, { minutes: String(minutes) })}
+                          </div>
                         </div>
+                        {canBulkComplete && (
+                          <>
+                            <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-black/10">
+                              <div
+                                className="h-full rounded-full bg-primary"
+                                style={{
+                                  width: isHolding ? '100%' : '0%',
+                                  transition: isHolding ? `width ${HOLD_DURATION_MS}ms linear` : 'none',
+                                }}
+                              />
+                            </div>
+                            <div className="mt-1 text-[10px] text-muted-foreground">{t(`${ns}.holdAllHint`)}</div>
+                          </>
+                        )}
                       </div>
                       <div className="flex flex-col gap-2">
                         {group.items.map((item) => {
-                          const optionsLabel = item.selected_options.map((o) => o.choiceLabel).join(' / ');
+                          const optionsLabel = item.selected_options.map((o) => menuText(o.choiceLabel, o.translations)).join(' / ');
                           return (
                             <div
                               key={item.id}
@@ -234,7 +312,7 @@ export function TicketMonitorScreen({ kind, ns, fontSizeStorageKey }: { kind: 'f
                             >
                               <div className="min-w-0 flex-1">
                                 <div className={`font-semibold leading-snug ${cls.name}`}>
-                                  {item.menu_name} × {item.qty}
+                                  {menuText(item.menu_name, item.menu_translations)} × {item.qty}
                                 </div>
                                 {optionsLabel && <div className={`text-muted-foreground ${cls.options}`}>{optionsLabel}</div>}
                               </div>
@@ -266,7 +344,8 @@ export function TicketMonitorScreen({ kind, ns, fontSizeStorageKey }: { kind: 'f
                 {recentlyDone.map((item) => (
                   <div key={item.id} className="flex items-center justify-between rounded-lg border border-border bg-card px-4 py-2.5">
                     <div className={cls.doneRow}>
-                      <span className="font-semibold">{item.table_code ?? t(`${ns}.noTable`)}</span> ・ {item.menu_name} × {item.qty}
+                      <span className="font-semibold">{item.table_code ?? t(`${ns}.noTable`)}</span> ・{' '}
+                      {menuText(item.menu_name, item.menu_translations)} × {item.qty}
                       {item.kitchen_done_by_name && <span className="ml-2 text-muted-foreground">{t(`${ns}.doneBy`, { name: item.kitchen_done_by_name })}</span>}
                     </div>
                     <button

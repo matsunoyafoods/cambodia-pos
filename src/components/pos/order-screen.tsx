@@ -594,6 +594,15 @@ export function OrderScreen({
     };
   }, []);
 
+  // 商品カードの画像右上に、今回のカート内の同じ商品の数量を表示する (2026-09-04 追加。
+  // 連打防止のフィードバックをさらに分かりやすくしてほしいというTomからの要望)。
+  // オプション違いで複数のカート行に分かれることがあるため menuId で合算する。
+  const cartQtyByMenuId = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const line of cart) map.set(line.menuId, (map.get(line.menuId) ?? 0) + line.qty);
+    return map;
+  }, [cart]);
+
   return (
     <div className="flex flex-1 overflow-hidden">
       <div className="flex flex-1 flex-col overflow-hidden">
@@ -670,6 +679,7 @@ export function OrderScreen({
                         : `${money(basePrice + minDelta)}〜${money(basePrice + maxDelta)}`;
                   }
                   const justAdded = justAddedId === m.id;
+                  const cartQty = cartQtyByMenuId.get(m.id) ?? 0;
                   return (
                     <button
                       key={m.id}
@@ -687,7 +697,7 @@ export function OrderScreen({
                       )}
                       <div
                         className={
-                          'flex items-center justify-center overflow-hidden rounded-lg bg-secondary text-muted-foreground ' +
+                          'relative flex items-center justify-center overflow-hidden rounded-lg bg-secondary text-muted-foreground ' +
                           (imageFull ? 'h-32' : 'h-16')
                         }
                       >
@@ -700,6 +710,11 @@ export function OrderScreen({
                           />
                         ) : (
                           '🍽'
+                        )}
+                        {cartQty > 0 && (
+                          <div className="pointer-events-none absolute right-1 top-1 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-foreground px-1 text-[11px] font-bold text-background shadow">
+                            {cartQty}
+                          </div>
                         )}
                       </div>
                       <div>

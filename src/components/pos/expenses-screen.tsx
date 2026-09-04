@@ -59,7 +59,7 @@ function ExpensesScreenInner() {
   const router = useRouter();
   const me = useStaff();
   const isPosNative = me.authMode === 'pos_native';
-  const canManage = me.role === 'owner' || me.role === 'manager';
+  const canManage = me.role === 'owner' || me.role === 'manager' || me.role === 'sub_manager';
 
   const [vendors, setVendors] = useState<ExpenseVendor[]>([]);
   const [categories, setCategories] = useState<ExpenseCategory[]>([]);

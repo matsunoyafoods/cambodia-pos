@@ -5,7 +5,7 @@ import { withPosStaff } from '@/lib/pos-auth';
 
 // テーブルレイアウト (卓 + 柱・カウンター等の障害物) 一覧。
 // register 画面 (テーブルマップ) からも参照するので staff 以上 (全スタッフ) で許可する。
-export const GET = withPosStaff('staff', async () => {
+export const GET = withPosStaff('part_time', async () => {
   const supabase = createPosAdminClient();
   const storeId = getPosStoreId();
 

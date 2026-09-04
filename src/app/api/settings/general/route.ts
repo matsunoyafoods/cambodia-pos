@@ -34,7 +34,7 @@ function toPosSettings(storeId: string, raw: unknown): PosSettings {
 }
 
 // 取得。staff 以上 (register 画面からは使わないが設定画面の表示用に閲覧は許可)。
-export const GET = withPosStaff('staff', async () => {
+export const GET = withPosStaff('part_time', async () => {
   const supabase = createPosAdminClient();
   const storeId = getPosStoreId();
 

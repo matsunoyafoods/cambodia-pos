@@ -13,7 +13,7 @@ import type { TimecardBreak, TimecardStatus } from '@/lib/pos-types';
 // 属さないため、staff_id で絞り込むだけで店舗を跨いだ混線は起きない (staffId は
 // resolveTargetStaffId() で自店舗の pos.staff に実在するかを必ず検証してから使う)。
 
-export const GET = withPosStaff('staff', async (session, req) => {
+export const GET = withPosStaff('part_time', async (session, req) => {
   const url = new URL(req.url);
   const resolved = await resolveTargetStaffId(session, url.searchParams.get('staffId'));
   if (resolved.error) return NextResponse.json({ error: resolved.error }, { status: 400 });

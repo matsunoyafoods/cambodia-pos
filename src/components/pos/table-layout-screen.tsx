@@ -63,7 +63,7 @@ function TableLayoutScreenInner() {
   const router = useRouter();
   const me = useStaff();
   const isPosNative = me.authMode === 'pos_native';
-  const canManage = isPosNative && (me.role === 'owner' || me.role === 'manager');
+  const canManage = isPosNative && (me.role === 'owner' || me.role === 'manager' || me.role === 'sub_manager');
 
   const [items, setItems] = useState<TableLayoutItemRecord[] | null>(null);
   const [dirtyIds, setDirtyIds] = useState<Set<string>>(new Set());

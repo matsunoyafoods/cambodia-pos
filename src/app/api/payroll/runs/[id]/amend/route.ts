@@ -93,4 +93,4 @@ export const GET = withPosStaff('manager', async (_session, _req, ctx: RouteCont
       changedAt: a.changed_at,
     })),
   });
-});
+}, { deny: ['sub_manager'] });

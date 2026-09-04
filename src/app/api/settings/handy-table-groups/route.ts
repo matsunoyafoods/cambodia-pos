@@ -18,7 +18,7 @@ import type { HandyTableGroup } from '@/lib/pos-types';
 
 type StoredSettings = { handyTableGroups?: HandyTableGroup[] };
 
-export const GET = withPosStaff('staff', async () => {
+export const GET = withPosStaff('part_time', async () => {
   const supabase = createPosAdminClient();
   const storeId = getPosStoreId();
   const { data, error } = await supabase.from('stores').select('settings').eq('id', storeId).maybeSingle();

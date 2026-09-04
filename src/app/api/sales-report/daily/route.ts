@@ -59,4 +59,4 @@ export const GET = withPosStaff('manager', async (_session, req) => {
   const orderCount = days.reduce((s, d) => s + d.orderCount, 0);
 
   return NextResponse.json({ month, days, monthTotal, orderCount });
-});
+}, { deny: ['sub_manager'] });

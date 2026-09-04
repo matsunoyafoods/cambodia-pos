@@ -98,7 +98,7 @@ const closingSelectCols =
 
 // 指定日のレジ締め状況を取得。既に確定済みならその記録を、未確定ならその場で集計したシステム
 // 合計 (未確定・実査待ち) を返す。staff 以上 (締め作業はシフトの担当者が誰でも行えるように)。
-export const GET = withPosStaff('staff', async (_session, req) => {
+export const GET = withPosStaff('part_time', async (_session, req) => {
   const url = new URL(req.url);
   const date = url.searchParams.get('date');
   if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
@@ -138,7 +138,7 @@ const postSchema = z.object({
 });
 
 // レジ締めを確定。staff 以上。確定した system_cash_total が現金残高に積み上がる。
-export const POST = withPosStaff('staff', async (session, req) => {
+export const POST = withPosStaff('part_time', async (session, req) => {
   const json = await req.json().catch(() => null);
   const parsed = postSchema.safeParse(json);
   if (!parsed.success) {

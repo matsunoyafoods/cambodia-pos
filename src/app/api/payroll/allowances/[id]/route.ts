@@ -71,7 +71,7 @@ export const PATCH = withPosStaff('manager', async (_session, req, ctx: RouteCon
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   if (!data) return NextResponse.json({ error: 'not_found' }, { status: 404 });
   return NextResponse.json({ allowance: toAllowance(data as unknown as Row) });
-});
+}, { deny: ['sub_manager'] });
 
 // 削除。manager以上のみ。
 export const DELETE = withPosStaff('manager', async (_session, _req, ctx: RouteContext) => {
@@ -81,4 +81,4 @@ export const DELETE = withPosStaff('manager', async (_session, _req, ctx: RouteC
   const { error } = await supabase.from('payroll_allowances').delete().eq('id', id).eq('store_id', storeId);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true });
-});
+}, { deny: ['sub_manager'] });

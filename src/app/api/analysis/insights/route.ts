@@ -295,4 +295,4 @@ export const POST = withPosStaff('manager', async (_session, req) => {
     const message = err instanceof Error ? err.message : '分析の生成に失敗しました';
     return NextResponse.json({ error: message }, { status: 500 });
   }
-});
+}, { deny: ['sub_manager'] });

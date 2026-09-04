@@ -75,4 +75,4 @@ export const GET = withPosStaff('manager', async (_session, req) => {
   });
 
   return NextResponse.json({ month, rows });
-});
+}, { deny: ['sub_manager'] });

@@ -4,7 +4,9 @@ import { createPosAdminClient, getPosStoreId } from '@/lib/supabase/admin';
 import { withPosStaff, hashPin } from '@/lib/pos-auth';
 
 // スタッフ一覧 (role/active も含む、フル情報)。manager 以上のみ。
-export const GET = withPosStaff('manager', async () => {
+// sub_manager はスタッフ管理自体はできるが「スタッフの給料は見られない」(Tom の要望) ため、
+// hourly_wage_usd はレスポンスから除去する (フロントだけで隠すのではなく API 側で除去)。
+export const GET = withPosStaff('manager', async (session) => {
   const supabase = createPosAdminClient();
   const storeId = getPosStoreId();
 
@@ -17,12 +19,15 @@ export const GET = withPosStaff('manager', async () => {
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
-  return NextResponse.json({ staff: data ?? [] });
+  const staff = (data ?? []).map((row) =>
+    session.role === 'sub_manager' ? { ...row, hourly_wage_usd: undefined } : row,
+  );
+  return NextResponse.json({ staff });
 });
 
 const createSchema = z.object({
   displayName: z.string().trim().min(1).max(50),
-  role: z.enum(['owner', 'manager', 'staff']),
+  role: z.enum(['owner', 'manager', 'sub_manager', 'employee', 'part_time']),
   pin: z.string().regex(/^\d{4,8}$/, 'PIN は4〜8桁の数字で入力してください'),
 });
 

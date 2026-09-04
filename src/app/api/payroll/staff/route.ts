@@ -51,4 +51,4 @@ export const GET = withPosStaff('manager', async () => {
   const { data, error } = await supabase.from('staff').select(SELECT).eq('store_id', storeId).order('created_at');
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ staff: (data ?? []).map((r) => toProfile(r as unknown as Row)) });
-});
+}, { deny: ['sub_manager'] });

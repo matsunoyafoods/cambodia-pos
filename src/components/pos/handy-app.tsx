@@ -432,7 +432,14 @@ function HandyAppInner() {
     );
   }
 
-  const ROLE_LABEL_KEY = { owner: 'role.owner', manager: 'role.manager', staff: 'role.staff' } as const;
+  const ROLE_LABEL_KEY = {
+  owner: 'role.owner',
+  manager: 'role.manager',
+  staff: 'role.staff',
+  sub_manager: 'role.sub_manager',
+  employee: 'role.employee',
+  part_time: 'role.part_time',
+} as const;
 
   return (
     <div className="relative flex h-dvh w-full flex-col overflow-hidden bg-background">

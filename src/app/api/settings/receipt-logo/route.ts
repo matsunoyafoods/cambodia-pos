@@ -17,7 +17,7 @@ type StoredSettings = { receiptFormat?: Partial<ReceiptFormatSettings> };
 // ロゴは元々小さいモノクロ寄りの画像想定なので、通常の運用では十分な上限。
 const MAX_LOGO_BYTES = 300 * 1024;
 
-export const GET = withPosStaff('staff', async () => {
+export const GET = withPosStaff('part_time', async () => {
   const supabase = createPosAdminClient();
   const storeId = getPosStoreId();
   const { data, error } = await supabase.from('stores').select('settings').eq('id', storeId).maybeSingle();

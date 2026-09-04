@@ -20,7 +20,7 @@ const ALLOWED_TYPES: Record<string, string> = {
 
 // アップロード。staff 以上 (現場で立て替え購入したスタッフがその場で撮影・添付できるように、
 // 経費の新規登録と同じ権限にしている)。
-export const POST = withPosStaff('staff', async (_session, req, ctx: RouteContext) => {
+export const POST = withPosStaff('part_time', async (_session, req, ctx: RouteContext) => {
   const { id } = await ctx.params;
   const storeId = getPosStoreId();
   const supabase = createPosAdminClient();

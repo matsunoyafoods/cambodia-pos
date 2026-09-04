@@ -40,7 +40,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export type PosStaffRole = 'owner' | 'manager' | 'staff';
+// pos-auth.ts の PosStaffRole と同期させること (2026-09-04: 4段階権限に拡張)。
+export type PosStaffRole = 'owner' | 'manager' | 'sub_manager' | 'employee' | 'part_time';
 
 export type PosStaffRosterEntry = { id: string; display_name: string };
 
@@ -111,5 +112,13 @@ export function updateStaffWage(staffId: string, hourlyWageUsd: number | null): 
   return request(`/api/staff/${staffId}`, {
     method: 'PATCH',
     body: JSON.stringify({ hourlyWageUsd }),
+  });
+}
+
+// 権限 (role) の変更 (2026-09-04 追加。既存スタッフの権限を後から編集できるように)。
+export function updateStaffRole(staffId: string, role: PosStaffRole): Promise<{ staff: PosStaffMember }> {
+  return request(`/api/staff/${staffId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ role }),
   });
 }

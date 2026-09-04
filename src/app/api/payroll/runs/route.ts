@@ -61,7 +61,7 @@ export const GET = withPosStaff('manager', async (_session, req) => {
   return NextResponse.json({
     runs: (runs ?? []).map((r) => toRun(r as RunRow, namesById.get((r as RunRow).staff_id) ?? '(不明なスタッフ)')),
   });
-});
+}, { deny: ['sub_manager'] });
 
 function isAllowanceApplicable(a: { start_date: string; end_date: string | null; monthly: boolean }, year: number, month: number): boolean {
   const monthStart = Date.UTC(year, month - 1, 1);
@@ -190,4 +190,4 @@ export const POST = withPosStaff('manager', async (_session, req) => {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   return NextResponse.json({ run: toRun(saved as RunRow, staffRow.display_name as string) });
-});
+}, { deny: ['sub_manager'] });

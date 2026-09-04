@@ -181,7 +181,7 @@ export const GET = withPosStaff('manager', async (_session, req) => {
   }
 
   return NextResponse.json({ storeId, days });
-});
+}, { deny: ['sub_manager'] });
 
 const upsertSchema = z.object({
   staffId: z.string().uuid(),
@@ -284,4 +284,4 @@ export const POST = withPosStaff('manager', async (session, req) => {
   });
 
   return NextResponse.json({ day: toDay(saved) });
-});
+}, { deny: ['sub_manager'] });

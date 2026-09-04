@@ -13,7 +13,7 @@ import { DEFAULT_RECEIPT_FORMAT_SETTINGS, type ReceiptFormatSettings } from '@/l
 
 type StoredSettings = { receiptFormat?: Partial<ReceiptFormatSettings> };
 
-export const GET = withPosStaff('staff', async () => {
+export const GET = withPosStaff('part_time', async () => {
   const supabase = createPosAdminClient();
   const storeId = getPosStoreId();
   const { data, error } = await supabase.from('stores').select('settings').eq('id', storeId).maybeSingle();
