@@ -31,6 +31,7 @@ function toPosSettings(storeId: string, raw: unknown): PosSettings {
         : DEFAULT_SETTINGS.menuImageStyle,
     themeColor: typeof stored.themeColor === 'string' ? stored.themeColor : DEFAULT_SETTINGS.themeColor,
     backgroundColor: typeof stored.backgroundColor === 'string' ? stored.backgroundColor : DEFAULT_SETTINGS.backgroundColor,
+    quickMenuKeys: Array.isArray(stored.quickMenuKeys) ? stored.quickMenuKeys : DEFAULT_SETTINGS.quickMenuKeys,
   };
 }
 
@@ -70,6 +71,7 @@ const patchSchema = z.object({
     .regex(/^#[0-9a-fA-F]{6}$/, '#rrggbb 形式で指定してください')
     .nullable()
     .optional(),
+  quickMenuKeys: z.array(z.string()).max(6).optional(),
 });
 
 // 更新。manager 以上のみ。

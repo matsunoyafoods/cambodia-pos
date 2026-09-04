@@ -1207,6 +1207,7 @@ function PosAppInner() {
           onCancelTableAction={cancelTableAction}
           onTableTapForAction={handleTableTapForAction}
           onConfirmMerge={confirmMerge}
+          quickMenuKeys={settings.quickMenuKeys}
         />
       )}
 

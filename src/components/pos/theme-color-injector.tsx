@@ -9,9 +9,12 @@ import { getPosOrderSettings } from '@/lib/pos-order-client';
 // 何もせず、globals.css のデフォルト配色 (紺の --primary、赤の --brand) のまま。
 //
 // 2026-09-04 追加: 背景色 (backgroundColor) も同様にカスタムできるようにした
-// (Tom「背景もカスタムできるようにしましょう」)。--background に反映し、暗い背景色を選んだ場合に
-// 文字が読めなくならないよう --foreground (本文の文字色) も明度に応じて自動で白/濃紺に切り替える。
-// カード等の上面 (--card) はあえて変更していない (背景の上に浮くカードとして区別がつくように)。
+// (Tom「背景もカスタムできるようにしましょう」)。
+// 最初のバージョンは --background だけを書き換えていたが、この画面のほとんどの面は
+// bg-card (カード・パネル) で覆われているため、実際にはほぼ何も変わって見えなかった
+// (Tom「背景が切り替わらない」)。そのため --card / --popover も同じ色に揃えて、選んだ色が
+// 画面全体にちゃんと反映されるようにした。暗い色を選んだ場合に文字が読めなくならないよう、
+// --foreground / --card-foreground / --popover-foreground も明度に応じて自動で白/濃紺に切り替える。
 //
 // 新規マイグレーション・APIは追加していない — 既存の pos.stores.settings (jsonb) に themeColor /
 // backgroundColor を項目追加しただけで、レジ画面が起動時に必ず読む /api/pos-order/settings
@@ -80,11 +83,20 @@ export function ThemeColorInjector() {
 
         const bgHsl = s.backgroundColor ? hexToHsl(s.backgroundColor) : null;
         if (bgHsl && s.backgroundColor) {
+          const bgFg = foregroundHslFor(s.backgroundColor);
           root.setProperty('--background', bgHsl);
-          root.setProperty('--foreground', foregroundHslFor(s.backgroundColor));
+          root.setProperty('--foreground', bgFg);
+          root.setProperty('--card', bgHsl);
+          root.setProperty('--card-foreground', bgFg);
+          root.setProperty('--popover', bgHsl);
+          root.setProperty('--popover-foreground', bgFg);
         } else {
           root.removeProperty('--background');
           root.removeProperty('--foreground');
+          root.removeProperty('--card');
+          root.removeProperty('--card-foreground');
+          root.removeProperty('--popover');
+          root.removeProperty('--popover-foreground');
         }
       })
       .catch(() => {

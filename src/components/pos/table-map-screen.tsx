@@ -1,13 +1,42 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import type { TableStatus } from '@/lib/pos-types';
 import { DEMO_TABLE_GROUPS } from '@/lib/demo-data';
 import type { TableLayoutItemRecord } from '@/lib/table-layout-client';
 import { TABLE_LAYOUT_CANVAS_HEIGHT, TABLE_LAYOUT_CANVAS_WIDTH } from '@/lib/table-layout-geometry';
 import type { TableSessionRecord } from '@/lib/table-session-client';
 import { drinkTimerState, elapsedMinutes, formatDuration } from '@/lib/table-timer';
+import { resolveQuickMenuItems } from '@/lib/pos-quick-menu';
 import { useLanguage } from './language-context';
+
+// TOP画面ショートカット (2026-09-04 追加。Tom「メニューから6個だけTOP画面にアイコン表示
+// できるようにしてほしい。アイコンはAIっぽくないのでおまかせします」)。設定画面で選んだ最大6件を
+// フィルターの下にアイコンボタンとして表示する。アイコンは lucide-react (シンプルな線画) を使用。
+function QuickMenuRow({ quickMenuKeys }: { quickMenuKeys: string[] }) {
+  const { t } = useLanguage();
+  const router = useRouter();
+  const items = resolveQuickMenuItems(quickMenuKeys);
+  if (items.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-2 px-5 pt-3">
+      {items.map((item) => {
+        const Icon = item.icon;
+        return (
+          <button
+            key={item.key}
+            onClick={() => router.push(item.path)}
+            className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-[12.5px] font-semibold text-foreground hover:bg-secondary"
+          >
+            <Icon className="h-4 w-4 text-muted-foreground" />
+            {t(item.labelKey)}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 const STATUS_CLASS: Record<TableStatus, string> = {
   available: 'bg-card border-border text-foreground',
@@ -108,6 +137,7 @@ export function TableMapScreen({
   onCancelTableAction,
   onTableTapForAction,
   onConfirmMerge,
+  quickMenuKeys = [],
 }: {
   tableStatus: Record<string, TableStatus>;
   statusFilter: 'all' | TableStatus;
@@ -129,6 +159,8 @@ export function TableMapScreen({
   onCancelTableAction?: () => void;
   onTableTapForAction?: (code: string) => void;
   onConfirmMerge?: () => void;
+  /** TOP画面ショートカット (2026-09-04 追加)。省略時は非表示。 */
+  quickMenuKeys?: string[];
 }) {
   const { t } = useLanguage();
   // 飲み放題の残り時間は Date.now() 基準で計算するため、セッション自体に変化が無くても
@@ -204,6 +236,8 @@ export function TableMapScreen({
           </div>
         )}
       </div>
+
+      {!inActionMode && <QuickMenuRow quickMenuKeys={quickMenuKeys} />}
 
       {inActionMode && (
         <div className="mx-5 mt-3 flex items-center justify-between gap-3 rounded-xl border border-primary/40 bg-primary/5 px-4 py-3">

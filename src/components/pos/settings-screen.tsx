@@ -90,6 +90,7 @@ import {
   type CreatePrinterInput,
 } from '@/lib/printer-client';
 import type { HandyTableGroup, PaymentMethodConfig, PrinterConfig } from '@/lib/pos-types';
+import { QUICK_MENU_ITEMS, MAX_QUICK_MENU_ITEMS } from '@/lib/pos-quick-menu';
 import { LanguageProvider, useLanguage, STAFF_LANGUAGE_STORAGE_KEY } from './language-context';
 
 // 設定画面の多言語化 (2026-09-03 追加)。この画面は '/pos/layout.tsx' が LanguageProvider を
@@ -1215,6 +1216,7 @@ function SettingsScreenInner() {
           menuImageStyle,
           themeColor,
           backgroundColor,
+          quickMenuKeys,
         } = settings;
         const s = await updateGeneralSettings({
           vatRate,
@@ -1230,6 +1232,7 @@ function SettingsScreenInner() {
           menuImageStyle,
           themeColor,
           backgroundColor,
+          quickMenuKeys,
         });
         setSettings((prev) => ({ ...prev, ...s }));
       } else {
@@ -1442,6 +1445,45 @@ function SettingsScreenInner() {
                     )}
                   </div>
                   <div className="mt-1.5 text-[11px] text-muted-foreground">{t('settings.general.backgroundColorDesc')}</div>
+                </Field>
+              )}
+
+              {isPosNative && (
+                <Field label={t('settings.general.quickMenuLabel')}>
+                  <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+                    {QUICK_MENU_ITEMS.map((item) => {
+                      const checked = settings.quickMenuKeys.includes(item.key);
+                      const atLimit = !checked && settings.quickMenuKeys.length >= MAX_QUICK_MENU_ITEMS;
+                      const Icon = item.icon;
+                      return (
+                        <label
+                          key={item.key}
+                          className={
+                            'flex items-center gap-2 rounded-lg border px-2.5 py-2 text-[12.5px] ' +
+                            (checked ? 'border-primary bg-primary/5' : 'border-border') +
+                            (!canManageSettings || atLimit ? ' opacity-50' : ' cursor-pointer')
+                          }
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            disabled={!canManageSettings || atLimit}
+                            onChange={() =>
+                              update(
+                                'quickMenuKeys',
+                                checked ? settings.quickMenuKeys.filter((k) => k !== item.key) : [...settings.quickMenuKeys, item.key],
+                              )
+                            }
+                          />
+                          <Icon className="h-4 w-4 flex-shrink-0" />
+                          <span className="truncate">{t(item.labelKey)}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <div className="mt-1.5 text-[11px] text-muted-foreground">
+                    {t('settings.general.quickMenuDesc', { count: settings.quickMenuKeys.length, max: MAX_QUICK_MENU_ITEMS })}
+                  </div>
                 </Field>
               )}
 
