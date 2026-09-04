@@ -351,8 +351,16 @@ function ConfirmedItemRow({
     // 成功時はこの行自体が親から消えるので setSaving(false) は不要
   }
 
+  // 提供完了になったら行全体の色を変える (2026-09-04 追加。Tom「商品が提供完了になったら
+  // 色が変わるといいですね！」)。以前は右下の小さいボタンだけが色付いていて、一覧をぱっと
+  // 見ただけでは分かりにくかった。
   return (
-    <div className="rounded-lg border border-dashed border-border bg-card/60 px-3 py-2">
+    <div
+      className={
+        'rounded-lg border px-3 py-2 ' +
+        (item.kitchen_done_at ? 'border-emerald-200 bg-emerald-50' : 'border-dashed border-border bg-card/60')
+      }
+    >
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0 flex-1">
           <div className="truncate text-[12.5px] font-semibold text-muted-foreground">{baseName}</div>
@@ -411,7 +419,7 @@ function ConfirmedItemRow({
           disabled={servedSaving}
           className={
             'h-6 rounded-full border px-2 text-[10.5px] font-semibold disabled:opacity-50 ' +
-            (item.kitchen_done_at ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border text-muted-foreground')
+            (item.kitchen_done_at ? 'border-emerald-300 bg-emerald-100 text-emerald-700' : 'border-border text-muted-foreground')
           }
         >
           {item.kitchen_done_at ? `✓ ${t('serve.doneLabel')}` : t('serve.markDone')}

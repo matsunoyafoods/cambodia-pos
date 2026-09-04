@@ -31,6 +31,7 @@ import {
   enqueueKitchenPrintJob,
   enqueueReceiptPrintJob,
   getOpenOrder,
+  getTableBillingStatus,
   mergeTables,
   moveTable,
   recordGuestDemographics,
@@ -121,6 +122,8 @@ function PosAppInner() {
   const [layoutItems, setLayoutItems] = useState<TableLayoutItemRecord[]>([]);
   const [tableSessions, setTableSessions] = useState<TableSessionRecord[]>([]);
   const [reservations, setReservations] = useState<ReservationRecord[]>([]);
+  // 会計待ち (billing) 判定用 (2026-09-04 追加。詳細は tableStatus の useMemo 参照)。
+  const [billingReadyTables, setBillingReadyTables] = useState<string[]>([]);
   const [dataLoading, setDataLoading] = useState(true);
   const [dataError, setDataError] = useState<string | null>(null);
   const [loadToken, setLoadToken] = useState(0);
@@ -239,15 +242,20 @@ function PosAppInner() {
         // 予約の卓割り当てをテーブルマップに反映するため (2026-09-02 追加)。連携モードに関係なく
         // POS側の予約一覧 (pos.reservations + アプリ予約マージ) から読む。失敗時は空配列 (バッジなしで表示継続)。
         const reservationsPromise = getReservations().catch(() => ({ items: [] as ReservationRecord[] }));
+        // 会計待ちステータスは連携モードに関係なく pos.orders/order_items から判定する
+        // (2026-09-04 追加)。失敗時は空配列 (テーブルマップ表示自体は止めない)。
+        const billingStatusPromise = getTableBillingStatus().catch(() => ({ readyTableCodes: [] as string[] }));
         if (menuSource === 'pos_native') {
-          const [menuData, settingsData, layoutData, sessionsData, paymentMethodsData, reservationsData] = await Promise.all([
-            getPosOrderMenu(),
-            getPosOrderSettings(),
-            layoutPromise,
-            sessionsPromise,
-            paymentMethodsPromise,
-            reservationsPromise,
-          ]);
+          const [menuData, settingsData, layoutData, sessionsData, paymentMethodsData, reservationsData, billingStatusData] =
+            await Promise.all([
+              getPosOrderMenu(),
+              getPosOrderSettings(),
+              layoutPromise,
+              sessionsPromise,
+              paymentMethodsPromise,
+              reservationsPromise,
+              billingStatusPromise,
+            ]);
           if (cancelled) return;
           setMenu(menuData.items);
           setPosNativeCategoryOrder(menuData.categories);
@@ -256,15 +264,18 @@ function PosAppInner() {
           setTableSessions(sessionsData.items);
           setPaymentMethods(paymentMethodsData.paymentMethods);
           setReservations(reservationsData.items);
+          setBillingReadyTables(billingStatusData.readyTableCodes);
         } else {
-          const [menuData, settingsData, layoutData, sessionsData, paymentMethodsData, reservationsData] = await Promise.all([
-            getPosMenus(),
-            getPosSettings(),
-            layoutPromise,
-            sessionsPromise,
-            paymentMethodsPromise,
-            reservationsPromise,
-          ]);
+          const [menuData, settingsData, layoutData, sessionsData, paymentMethodsData, reservationsData, billingStatusData] =
+            await Promise.all([
+              getPosMenus(),
+              getPosSettings(),
+              layoutPromise,
+              sessionsPromise,
+              paymentMethodsPromise,
+              reservationsPromise,
+              billingStatusPromise,
+            ]);
           if (cancelled) return;
           setMenu(
             menuData.map((m) => {
@@ -278,6 +289,7 @@ function PosAppInner() {
           setTableSessions(sessionsData.items);
           setPaymentMethods(paymentMethodsData.paymentMethods);
           setReservations(reservationsData.items);
+          setBillingReadyTables(billingStatusData.readyTableCodes);
         }
       } catch (err) {
         if (cancelled) return;
@@ -317,6 +329,13 @@ function PosAppInner() {
         .catch(() => {
           /* ポーリング失敗時は次回まで前回値を表示し続ける */
         });
+      // 会計待ちステータスも他端末 (キッチンモニター等) での「提供完了」操作で変わるため、
+      // 同じ周期で更新する (2026-09-04 追加)。
+      getTableBillingStatus()
+        .then(({ readyTableCodes }) => setBillingReadyTables(readyTableCodes))
+        .catch(() => {
+          /* ポーリング失敗時は次回まで前回値を表示し続ける */
+        });
     }, 20000);
     return () => clearInterval(id);
   }, [dataLoading]);
@@ -331,13 +350,18 @@ function PosAppInner() {
 
   // 卓の使用状況は「現在アクティブな来店セッションがあるか」から導出する
   // (以前はデモ用に BC3/C2 を固定で使用中・会計待ち扱いにしていた)。
-  // 会計画面を開いている卓は、この端末上では「会計待ち」として上書き表示する。
+  // 2026-09-04 修正: 「会計待ち」は元々「この端末で会計画面を開いている卓」だけを見ていたため、
+  // 他の卓が食べ終わっていてもテーブルマップ・フィルターに全く反映されず「機能してない」状態
+  // だった (Tom「会計待ちが機能してないから...」)。billingReadyTables (厨房送信済みの品目が
+  // 全て提供完了になっている卓) を優先して反映するようにし、会計画面を開いている卓はその上に
+  // 念のため上書きする (バックエンドの反映が間に合っていない場合の保険)。
   const tableStatus: Record<string, TableStatus> = useMemo(() => {
     const status: Record<string, TableStatus> = {};
     for (const s of tableSessions) status[s.table_code] = 'occupied';
+    for (const code of billingReadyTables) status[code] = 'billing';
     if (screen === 'checkout' && selectedTable) status[selectedTable] = 'billing';
     return status;
-  }, [tableSessions, screen, selectedTable]);
+  }, [tableSessions, billingReadyTables, screen, selectedTable]);
 
   // ハッピーアワー判定用の「現在時刻」。時間帯をまたいだ時にすぐ切り替わるよう定期的に更新する。
   const [now, setNow] = useState(() => new Date());
@@ -668,6 +692,13 @@ function PosAppInner() {
     setConfirmedItems((prev) =>
       prev.map((it) => (it.id === itemId ? { ...it, kitchen_done_at: item.kitchen_done_at, kitchen_done_by_name: item.kitchen_done_by_name } : it)),
     );
+    // レジ画面での提供完了トグルはテーブルマップの「会計待ち」に直結するため、次のポーリング
+    // (最大20秒) を待たずに即座に反映する (2026-09-04 追加)。
+    getTableBillingStatus()
+      .then(({ readyTableCodes }) => setBillingReadyTables(readyTableCodes))
+      .catch(() => {
+        /* 失敗時は次回ポーリングで補正 */
+      });
   }
 
   // オプション選択が必要な商品ならモーダルを開き、不要ならそのままカートに追加する。

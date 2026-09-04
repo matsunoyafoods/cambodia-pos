@@ -18,6 +18,9 @@ export class PosOrderOrdersApiError extends Error {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
+    // 会計待ち判定など、他端末の操作をすぐ反映したいライブデータのため
+    // キャッシュさせない (2026-09-04, pos-order-client.ts と同じ方針)。
+    cache: 'no-store',
     ...init,
     headers: {
       'Content-Type': 'application/json',
@@ -66,6 +69,12 @@ export type OrderItemRecord = {
 
 export function getOpenOrder(tableCode: string): Promise<{ order: OpenOrderRecord | null; items: OrderItemRecord[] }> {
   return request(`/api/pos-order/orders?tableCode=${encodeURIComponent(tableCode)}`);
+}
+
+// テーブルマップの「会計待ち」ステータス判定用 (2026-09-04 追加)。厨房送信済みの品目が
+// 全て提供完了になっている open 注文を持つ卓のコード一覧を返す。
+export function getTableBillingStatus(): Promise<{ readyTableCodes: string[] }> {
+  return request('/api/pos-order/table-billing-status');
 }
 
 export function createOpenOrder(input: { tableCode: string; staffId?: string }): Promise<{ order: OpenOrderRecord }> {
