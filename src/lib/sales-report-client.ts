@@ -38,6 +38,13 @@ export function getDailySales(month: string): Promise<DailySales> {
   return request(`/api/sales-report/daily?month=${encodeURIComponent(month)}`);
 }
 
+// 本日の売上 (2026-09-04 追加。レジ画面ヘッダーの常時表示用)。
+export type TodaySales = { date: string; total: number; orderCount: number };
+
+export function getTodaySales(): Promise<TodaySales> {
+  return request('/api/sales-report/today');
+}
+
 export type TableSaleRow = {
   orderId: string;
   date: string;

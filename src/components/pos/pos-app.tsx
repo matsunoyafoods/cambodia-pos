@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type {
   CartLine,
@@ -56,6 +56,7 @@ import { effectiveBasePrice, isHappyHourNow } from '@/lib/happy-hour';
 import { cartLineNetTotal, discountAmount } from '@/lib/cart';
 import { logoutPosStaff } from '@/lib/staff-client';
 import { getReservations, type ReservationRecord } from '@/lib/reservation-client';
+import { getTodaySales, type TodaySales } from '@/lib/sales-report-client';
 import { useStaff } from './staff-context';
 import { TableMapScreen, type TableReservationBadge } from './table-map-screen';
 import { OrderScreen } from './order-screen';
@@ -123,6 +124,20 @@ function PosAppInner() {
   const [dataLoading, setDataLoading] = useState(true);
   const [dataError, setDataError] = useState<string | null>(null);
   const [loadToken, setLoadToken] = useState(0);
+
+  // レジ画面ヘッダーの「本日の売上」常時表示 (2026-09-04 追加。Tom「POSレジなのに今の売上が
+  // 分からない」への対応)。売上レポート画面 (/pos/sales-report) と同じく owner/manager限定
+  // (sub_manager 以下は非表示。API 側も withPosStaff('manager', ..., {deny:['sub_manager']}))。
+  const canViewSales = me.authMode === 'pos_native' && (me.role === 'owner' || me.role === 'manager');
+  const [todaySales, setTodaySales] = useState<TodaySales | null>(null);
+  const refreshTodaySales = useCallback(() => {
+    if (!canViewSales) return;
+    getTodaySales()
+      .then(setTodaySales)
+      .catch(() => {
+        /* 取得失敗時は前回値を表示し続ける (次回ポーリングで補正) */
+      });
+  }, [canViewSales]);
 
   const [screen, setScreen] = useState<Screen>('tablemap');
   const [statusFilter, setStatusFilter] = useState<'all' | TableStatus>('all');
@@ -301,6 +316,14 @@ function PosAppInner() {
     }, 20000);
     return () => clearInterval(id);
   }, [dataLoading]);
+
+  // 本日の売上は他端末の会計操作でも増えるため、定期的に再取得する。
+  useEffect(() => {
+    if (dataLoading || !canViewSales) return;
+    refreshTodaySales();
+    const id = setInterval(refreshTodaySales, 60000);
+    return () => clearInterval(id);
+  }, [dataLoading, canViewSales, refreshTodaySales]);
 
   // 卓の使用状況は「現在アクティブな来店セッションがあるか」から導出する
   // (以前はデモ用に BC3/C2 を固定で使用中・会計待ち扱いにしていた)。
@@ -878,6 +901,8 @@ function PosAppInner() {
       setCurrentOrder(null);
       setConfirmedItems([]);
       setScreen('receipt');
+      // 会計完了直後に「本日の売上」もすぐ反映させる (次のポーリングを待たせない)。
+      refreshTodaySales();
     } catch (err) {
       setCompleteError(err instanceof PosOrderOrdersApiError ? err.message : t('posApp.completeFailed'));
     } finally {
@@ -1007,6 +1032,23 @@ function PosAppInner() {
           <div className="text-base font-bold tracking-tight">I&apos;mHungry POS</div>
         </div>
         <div className="flex items-center gap-3.5">
+          {canViewSales && (
+            <button
+              onClick={() => router.push('/pos/sales-report')}
+              className="flex items-center gap-2 rounded-lg border border-border bg-secondary/40 px-3 py-1.5 text-left hover:bg-secondary"
+              title={t('posApp.todaySalesHint')}
+            >
+              <span className="text-[10.5px] text-muted-foreground">{t('posApp.todaySalesLabel')}</span>
+              <span className="text-[14px] font-bold">
+                {todaySales ? `$${todaySales.total.toFixed(2)}` : '—'}
+              </span>
+              {todaySales && (
+                <span className="text-[10.5px] text-muted-foreground">
+                  {t('posApp.todaySalesOrderCount', { count: todaySales.orderCount })}
+                </span>
+              )}
+            </button>
+          )}
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
             {t('posApp.online')}
