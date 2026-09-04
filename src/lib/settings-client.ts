@@ -65,3 +65,9 @@ export function getHandyTableGroups(): Promise<{ groups: HandyTableGroup[] }> {
 export function saveHandyTableGroups(groups: HandyTableGroup[]): Promise<{ ok: true; groups: HandyTableGroup[] }> {
   return request('/api/settings/handy-table-groups', { method: 'POST', body: JSON.stringify({ groups }) });
 }
+
+// 卓グループ名のAI下書き翻訳生成 (2026-09-03 追加)。空欄の言語だけを埋め、既存の翻訳は
+// 上書きしない。保存まで完了した状態のグループ一覧を返す。
+export function generateHandyTableGroupTranslations(): Promise<{ updated: number; total: number; groups?: HandyTableGroup[] }> {
+  return request('/api/settings/handy-table-groups/generate', { method: 'POST' });
+}

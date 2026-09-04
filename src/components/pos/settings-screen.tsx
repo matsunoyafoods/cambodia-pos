@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { DEFAULT_SETTINGS, type PosSettings } from '@/lib/pos-types';
 import { getPosSettings, updatePosSettings, PosApiError } from '@/lib/api-client';
 import {
+  generateHandyTableGroupTranslations,
   getGeneralSettings,
   getHandyTableGroups,
   getIntegrationSettings,
@@ -856,6 +857,8 @@ function HandyGroupsSection({ canManageSettings }: { canManageSettings: boolean 
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedJustNow, setSavedJustNow] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [generateResult, setGenerateResult] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -921,6 +924,34 @@ function HandyGroupsSection({ canManageSettings }: { canManageSettings: boolean 
     }
   }
 
+  // 卓グループ名のAI下書き翻訳 (2026-09-03 追加。Tom「AIで下書き生成もできるようにして
+  // ほしい」)。サーバー側で保存まで完了させるため、未保存のローカル編集 (dirty) がある
+  // 状態で実行すると、生成後の再取得でその編集が失われてしまう。そのためdirty中はボタンを
+  // 無効化し、先に保存してもらうよう案内する。
+  async function handleGenerate() {
+    setGenerating(true);
+    setGenerateResult(null);
+    setSaveError(null);
+    try {
+      const r = await generateHandyTableGroupTranslations();
+      setGenerateResult(
+        r.updated > 0 ? t('settings.translations.generateResult', { updated: r.updated, total: r.total }) : t('settings.translations.generateNoneNeeded'),
+      );
+      if (r.groups) {
+        setGroups(r.groups);
+        setSavedSnapshot(JSON.stringify(r.groups));
+      } else {
+        const { groups: fresh } = await getHandyTableGroups();
+        setGroups(fresh);
+        setSavedSnapshot(JSON.stringify(fresh));
+      }
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : t('settings.translations.generateError'));
+    } finally {
+      setGenerating(false);
+    }
+  }
+
   if (!loaded) {
     return (
       <div className="rounded-xl border border-border p-3 text-[12.5px] text-muted-foreground">
@@ -931,6 +962,22 @@ function HandyGroupsSection({ canManageSettings }: { canManageSettings: boolean 
 
   return (
     <div className="flex flex-col gap-3">
+      {canManageSettings && groups.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            type="button"
+            onClick={handleGenerate}
+            disabled={generating || dirty}
+            title={dirty ? t('settings.handy.generateDisabledDirty') : undefined}
+            className="h-9 rounded-lg border border-dashed border-brand px-3 text-[12px] font-semibold text-brand disabled:opacity-50"
+          >
+            {generating ? t('settings.translations.generatingEllipsis') : t('settings.translations.generateDraft')}
+          </button>
+          {dirty && <span className="text-[11.5px] text-muted-foreground">{t('settings.handy.generateDisabledDirty')}</span>}
+        </div>
+      )}
+      {generateResult && <div className="rounded-lg bg-primary/10 p-2.5 text-[12.5px] text-primary">{generateResult}</div>}
+
       {groups.map((g, i) => (
         <HandyGroupCard
           key={g.id}
