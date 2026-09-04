@@ -59,13 +59,35 @@ function loadFontSize(storageKey: string): FontSize {
   return v === 'sm' || v === 'md' || v === 'lg' ? v : 'md';
 }
 
-// 新規注文チャイム (2026-09-04 追加。Tom「注文が入った時に音が鳴らないと気づきません」への
-// 対応)。外部音声ファイルを持ち込まず Web Audio API のオシレーターで「ピンポン」の2音を
-// 鳴らすだけの軽量な実装。タブレット画面を常時見ていなくても、新しい品目が届いたことに
-// 気づけるようにする。ブラウザの自動再生制限により、そのタブレットで一度も画面操作
-// (「調理完了」ボタン等のタップ) をしていない状態だと最初の1回は鳴らないことがあるが、
-// このモニター画面は常に操作しながら使う前提のため実運用上は問題にならない。
-function playNewOrderChime() {
+// 新規注文チャイム (2026-09-04 追加。Tom「注文が入った時に音が鳴らないと気づきません」→
+// 「さすがにこれじゃ気づかないでしょ。音と長さを選べるようにしてほしい」への対応)。外部
+// 音声ファイルを持ち込まず Web Audio API のオシレーターで音を生成する軽量な実装。タブレット
+// 画面を常時見ていなくても、新しい品目が届いたことに気づけるようにする。ブラウザの自動再生
+// 制限により、そのタブレットで一度も画面操作 (「調理完了」ボタン等のタップ) をしていない
+// 状態だと最初の1回は鳴らないことがあるが、このモニター画面は常に操作しながら使う前提のため
+// 実運用上は問題にならない。
+//
+// 「音」(音色) と「長さ」(繰り返し回数) をそれぞれ選べるようにした。特に「長さ」は
+// 厨房のような騒がしい環境でも気づけるよう、1回だけでなく何度も鳴らし続けられるようにする
+// のが狙い (Tom「これじゃ気づかない」)。
+export type MonitorSoundType = 'ping' | 'beep' | 'alarm';
+export type MonitorSoundRepeat = 1 | 3 | 6;
+export type MonitorSoundSettings = { enabled: boolean; type: MonitorSoundType; repeat: MonitorSoundRepeat };
+
+const DEFAULT_SOUND_SETTINGS: MonitorSoundSettings = { enabled: true, type: 'ping', repeat: 1 };
+const SOUND_TYPES: MonitorSoundType[] = ['ping', 'beep', 'alarm'];
+const SOUND_REPEATS: MonitorSoundRepeat[] = [1, 3, 6];
+
+// 音色ごとのパターン定義。1回分の音 (freqs を順に鳴らす) を、長さ設定の回数分だけ間隔を
+// 空けて繰り返す。ping=やわらかい2音、beep=短く鋭い単音連打、alarm=目立つサイレン風の2音
+// (波形をノコギリ波にして音量も上げ、聞き逃しにくくしてある)。
+const SOUND_PATTERNS: Record<MonitorSoundType, { freqs: number[]; noteMs: number; type: OscillatorType; gain: number }> = {
+  ping: { freqs: [880, 1320], noteMs: 160, type: 'sine', gain: 0.35 },
+  beep: { freqs: [1200, 1200], noteMs: 110, type: 'square', gain: 0.3 },
+  alarm: { freqs: [660, 990], noteMs: 220, type: 'sawtooth', gain: 0.45 },
+};
+
+function playNewOrderChime(settings: Pick<MonitorSoundSettings, 'type' | 'repeat'>) {
   try {
     type AudioContextCtor = typeof AudioContext;
     const AudioCtx: AudioContextCtor | undefined =
@@ -73,30 +95,59 @@ function playNewOrderChime() {
     if (!AudioCtx) return;
     const ctx = new AudioCtx();
     const now = ctx.currentTime;
-    [880, 1320].forEach((freq, i) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.value = freq;
-      const start = now + i * 0.16;
-      gain.gain.setValueAtTime(0, start);
-      gain.gain.linearRampToValueAtTime(0.35, start + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.001, start + 0.3);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start(start);
-      osc.stop(start + 0.32);
-    });
-    setTimeout(() => ctx.close(), 800);
+    const pattern = SOUND_PATTERNS[settings.type];
+    const unitMs = pattern.freqs.length * pattern.noteMs;
+    const gapMs = 240; // 繰り返し (長さ設定) 1回ごとの間の無音
+    let cursorMs = 0;
+    for (let r = 0; r < settings.repeat; r++) {
+      pattern.freqs.forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = pattern.type;
+        osc.frequency.value = freq;
+        const start = now + (cursorMs + i * pattern.noteMs) / 1000;
+        const dur = pattern.noteMs / 1000;
+        gain.gain.setValueAtTime(0, start);
+        gain.gain.linearRampToValueAtTime(pattern.gain, start + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.001, start + dur * 0.9);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(start);
+        osc.stop(start + dur);
+      });
+      cursorMs += unitMs + gapMs;
+    }
+    setTimeout(() => ctx.close(), cursorMs + 400);
   } catch {
     // 音声再生に失敗しても画面表示自体は継続する
   }
 }
 
-function loadSoundEnabled(storageKey: string): boolean {
-  if (typeof window === 'undefined') return true;
-  const v = window.localStorage.getItem(storageKey);
-  return v !== 'off'; // 未設定 (初回) は ON をデフォルトにする
+function loadSoundSettings(storageKey: string): MonitorSoundSettings {
+  if (typeof window === 'undefined') return DEFAULT_SOUND_SETTINGS;
+  const raw = window.localStorage.getItem(storageKey);
+  if (!raw) return DEFAULT_SOUND_SETTINGS;
+  // 旧バージョン ('on'/'off' の文字列のみ) との互換。
+  if (raw === 'off') return { ...DEFAULT_SOUND_SETTINGS, enabled: false };
+  if (raw === 'on') return DEFAULT_SOUND_SETTINGS;
+  try {
+    const parsed = JSON.parse(raw) as Partial<MonitorSoundSettings>;
+    return {
+      enabled: typeof parsed.enabled === 'boolean' ? parsed.enabled : DEFAULT_SOUND_SETTINGS.enabled,
+      type: parsed.type && SOUND_TYPES.includes(parsed.type) ? parsed.type : DEFAULT_SOUND_SETTINGS.type,
+      repeat: parsed.repeat && SOUND_REPEATS.includes(parsed.repeat) ? parsed.repeat : DEFAULT_SOUND_SETTINGS.repeat,
+    };
+  } catch {
+    return DEFAULT_SOUND_SETTINGS;
+  }
+}
+
+function saveSoundSettings(storageKey: string, settings: MonitorSoundSettings) {
+  try {
+    window.localStorage.setItem(storageKey, JSON.stringify(settings));
+  } catch {
+    // localStorage が使えない環境でも画面表示自体は継続する
+  }
 }
 
 // テーブルごとにカードをまとめる (2026-09-04 変更。Tomからの要望「商品ごとではなくて
@@ -145,8 +196,9 @@ export function TicketMonitorScreen({ kind, ns, fontSizeStorageKey }: { kind: 'f
   const [, setTick] = useState(0);
   const [fontSize, setFontSize] = useState<FontSize>('md');
   const soundStorageKey = `posMonitorSound:${ns}`;
-  const [soundEnabled, setSoundEnabled] = useState(true);
-  const soundEnabledRef = useRef(true);
+  const [soundSettings, setSoundSettings] = useState<MonitorSoundSettings>(DEFAULT_SOUND_SETTINGS);
+  const soundSettingsRef = useRef<MonitorSoundSettings>(DEFAULT_SOUND_SETTINGS);
+  const [soundPanelOpen, setSoundPanelOpen] = useState(false);
   // このモニター (kind) がこれまでに見た保留中の品目ID。null のうちは「初回読み込み前」の
   // 意味で、初回取得時に鳴らさないようにするためのガード。
   const knownPendingIdsRef = useRef<Set<string> | null>(null);
@@ -156,9 +208,9 @@ export function TicketMonitorScreen({ kind, ns, fontSizeStorageKey }: { kind: 'f
   }, [fontSizeStorageKey]);
 
   useEffect(() => {
-    const enabled = loadSoundEnabled(soundStorageKey);
-    setSoundEnabled(enabled);
-    soundEnabledRef.current = enabled;
+    const loaded = loadSoundSettings(soundStorageKey);
+    setSoundSettings(loaded);
+    soundSettingsRef.current = loaded;
     // 画面 (kind) が変わったら「初回読み込み」扱いに戻す。
     knownPendingIdsRef.current = null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -173,15 +225,15 @@ export function TicketMonitorScreen({ kind, ns, fontSizeStorageKey }: { kind: 'f
     }
   }
 
+  function updateSoundSettings(patch: Partial<MonitorSoundSettings>) {
+    const next = { ...soundSettingsRef.current, ...patch };
+    setSoundSettings(next);
+    soundSettingsRef.current = next;
+    saveSoundSettings(soundStorageKey, next);
+  }
+
   function toggleSound() {
-    const next = !soundEnabled;
-    setSoundEnabled(next);
-    soundEnabledRef.current = next;
-    try {
-      window.localStorage.setItem(soundStorageKey, next ? 'on' : 'off');
-    } catch {
-      // localStorage が使えない環境でも画面表示自体は継続する
-    }
+    updateSoundSettings({ enabled: !soundSettingsRef.current.enabled });
   }
 
   const pending = allPending.filter((item) => item.kind === kind);
@@ -208,7 +260,7 @@ export function TicketMonitorScreen({ kind, ns, fontSizeStorageKey }: { kind: 'f
               break;
             }
           }
-          if (hasNew && soundEnabledRef.current) playNewOrderChime();
+          if (hasNew && soundSettingsRef.current.enabled) playNewOrderChime(soundSettingsRef.current);
         }
         knownPendingIdsRef.current = idsForKind;
       })
@@ -321,18 +373,76 @@ export function TicketMonitorScreen({ kind, ns, fontSizeStorageKey }: { kind: 'f
         </button>
         <div className="text-[15px] font-bold">{t(`${ns}.title`)}</div>
         <div className="ml-auto flex items-center gap-1.5">
+          {/* 音のON/OFFはワンタップで即切り替え、音色・長さは横の⚙から選ぶ (2026-09-04 追加。
+              Tom「さすがにこれじゃ気づかないでしょ。音と長さを選べるようにしてほしい」)。 */}
           <button
             type="button"
             onClick={toggleSound}
-            title={t(soundEnabled ? 'monitor.soundOnHint' : 'monitor.soundOffHint')}
+            title={t(soundSettings.enabled ? 'monitor.soundOnHint' : 'monitor.soundOffHint')}
             className={
               'flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-[11.5px] font-semibold ' +
-              (soundEnabled ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border text-muted-foreground')
+              (soundSettings.enabled ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border text-muted-foreground')
             }
           >
-            <span>{soundEnabled ? '🔔' : '🔕'}</span>
-            {t(soundEnabled ? 'monitor.soundOn' : 'monitor.soundOff')}
+            <span>{soundSettings.enabled ? '🔔' : '🔕'}</span>
+            {t(soundSettings.enabled ? 'monitor.soundOn' : 'monitor.soundOff')}
           </button>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setSoundPanelOpen((v) => !v)}
+              title={t('monitor.soundSettingsTitle')}
+              className="flex h-8 w-8 items-center justify-center rounded-lg border border-border text-[13px] text-muted-foreground"
+            >
+              ⚙
+            </button>
+            {soundPanelOpen && (
+              <>
+                <button aria-label="close sound settings" onClick={() => setSoundPanelOpen(false)} className="fixed inset-0 z-10 cursor-default" />
+                <div className="absolute right-0 top-[calc(100%+8px)] z-20 w-64 rounded-xl border border-border bg-card p-3.5 shadow-lg">
+                  <div className="mb-2 text-[11.5px] font-semibold text-muted-foreground">{t('monitor.soundTypeLabel')}</div>
+                  <div className="mb-3 flex gap-1.5">
+                    {SOUND_TYPES.map((tp) => (
+                      <button
+                        key={tp}
+                        type="button"
+                        onClick={() => updateSoundSettings({ type: tp })}
+                        className={
+                          'h-8 flex-1 rounded-md border text-[11.5px] font-semibold ' +
+                          (soundSettings.type === tp ? 'border-primary bg-primary text-primary-foreground' : 'border-border text-foreground')
+                        }
+                      >
+                        {t(`monitor.soundType.${tp}`)}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="mb-2 text-[11.5px] font-semibold text-muted-foreground">{t('monitor.soundLengthLabel')}</div>
+                  <div className="mb-3 flex gap-1.5">
+                    {SOUND_REPEATS.map((n) => (
+                      <button
+                        key={n}
+                        type="button"
+                        onClick={() => updateSoundSettings({ repeat: n })}
+                        className={
+                          'h-8 flex-1 rounded-md border text-[11.5px] font-semibold ' +
+                          (soundSettings.repeat === n ? 'border-primary bg-primary text-primary-foreground' : 'border-border text-foreground')
+                        }
+                      >
+                        {t(`monitor.soundRepeat.${n}`)}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => playNewOrderChime(soundSettings)}
+                    className="h-9 w-full rounded-lg bg-secondary text-[12.5px] font-semibold text-foreground"
+                  >
+                    ▶ {t('monitor.soundTest')}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
           <span className="text-[11px] text-muted-foreground">{t('monitor.fontSizeLabel')}</span>
           <div className="flex gap-1 rounded-lg bg-secondary p-0.5">
             {(['sm', 'md', 'lg'] as const).map((size) => (
