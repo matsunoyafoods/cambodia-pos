@@ -1,12 +1,14 @@
 // 滞在タイマー・飲み放題タイマーの表示用ヘルパー。
 // pos.table_sessions の起点タイムスタンプから、画面表示用の経過/残り時間を計算する。
 
+// 「○時間○分」のような言語依存の単位表記ではなく、H:MM形式 (世界共通の時間表記) で返す。
+// 多言語対応 (2026-09-04): カンボジア語UI等で漢字の「時間」「分」がそのまま表示されてしまう
+// 問題への対応。翻訳ではなく、そもそも言語に依存しない数字表記に変更した。
 export function formatDuration(totalMinutes: number): string {
   const m = Math.max(0, Math.round(totalMinutes));
   const h = Math.floor(m / 60);
   const rem = m % 60;
-  if (h > 0) return `${h}時間${rem}分`;
-  return `${rem}分`;
+  return `${h}:${String(rem).padStart(2, '0')}`;
 }
 
 export function elapsedMinutes(startedAtIso: string, nowMs: number = Date.now()): number {
