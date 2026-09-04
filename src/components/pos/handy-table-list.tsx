@@ -35,11 +35,11 @@ function naturalTableCompare(a: string, b: string): number {
   return pa.num - pb.num;
 }
 
-const STATUS_LABEL: Record<TableStatus, string> = {
-  available: '空席',
-  occupied: '使用中',
-  billing: '会計待ち',
-};
+function statusLabel(status: TableStatus, t: (key: string) => string): string {
+  if (status === 'available') return t('tableMap.statusAvailable');
+  if (status === 'occupied') return t('tableMap.statusOccupied');
+  return t('tableMap.statusBilling');
+}
 
 const STATUS_CLASS: Record<TableStatus, string> = {
   available: 'border-border bg-card text-foreground',
@@ -53,6 +53,7 @@ function isDrinkTimerExpired(session: TableSessionRecord | undefined): boolean {
 }
 
 function TableTimerBadges({ session }: { session: TableSessionRecord | undefined }) {
+  const { t } = useLanguage();
   const [, tick] = useState(0);
   useEffect(() => {
     if (!session) return;
@@ -67,7 +68,7 @@ function TableTimerBadges({ session }: { session: TableSessionRecord | undefined
   return (
     <div className="mt-1 flex flex-wrap items-center gap-1">
       <span className="rounded-full bg-black/10 px-1.5 py-0.5 text-[10px] font-semibold leading-none">
-        滞在{stay}
+        {t('timer.stay', { duration: stay })}
       </span>
       {drink && (
         <span
@@ -76,7 +77,7 @@ function TableTimerBadges({ session }: { session: TableSessionRecord | undefined
             (drink.isExpired ? 'animate-pulse bg-destructive text-destructive-foreground' : 'bg-black/10')
           }
         >
-          🍺{drink.isExpired ? '終了' : formatDuration(drink.remainingMinutes)}
+          🍺{drink.isExpired ? t('timer.drinkExpiredShort') : formatDuration(drink.remainingMinutes)}
         </span>
       )}
     </div>
@@ -132,14 +133,14 @@ export function HandyTableList({
     }
   } else {
     // レイアウト未作成の店舗向けフォールバック (table-map-screen.tsx と同じデモ配置)。
-    groups = DEMO_TABLE_GROUPS.map((g) => ({ label: g.label, tables: g.codes.map((code) => ({ code, seats: g.seats })) }));
+    groups = DEMO_TABLE_GROUPS.map((g) => ({ label: tr(g.labelKey), tables: g.codes.map((code) => ({ code, seats: g.seats })) }));
   }
 
   const filters: { key: 'all' | TableStatus; label: string }[] = [
-    { key: 'all', label: 'すべて' },
-    { key: 'available', label: '空席' },
-    { key: 'occupied', label: '使用中' },
-    { key: 'billing', label: '会計待ち' },
+    { key: 'all', label: tr('tableMap.filterAll') },
+    { key: 'available', label: tr('tableMap.statusAvailable') },
+    { key: 'occupied', label: tr('tableMap.statusOccupied') },
+    { key: 'billing', label: tr('tableMap.statusBilling') },
   ];
 
   return (
@@ -184,7 +185,9 @@ export function HandyTableList({
                       }
                     >
                       <div className="text-[15px] font-bold">{t.code}</div>
-                      <div className="mt-0.5 text-[10.5px] opacity-80">{t.seats}席・{STATUS_LABEL[status]}</div>
+                      <div className="mt-0.5 text-[10.5px] opacity-80">
+                        {tr('settings.handy.seatsCount', { n: t.seats })}・{statusLabel(status, tr)}
+                      </div>
                       <TableTimerBadges session={session} />
                     </button>
                   );

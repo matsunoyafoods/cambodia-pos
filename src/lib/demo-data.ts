@@ -68,12 +68,15 @@ export const DEMO_MENU: MenuItem[] = [
 
 export const CATEGORIES = ['メイン', 'サイド', 'ドリンク'];
 
-const GROUPS: { label: string; codes: string[]; seats: number }[] = [
-  { label: 'Takeaway', codes: ['Takeaway'], seats: 10 },
-  { label: 'フロア', codes: ['1', '2', '3', '4', '5'], seats: 4 },
-  { label: 'テラス', codes: ['V1', 'V2', 'V3'], seats: 4 },
-  { label: '個室', codes: ['BC1', 'BC2', 'BC3', 'BC4', 'BC5', 'BC6'], seats: 4 },
-  { label: 'カウンター', codes: ['C1', 'C2', 'C3', 'C4', 'C5'], seats: 2 },
+// labelKey: 多言語化 (2026-09-04追加)。label はレイアウト未設定店舗向けのフォールバック表示名
+// (日本語) で、React key としても使う。表示時は labelKey を useLanguage() の t() に渡して
+// 選択言語の文言に置き換える (呼び出し側: table-map-screen.tsx / handy-table-list.tsx)。
+const GROUPS: { label: string; labelKey: string; codes: string[]; seats: number }[] = [
+  { label: 'Takeaway', labelKey: 'demoTableGroup.takeaway', codes: ['Takeaway'], seats: 10 },
+  { label: 'フロア', labelKey: 'demoTableGroup.floor', codes: ['1', '2', '3', '4', '5'], seats: 4 },
+  { label: 'テラス', labelKey: 'demoTableGroup.terrace', codes: ['V1', 'V2', 'V3'], seats: 4 },
+  { label: '個室', labelKey: 'demoTableGroup.privateRoom', codes: ['BC1', 'BC2', 'BC3', 'BC4', 'BC5', 'BC6'], seats: 4 },
+  { label: 'カウンター', labelKey: 'demoTableGroup.counter', codes: ['C1', 'C2', 'C3', 'C4', 'C5'], seats: 2 },
 ];
 
 export const DEMO_TABLE_GROUPS = GROUPS;

@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { checkStaffSession } from '@/lib/api-client';
 import { checkPosStaffSession } from '@/lib/staff-client';
 import { StaffContext, type AuthenticatedStaff } from './staff-context';
+import { LanguageProvider, useLanguage, STAFF_LANGUAGE_STORAGE_KEY } from './language-context';
 
 /**
  * /pos/* 配下を保護する認証ガード。
@@ -16,6 +17,15 @@ import { StaffContext, type AuthenticatedStaff } from './staff-context';
  * どちらも無ければ /login へ (multi-tenant-productization-spec.md §3.3)。
  */
 export function StaffGate({ children }: { children: React.ReactNode }) {
+  return (
+    <LanguageProvider storageKey={STAFF_LANGUAGE_STORAGE_KEY} defaultLang="ja">
+      <StaffGateInner>{children}</StaffGateInner>
+    </LanguageProvider>
+  );
+}
+
+function StaffGateInner({ children }: { children: React.ReactNode }) {
+  const { t } = useLanguage();
   const router = useRouter();
   const [staff, setStaff] = useState<AuthenticatedStaff | null | undefined>(undefined);
 
@@ -49,7 +59,7 @@ export function StaffGate({ children }: { children: React.ReactNode }) {
   if (staff === undefined) {
     return (
       <div className="flex min-h-dvh items-center justify-center text-muted-foreground">
-        読み込み中…
+        {t('loading.staffGate')}
       </div>
     );
   }

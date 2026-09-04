@@ -53,6 +53,16 @@ export function LanguageProvider({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storageKey]);
 
+  // <html lang="..."> をUIの選択言語に同期する (2026-09-04 追加。全体多言語化チェックで
+  // 「<html lang="ja"> が選択言語を反映していない」という指摘を受けての対応)。
+  // 画面ごとに複数の LanguageProvider インスタンスが存在しうるが、document 全体で1つしかない
+  // <html> 要素への書き込みは副作用として安全 (後から mount された Provider の lang が勝つ程度で、
+  // 実害はない)。
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    document.documentElement.lang = lang;
+  }, [lang]);
+
   const setLang = useCallback(
     (next: Lang) => {
       setLangState(next);

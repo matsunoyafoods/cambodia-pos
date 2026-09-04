@@ -130,7 +130,7 @@ function QrOrderAppInner({ tableCode }: { tableCode: string }) {
           if (cancelled) return;
           setMenu(
             menuData.map((m) => {
-              const category = m.category ?? '未分類';
+              const category = m.category ?? t('menu.uncategorized');
               return { ...m, category, minorCategory: category };
             }),
           );
@@ -315,7 +315,7 @@ function QrOrderAppInner({ tableCode }: { tableCode: string }) {
       }).catch(() => {});
       return true;
     } catch (err) {
-      setConfirmError(err instanceof PosOrderOrdersApiError ? err.message : '注文の送信に失敗しました');
+      setConfirmError(err instanceof PosOrderOrdersApiError ? err.message : t('handyApp.confirmError'));
       return false;
     } finally {
       setConfirming(false);

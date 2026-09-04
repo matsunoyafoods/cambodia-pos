@@ -23,6 +23,7 @@ import { downloadCsv } from '@/lib/csv-export';
 import type { ExpenseCategory, ExpensePaidFrom, ExpensePaymentStatus, ExpenseRecord, ExpenseVendor } from '@/lib/pos-types';
 import { createCashDeposit, deleteCashDeposit, getCashBalance, listCashDeposits, PosCashApiError, type CashBalance, type CashDepositRecord } from '@/lib/cash-client';
 import { LanguageProvider, useLanguage, STAFF_LANGUAGE_STORAGE_KEY } from './language-context';
+import { localeForLang } from '@/lib/i18n/lang';
 
 // 経費管理画面 (2026-08-31 追加)。
 // 「経費はよく買うところなどは登録できるようにしましょう！経費は雑費や仕入れなどの項目も登録して
@@ -509,7 +510,7 @@ function QuickEntryForm({
 }
 
 function ExpenseReport({ refreshKey, onChanged }: { refreshKey: number; onChanged: () => void }) {
-  const { t } = useLanguage();
+  const { t, lang } = useLanguage();
   const me = useStaff();
   const [from, setFrom] = useState(() => todayIso().slice(0, 8) + '01');
   const [to, setTo] = useState(todayIso());
@@ -622,7 +623,7 @@ function ExpenseReport({ refreshKey, onChanged }: { refreshKey: number; onChange
         <div className="text-[16px] font-bold">{t('expenses.reportTitle')}{me.store_name ? ` — ${me.store_name}` : ''}</div>
         <div className="text-[12px] text-muted-foreground">
           {t('common.printHeaderPeriod', { from, to })} ・ {t('expenses.printHeaderStatus', { status: statusFilter === 'all' ? t('expenses.filterAll') : statusFilter === 'paid' ? t('expenses.paidStatus') : t('expenses.filterUnpaidOnly') })} ・{' '}
-          {t('common.printHeaderGenerated', { datetime: new Date().toLocaleString('ja-JP') })}
+          {t('common.printHeaderGenerated', { datetime: new Date().toLocaleString(localeForLang(lang)) })}
         </div>
       </div>
 

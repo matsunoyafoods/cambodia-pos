@@ -18,7 +18,7 @@ const STATUS_CLASS: Record<TableStatus, string> = {
 // 多言語化 (2026-09-02追加): ステータス/障害物ラベルは t() 経由で解決するため、呼び出し側で
 // useLanguage() の t を渡す関数に変更した (以前は静的 Record だった)。
 function statusLabel(status: TableStatus, t: (key: string) => string): string {
-  if (status === 'available') return 'Available';
+  if (status === 'available') return t('tableMap.statusAvailable');
   if (status === 'occupied') return t('tableMap.statusOccupied');
   return t('tableMap.statusBilling');
 }
@@ -142,7 +142,7 @@ export function TableMapScreen({
   const sessionByTable = new Map(tableSessions.map((s) => [s.table_code, s]));
   const filters: { key: 'all' | TableStatus; label: string }[] = [
     { key: 'all', label: t('tableMap.filterAll') },
-    { key: 'available', label: 'Available' },
+    { key: 'available', label: t('tableMap.statusAvailable') },
     { key: 'occupied', label: t('tableMap.statusOccupied') },
     { key: 'billing', label: t('tableMap.statusBilling') },
   ];
@@ -305,7 +305,7 @@ export function TableMapScreen({
             return (
               <div key={group.label} className="mb-6">
                 <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  {group.label}
+                  {t(group.labelKey)}
                 </div>
                 <div className="grid grid-cols-6 gap-3">
                   {groupTables.map((tbl) => (

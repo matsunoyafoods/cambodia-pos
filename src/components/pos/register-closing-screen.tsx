@@ -14,6 +14,7 @@ import {
 import { getPosOrderSettings } from '@/lib/pos-order-client';
 import { DEFAULT_SETTINGS } from '@/lib/pos-types';
 import { LanguageProvider, useLanguage, STAFF_LANGUAGE_STORAGE_KEY } from './language-context';
+import { localeForLang } from '@/lib/i18n/lang';
 
 // レジ締め (2026-09-02 実データ連携)。
 // 従来はシステム合計・現金過不足のすべてが固定のデモ値で、「レジ締めを確定」ボタンも DB には
@@ -123,7 +124,7 @@ function RegisterClosingScreenInner() {
 }
 
 function ConfirmedClosingView({ closing, canManage, onReopen }: { closing: RegisterClosingRecord; canManage: boolean; onReopen: () => void }) {
-  const { t } = useLanguage();
+  const { t, lang } = useLanguage();
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const diffOk = Math.abs(closing.differenceUsd) < 0.005;
@@ -173,7 +174,7 @@ function ConfirmedClosingView({ closing, canManage, onReopen }: { closing: Regis
         </div>
       )}
       <div className="mt-3 text-[11.5px] text-muted-foreground">
-        {t('registerClosing.confirmedAtLabel')}: {new Date(closing.confirmedAt).toLocaleString('ja-JP')}
+        {t('registerClosing.confirmedAtLabel')}: {new Date(closing.confirmedAt).toLocaleString(localeForLang(lang))}
       </div>
     </div>
   );

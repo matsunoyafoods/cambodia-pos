@@ -13,13 +13,22 @@ import {
   type TableLayoutKind,
 } from '@/lib/table-layout-client';
 import { TABLE_LAYOUT_CANVAS_HEIGHT, TABLE_LAYOUT_CANVAS_WIDTH } from '@/lib/table-layout-geometry';
+import { LanguageProvider, useLanguage, STAFF_LANGUAGE_STORAGE_KEY } from './language-context';
 
-const KIND_META: Record<TableLayoutKind, { label: string; addLabel: string; defaultCode: string }> = {
-  table: { label: '卓', addLabel: '＋ 卓を追加', defaultCode: '新卓' },
-  pillar: { label: '柱', addLabel: '＋ 柱を追加', defaultCode: '柱' },
-  counter: { label: 'カウンター', addLabel: '＋ カウンターを追加', defaultCode: 'カウンター' },
-  wall: { label: '壁', addLabel: '＋ 壁を追加', defaultCode: '壁' },
-};
+// 多言語化 (2026-09-04 追加。以前は「別画面なのでスコープ外」としていたが、Tom からの
+// 指摘を受けてこの画面も5言語対応した)。t() 経由で解決するため静的 Record から関数に変更。
+function kindMeta(kind: TableLayoutKind, t: (key: string) => string): { label: string; addLabel: string; defaultCode: string } {
+  switch (kind) {
+    case 'table':
+      return { label: t('tableLayout.kind.table'), addLabel: t('tableLayout.addTable'), defaultCode: t('tableLayout.newCodeTable') };
+    case 'pillar':
+      return { label: t('tableLayout.kind.pillar'), addLabel: t('tableLayout.addPillar'), defaultCode: t('tableLayout.kind.pillar') };
+    case 'counter':
+      return { label: t('tableLayout.kind.counter'), addLabel: t('tableLayout.addCounter'), defaultCode: t('tableLayout.kind.counter') };
+    case 'wall':
+      return { label: t('tableLayout.kind.wall'), addLabel: t('tableLayout.addWall'), defaultCode: t('tableLayout.kind.wall') };
+  }
+}
 const ADD_KINDS: TableLayoutKind[] = ['table', 'pillar', 'counter'];
 
 // クライアント側だけで作った未保存の新規項目には tmp- プレフィックスの仮IDを振る。
@@ -40,6 +49,17 @@ type Clipboard = {
 // 編集はまずローカル state だけに反映し (ドラッグ・サイズ変更・複製など)、
 // ヘッダーの「保存」を押した時点でまとめて API に反映する。
 export function TableLayoutScreen() {
+  return (
+    <LanguageProvider storageKey={STAFF_LANGUAGE_STORAGE_KEY} defaultLang="ja">
+      <TableLayoutScreenInner />
+    </LanguageProvider>
+  );
+}
+
+function TableLayoutScreenInner() {
+  // t() の別名を tr にしているのは、この画面のテーブル項目ループ変数に慣習的に `t` を
+  // 使っているため (items.map((t) => ...) 等)。翻訳関数と衝突しないよう区別する。
+  const { t: tr } = useLanguage();
   const router = useRouter();
   const me = useStaff();
   const isPosNative = me.authMode === 'pos_native';
@@ -69,7 +89,8 @@ export function TableLayoutScreen() {
         setDeletedIds(new Set());
         setSaved(false);
       })
-      .catch((err) => setError(err instanceof PosTableLayoutApiError ? err.message : '取得に失敗しました'));
+      .catch((err) => setError(err instanceof PosTableLayoutApiError ? err.message : tr('tableLayout.fetchError')));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -105,7 +126,7 @@ export function TableLayoutScreen() {
   }, [hasUnsavedChanges]);
 
   function goBack() {
-    if (hasUnsavedChanges && !window.confirm('保存されていない変更があります。保存せずに戻りますか？')) {
+    if (hasUnsavedChanges && !window.confirm(tr('tableLayout.confirmLeaveUnsaved'))) {
       return;
     }
     router.push('/pos');
@@ -137,10 +158,11 @@ export function TableLayoutScreen() {
       }
       return candidate;
     }
-    let candidate = `${base}コピー`;
+    const copyLabel = tr('tableLayout.copyLabel');
+    let candidate = `${base}${copyLabel}`;
     let i = 2;
     while (existing.has(candidate)) {
-      candidate = `${base}コピー${i}`;
+      candidate = `${base}${copyLabel}${i}`;
       i += 1;
     }
     return candidate;
@@ -148,7 +170,7 @@ export function TableLayoutScreen() {
 
   function addItem(kind: TableLayoutKind) {
     const n = nextIndex.current++;
-    const meta = KIND_META[kind];
+    const meta = kindMeta(kind, tr);
     const width = kind === 'table' ? 84 : kind === 'pillar' ? 32 : 160;
     const height = kind === 'table' ? 64 : kind === 'pillar' ? 32 : 40;
     const existing = new Set((items ?? []).map((t) => t.table_code));
@@ -301,7 +323,7 @@ export function TableLayoutScreen() {
       } catch (err) {
         stillDeleted.add(id);
         hadError = true;
-        setError(err instanceof PosTableLayoutApiError ? err.message : '削除に失敗しました');
+        setError(err instanceof PosTableLayoutApiError ? err.message : tr('tableLayout.deleteError'));
       }
     }
 
@@ -323,7 +345,7 @@ export function TableLayoutScreen() {
         } catch (err) {
           nextItems.push(item);
           hadError = true;
-          setError(err instanceof PosTableLayoutApiError ? err.message : '保存に失敗しました');
+          setError(err instanceof PosTableLayoutApiError ? err.message : tr('tableLayout.saveError'));
         }
       } else if (dirtyIds.has(item.id)) {
         try {
@@ -341,7 +363,7 @@ export function TableLayoutScreen() {
           nextItems.push(item);
           stillDirty.add(item.id);
           hadError = true;
-          setError(err instanceof PosTableLayoutApiError ? err.message : '保存に失敗しました');
+          setError(err instanceof PosTableLayoutApiError ? err.message : tr('tableLayout.saveError'));
         }
       } else {
         nextItems.push(item);
@@ -357,22 +379,23 @@ export function TableLayoutScreen() {
 
   const clipboardLabel = useMemo(() => {
     if (!clipboard) return null;
-    return `${KIND_META[clipboard.kind].label}「${clipboard.table_code}」をコピー中`;
+    return tr('tableLayout.clipboardLabel', { kind: kindMeta(clipboard.kind, tr).label, code: clipboard.table_code });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clipboard]);
 
   if (!isPosNative) {
     return (
       <div className="flex w-[640px] flex-col gap-3.5 rounded-2xl border border-border bg-background p-6">
-        <div className="text-[15px] font-bold">テーブルレイアウト編集</div>
+        <div className="text-[15px] font-bold">{tr('tableLayout.title')}</div>
         <div className="flex flex-col gap-2 rounded-xl border border-amber-300 bg-amber-50 p-4">
           <div className="text-[13px] leading-relaxed text-amber-900">
-            この機能はPINログインでのみご利用いただけます。現在 Telegram (matsunoya-dine) 連携ログインでアクセスしているため、一度PINでログインし直してください。
+            {tr('tableLayout.pinRequiredBody')}
           </div>
           <button
             onClick={() => router.push('/login')}
             className="mt-1 h-[38px] w-fit rounded-lg bg-primary px-4 text-[12.5px] font-semibold text-primary-foreground"
           >
-            PINでログインし直す
+            {tr('tableLayout.pinRequiredButton')}
           </button>
         </div>
       </div>
@@ -387,14 +410,14 @@ export function TableLayoutScreen() {
             onClick={goBack}
             className="flex h-9 items-center gap-1 rounded-lg px-2.5 text-[12.5px] font-semibold text-muted-foreground hover:bg-secondary"
           >
-            ← 戻る
+            {tr('tableLayout.backButton')}
           </button>
           <div>
-            <div className="text-base font-bold">テーブルレイアウト編集</div>
+            <div className="text-base font-bold">{tr('tableLayout.title')}</div>
             <div className="text-xs text-muted-foreground">
               {canManage
-                ? '卓・柱・カウンターをドラッグして配置できます。変更後は「保存」を押してください'
-                : '閲覧のみ (編集には manager 以上の権限が必要です)'}
+                ? tr('tableLayout.subtitleEditable')
+                : tr('tableLayout.subtitleReadOnly')}
             </div>
           </div>
         </div>
@@ -406,7 +429,7 @@ export function TableLayoutScreen() {
                 onClick={() => addItem(kind)}
                 className="h-9 rounded-lg border border-dashed border-brand px-3 text-[12.5px] font-semibold text-brand"
               >
-                {KIND_META[kind].addLabel}
+                {kindMeta(kind, tr).addLabel}
               </button>
             ))}
             <button
@@ -414,7 +437,7 @@ export function TableLayoutScreen() {
               disabled={!clipboard}
               className="h-9 rounded-lg border border-border px-3 text-[12.5px] font-semibold disabled:opacity-40"
             >
-              貼り付け
+              {tr('tableLayout.pasteButton')}
             </button>
             <button
               onClick={saveAll}
@@ -424,7 +447,7 @@ export function TableLayoutScreen() {
                 (saved ? 'bg-emerald-100 text-emerald-600' : 'bg-primary text-primary-foreground')
               }
             >
-              {saving ? '保存中…' : saved ? '保存しました ✓' : hasUnsavedChanges ? '保存 ●' : '保存'}
+              {saving ? tr('tableLayout.saving') : saved ? tr('tableLayout.saved') : hasUnsavedChanges ? tr('tableLayout.saveWithDot') : tr('tableLayout.saveButton')}
             </button>
           </div>
         )}
@@ -433,7 +456,7 @@ export function TableLayoutScreen() {
       {error && <div className="border-b border-border px-6 py-2 text-xs text-destructive">{error}</div>}
       {clipboardLabel && (
         <div className="border-b border-border bg-secondary/50 px-6 py-1.5 text-[11px] text-muted-foreground">
-          {clipboardLabel} (卓を選んで「貼り付け」、または ⌘/Ctrl+V)
+          {clipboardLabel} {tr('tableLayout.clipboardHint')}
         </div>
       )}
 
@@ -452,7 +475,7 @@ export function TableLayoutScreen() {
             }}
           >
             {items === null && !error && (
-              <div className="p-5 text-[12.5px] text-muted-foreground">読み込み中…</div>
+              <div className="p-5 text-[12.5px] text-muted-foreground">{tr('tableLayout.loading')}</div>
             )}
             {items?.map((t) => {
               const isSel = t.id === selectedId;
@@ -477,11 +500,11 @@ export function TableLayoutScreen() {
                   style={{ left: t.x, top: t.y, width: t.width, height: t.height }}
                 >
                   {dirty && (
-                    <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-amber-500" title="未保存の変更があります" />
+                    <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-amber-500" title={tr('tableLayout.unsavedIndicator')} />
                   )}
                   <div className="px-1 text-center text-[13px] font-bold leading-tight">{t.table_code}</div>
-                  {isTable && <div className="text-[10.5px] opacity-85">{t.seats}席</div>}
-                  {!isTable && <div className="text-[10px] opacity-75">{KIND_META[t.kind].label}</div>}
+                  {isTable && <div className="text-[10.5px] opacity-85">{tr('settings.handy.seatsCount', { n: t.seats })}</div>}
+                  {!isTable && <div className="text-[10px] opacity-75">{kindMeta(t.kind, tr).label}</div>}
                 </div>
               );
             })}
@@ -492,10 +515,10 @@ export function TableLayoutScreen() {
           {selected ? (
             <div className="flex flex-col gap-2.5 rounded-xl border border-border p-3.5">
               <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                選択中の{KIND_META[selected.kind].label}
+                {tr('tableLayout.selectedKindHeading', { kind: kindMeta(selected.kind, tr).label })}
               </div>
               <div>
-                <div className="mb-1 text-[11.5px] text-muted-foreground">名前</div>
+                <div className="mb-1 text-[11.5px] text-muted-foreground">{tr('tableLayout.nameLabel')}</div>
                 <input
                   value={nameDraft}
                   onChange={(e) => setNameDraft(e.target.value)}
@@ -507,7 +530,7 @@ export function TableLayoutScreen() {
 
               {selected.kind === 'table' && (
                 <div>
-                  <div className="mb-1 text-[11.5px] text-muted-foreground">席数</div>
+                  <div className="mb-1 text-[11.5px] text-muted-foreground">{tr('tableLayout.seatsLabel')}</div>
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => seatsDelta(-1)}
@@ -529,7 +552,7 @@ export function TableLayoutScreen() {
               )}
 
               <div>
-                <div className="mb-1 text-[11.5px] text-muted-foreground">大きさ (幅 × 高さ、直接入力可)</div>
+                <div className="mb-1 text-[11.5px] text-muted-foreground">{tr('tableLayout.sizeLabel')}</div>
                 <div className="flex items-center gap-1.5">
                   <button
                     onClick={() => resizeSelected(-8, 0)}
@@ -595,25 +618,25 @@ export function TableLayoutScreen() {
                     onClick={copySelected}
                     className="h-[38px] flex-1 rounded-lg border border-border text-[12.5px] font-semibold"
                   >
-                    コピー
+                    {tr('tableLayout.copyLabel')}
                   </button>
                   <button
                     onClick={deleteSelected}
                     className="h-[38px] flex-1 rounded-lg border border-destructive text-[12.5px] font-semibold text-destructive"
                   >
-                    削除
+                    {tr('tableLayout.deleteLabel')}
                   </button>
                 </div>
               )}
             </div>
           ) : (
             <div className="px-0.5 py-1.5 text-[12.5px] leading-relaxed text-muted-foreground">
-              見取り図の卓・柱・カウンターをタップすると、名前や席数・大きさを編集できます。ドラッグで自由に配置を変更できます。「コピー」→「貼り付け」(または ⌘/Ctrl+C・⌘/Ctrl+V) で複製できます。変更後は右上の「保存」を押してください。
+              {tr('tableLayout.instructions')}
             </div>
           )}
 
           <div className="mt-auto text-[11px] leading-relaxed text-muted-foreground">
-            配置はこの店舗のPOS専用データとして保存されます。保存すると、レジ画面のテーブルマップにもこの配置がそのまま反映されます。
+            {tr('tableLayout.footerNote')}
           </div>
         </div>
       </div>

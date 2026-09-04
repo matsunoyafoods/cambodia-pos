@@ -242,7 +242,7 @@ function PosAppInner() {
           if (cancelled) return;
           setMenu(
             menuData.map((m) => {
-              const category = m.category ?? '未分類';
+              const category = m.category ?? t('menu.uncategorized');
               return { ...m, category, minorCategory: category };
             }),
           );
@@ -264,6 +264,7 @@ function PosAppInner() {
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadToken]);
 
   // メニュー取得後、最初のカテゴリを選択状態にする

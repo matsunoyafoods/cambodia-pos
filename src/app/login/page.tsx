@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 
 import { checkStaffSession } from '@/lib/api-client';
 import { checkPosStaffSession, getStaffRoster, loginWithPin, type PosStaffRosterEntry } from '@/lib/staff-client';
+import { LanguageProvider, useLanguage, STAFF_LANGUAGE_STORAGE_KEY } from '@/components/pos/language-context';
 
 const ADMIN_LOGIN_URL =
   process.env.NEXT_PUBLIC_MATSUNOYA_DINE_ADMIN_LOGIN_URL ?? 'https://app.matsunoyafoods.com/admin-login';
@@ -20,13 +21,16 @@ function safeNextPath(raw: string | null): string {
 
 export default function LoginPage() {
   return (
-    <Suspense fallback={null}>
-      <LoginPageInner />
-    </Suspense>
+    <LanguageProvider storageKey={STAFF_LANGUAGE_STORAGE_KEY} defaultLang="ja">
+      <Suspense fallback={null}>
+        <LoginPageInner />
+      </Suspense>
+    </LanguageProvider>
   );
 }
 
 function LoginPageInner() {
+  const { t } = useLanguage();
   const router = useRouter();
   const searchParams = useSearchParams();
   const nextPath = safeNextPath(searchParams.get('next'));
@@ -91,7 +95,7 @@ function LoginPageInner() {
       await loginWithPin(selectedStaffId, pin);
       router.replace(nextPath);
     } catch {
-      setPinError('スタッフ名またはPINが正しくありません');
+      setPinError(t('login.errorInvalid'));
       setPin('');
     } finally {
       setPinLoading(false);
@@ -108,13 +112,13 @@ function LoginPageInner() {
           onSubmit={handlePinLogin}
           className="w-full rounded-xl border-2 border-border bg-card p-5 text-left"
         >
-          <p className="mb-3 font-bold">PINでログイン</p>
+          <p className="mb-3 font-bold">{t('login.pinLoginTitle')}</p>
           <select
             value={selectedStaffId}
             onChange={(e) => setSelectedStaffId(e.target.value)}
             className="mb-3 h-11 w-full rounded-lg border border-border px-3 text-[14px]"
           >
-            <option value="">スタッフを選択…</option>
+            <option value="">{t('login.selectStaffPlaceholder')}</option>
             {roster.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.display_name}
@@ -135,7 +139,7 @@ function LoginPageInner() {
             disabled={pinLoading || !selectedStaffId || pin.length < 4}
             className="h-11 w-full rounded-full bg-primary font-bold text-primary-foreground shadow-md disabled:opacity-60"
           >
-            {pinLoading ? 'ログイン中…' : 'ログイン'}
+            {pinLoading ? t('login.loggingIn') : t('login.loginButton')}
           </button>
         </form>
       )}
@@ -143,17 +147,17 @@ function LoginPageInner() {
       {roster && roster.length > 0 && (
         <div className="flex w-full items-center gap-3 text-xs text-muted-foreground">
           <div className="h-px flex-1 bg-border" />
-          または
+          {t('login.or')}
           <div className="h-px flex-1 bg-border" />
         </div>
       )}
 
       <div className="w-full rounded-xl border-2 border-amber-300 bg-amber-50 p-5 text-left">
-        <p className="font-bold text-amber-900 mb-3">スタッフログインが必要です</p>
+        <p className="font-bold text-amber-900 mb-3">{t('login.staffLoginRequired')}</p>
         <ol className="space-y-2 text-sm text-amber-900">
-          <li>1. 下のボタンで matsunoya-dine の管理画面ログインを開く</li>
-          <li>2. Telegram Bot 経由でログインを完了する</li>
-          <li>3. このタブに戻って「ログイン状態を確認」を押す</li>
+          <li>{t('login.step1')}</li>
+          <li>{t('login.step2')}</li>
+          <li>{t('login.step3')}</li>
         </ol>
         <a
           href={ADMIN_LOGIN_URL}
@@ -161,7 +165,7 @@ function LoginPageInner() {
           rel="noopener noreferrer"
           className="mt-4 block w-full rounded-full bg-[#0088cc] hover:bg-[#0077b3] px-6 py-3 text-white text-center font-bold shadow-md"
         >
-          matsunoya-dine でログインする
+          {t('login.openDineLogin')}
         </a>
       </div>
 
@@ -170,17 +174,17 @@ function LoginPageInner() {
         disabled={checking}
         className="w-full rounded-full bg-primary px-6 py-3 font-bold text-primary-foreground shadow-md disabled:opacity-60"
       >
-        {checking ? '確認中…' : 'ログイン状態を確認'}
+        {checking ? t('login.checking') : t('login.checkStatus')}
       </button>
 
       {checked && !staffName && (
         <p className="text-sm text-muted-foreground">
-          まだログインが確認できません。同じブラウザで matsunoya-dine のログインを完了してから、もう一度お試しください。
+          {t('login.notConfirmed')}
         </p>
       )}
 
       <p className="text-xs text-muted-foreground">
-        ※ 一度ログインすれば、同じブラウザでは約30日間ログイン状態が保持されます。
+        {t('login.persistNote')}
       </p>
     </main>
   );

@@ -22,6 +22,7 @@ import { applyTimecardRounding } from '@/lib/timecard-rounding';
 import { downloadCsv } from '@/lib/csv-export';
 import { DEFAULT_TIMECARD_ROUNDING, type TimecardRecord, type TimecardRoundingSettings } from '@/lib/pos-types';
 import { LanguageProvider, useLanguage, STAFF_LANGUAGE_STORAGE_KEY } from './language-context';
+import { localeForLang, type Lang } from '@/lib/i18n/lang';
 
 type TFunc = ReturnType<typeof useLanguage>['t'];
 
@@ -49,9 +50,9 @@ function todayIso() {
   return new Date().toISOString().slice(0, 10);
 }
 
-function fmtTime(iso: string | null): string {
+function fmtTime(iso: string | null, lang: Lang = 'ja'): string {
   if (!iso) return '—';
-  return new Date(iso).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return new Date(iso).toLocaleString(localeForLang(lang), { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
 // 休憩時間を除いた実働分数。退勤前 (clockOut=null) は「今」を終了時刻とみなして計算する。
@@ -92,7 +93,7 @@ export function TimecardScreen() {
 }
 
 function TimecardScreenInner() {
-  const { t } = useLanguage();
+  const { t, lang } = useLanguage();
   const router = useRouter();
   const me = useStaff();
   const isPosNative = me.authMode === 'pos_native';
@@ -147,7 +148,7 @@ function PosNativeOnlyNotice() {
 }
 
 function PunchCard() {
-  const { t } = useLanguage();
+  const { t, lang } = useLanguage();
   const me = useStaff();
   const [roster, setRoster] = useState<PosStaffRosterEntry[]>([]);
   const [selectedStaffId, setSelectedStaffId] = useState(me.id);
@@ -226,7 +227,7 @@ function PunchCard() {
       </div>
 
       {status?.timecard && (
-        <div className="mb-3 text-[12.5px] text-muted-foreground">{t('timecardScreen.clockInLabel', { time: fmtTime(status.timecard.clockIn) })}</div>
+        <div className="mb-3 text-[12.5px] text-muted-foreground">{t('timecardScreen.clockInLabel', { time: fmtTime(status.timecard.clockIn, lang) })}</div>
       )}
 
       {error && <div className="mb-2 text-[12.5px] text-destructive">{error}</div>}
@@ -266,7 +267,7 @@ function PunchCard() {
 }
 
 function TimecardReport() {
-  const { t } = useLanguage();
+  const { t, lang } = useLanguage();
   const me = useStaff();
   const [from, setFrom] = useState(() => todayIso().slice(0, 8) + '01'); // 今月1日
   const [to, setTo] = useState(todayIso());
@@ -371,8 +372,8 @@ function TimecardReport() {
         const m = roundedMinutes(r);
         return [
           r.staffName,
-          fmtTime(r.clockIn),
-          r.clockOut ? fmtTime(r.clockOut) : '',
+          fmtTime(r.clockIn, lang),
+          r.clockOut ? fmtTime(r.clockOut, lang) : '',
           r.breaks.length,
           (m / 60).toFixed(2),
           wage ? ((m / 60) * wage).toFixed(2) : '',
@@ -414,7 +415,7 @@ function TimecardReport() {
       <div className="hidden print:mb-4 print:block">
         <div className="text-[16px] font-bold">{t('timecardScreen.reportTitle')}{me.store_name ? ` — ${me.store_name}` : ''}</div>
         <div className="text-[12px] text-muted-foreground">
-          {t('common.printHeaderPeriod', { from, to })} ・ {t('common.printHeaderGenerated', { datetime: new Date().toLocaleString('ja-JP') })}
+          {t('common.printHeaderPeriod', { from, to })} ・ {t('common.printHeaderGenerated', { datetime: new Date().toLocaleString(localeForLang(lang)) })}
           {rounding.enabled && ` ・ ${t('timecardScreen.roundingSummary', { minutes: rounding.unitMinutes, direction: roundingDirectionLabel(rounding.direction, t) })}`}
         </div>
       </div>
@@ -450,7 +451,7 @@ function TimecardReport() {
               <div className="text-[13px]">
                 <span className="font-semibold">{r.staffName}</span>
                 <span className="ml-2 text-muted-foreground">
-                  {fmtTime(r.clockIn)} 〜 {fmtTime(r.clockOut)}
+                  {fmtTime(r.clockIn, lang)} 〜 {fmtTime(r.clockOut, lang)}
                 </span>
                 {!r.clockOut && <span className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 text-[10.5px] font-semibold text-emerald-700 print:hidden">{t('timecardScreen.status.working')}</span>}
               </div>
@@ -630,7 +631,7 @@ function StaffImageExportSection({
   from: string;
   to: string;
 }) {
-  const { t } = useLanguage();
+  const { t, lang } = useLanguage();
   const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [savingId, setSavingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -702,7 +703,7 @@ function StaffImageExportSection({
               <div style={{ marginTop: 16, borderTop: '1px solid #e5e7eb' }}>
                 {g.records.map((r) => (
                   <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #f3f4f6', fontSize: 13 }}>
-                    <span>{fmtTime(r.clockIn)} 〜 {r.clockOut ? fmtTime(r.clockOut) : t('timecardScreen.workingParen')}</span>
+                    <span>{fmtTime(r.clockIn, lang)} 〜 {r.clockOut ? fmtTime(r.clockOut, lang) : t('timecardScreen.workingParen')}</span>
                     <span>{fmtHours(applyTimecardRounding(workedMinutes(r), rounding))}h</span>
                   </div>
                 ))}
@@ -711,7 +712,7 @@ function StaffImageExportSection({
                 {t('timecardScreen.imageTotalWorked', { hours: fmtHours(totalMinutes) })}
                 {cost !== null && ` ・ ${t('timecardScreen.imageEstimatedCost', { cost: cost.toFixed(2) })}`}
               </div>
-              <div style={{ marginTop: 10, fontSize: 10, color: '#9ca3af' }}>{t('timecardScreen.imageGeneratedAt', { datetime: new Date().toLocaleString('ja-JP') })}</div>
+              <div style={{ marginTop: 10, fontSize: 10, color: '#9ca3af' }}>{t('timecardScreen.imageGeneratedAt', { datetime: new Date().toLocaleString(localeForLang(lang)) })}</div>
             </div>
           );
         })}
