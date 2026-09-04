@@ -195,6 +195,10 @@ export function CheckoutScreen({
 
   const [amountStr, setAmountStr] = useState(remaining.toFixed(2));
   const [amountTouched, setAmountTouched] = useState(false);
+  // 均等割りで選択中の人数 (2026-09-04 追加。Tom「均等割を間違えて選んだら入力するしかないから
+  // 改善して欲しい」)。選択中のボタンをハイライトし、同じボタンをもう一度押すか専用の
+  // リセットボタンで、手入力せずに残額全体に戻せるようにした。
+  const [splitCount, setSplitCount] = useState<number | null>(null);
   const [cashUsdReceivedStr, setCashUsdReceivedStr] = useState('');
   const [cashKhrReceivedStr, setCashKhrReceivedStr] = useState('');
   const [changeUsdStr, setChangeUsdStr] = useState('');
@@ -228,9 +232,17 @@ export function CheckoutScreen({
   function resetLineForm() {
     setAmountStr(remaining > 0 ? remaining.toFixed(2) : '0.00');
     setAmountTouched(false);
+    setSplitCount(null);
     setCashUsdReceivedStr('');
     setCashKhrReceivedStr('');
     setChangeUsdStr('');
+  }
+
+  // 均等割りを解除して残額全体の入力に戻す (ボタンの選び直し・リセット共通)。
+  function clearSplit() {
+    setSplitCount(null);
+    setAmountStr(remaining > 0 ? remaining.toFixed(2) : '0.00');
+    setAmountTouched(false);
   }
 
   function addLine() {
@@ -417,21 +429,41 @@ export function CheckoutScreen({
                   </button>
                 ))}
               </div>
-              {/* 割り勘: 残額を人数で均等割りして、この支払いラインの金額に自動入力する */}
-              <div className="flex items-center gap-1.5">
+              {/* 割り勘: 残額を人数で均等割りして、この支払いラインの金額に自動入力する。
+                  選択中の人数はハイライトし、同じボタンの再タップ or 右の「戻す」で
+                  手入力なしに残額全体へ戻せる (2026-09-04 改善)。 */}
+              <div className="flex flex-wrap items-center gap-1.5">
                 <span className="text-[11px] text-muted-foreground">{t('checkout.splitEvenly')}</span>
                 {splitPresets.map((n) => (
                   <button
                     key={n}
                     onClick={() => {
+                      if (splitCount === n) {
+                        clearSplit();
+                        return;
+                      }
+                      setSplitCount(n);
                       setAmountStr((remaining / n).toFixed(2));
                       setAmountTouched(true);
                     }}
-                    className="h-7 rounded-md border border-border px-2 text-[11px]"
+                    className={
+                      'h-8 rounded-md border px-2.5 text-[12.5px] font-semibold ' +
+                      (splitCount === n
+                        ? 'border-primary bg-primary text-primary-foreground'
+                        : 'border-border text-foreground')
+                    }
                   >
                     {t('checkout.peopleCount', { n })}
                   </button>
                 ))}
+                {splitCount !== null && (
+                  <button
+                    onClick={clearSplit}
+                    className="h-8 rounded-md border border-dashed border-border px-2.5 text-[12.5px] text-muted-foreground"
+                  >
+                    {t('checkout.splitClear')}
+                  </button>
+                )}
               </div>
             </div>
 
@@ -442,6 +474,7 @@ export function CheckoutScreen({
                 onChange={(e) => {
                   setAmountStr(e.target.value);
                   setAmountTouched(true);
+                  setSplitCount(null);
                 }}
                 inputMode="decimal"
                 className="h-10 w-40 rounded-lg border border-border px-3 text-[13.5px]"
