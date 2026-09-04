@@ -20,6 +20,11 @@ export class PosOrderApiError extends Error {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
+    // レジが起動時に読む設定・メニュー・卓レイアウト等は「今の店舗の状態」がそのまま
+    // 表示に直結するライブデータなので、ブラウザ/中間キャッシュに古い応答を握らせない
+    // (2026-09-04 「色が変わらない」調査時に追加。真因は theme-color-injector.tsx 側の
+    // 再取得タイミングだったが、念のためこちらも防御的に固定しておく)。
+    cache: 'no-store',
     ...init,
     headers: {
       'Content-Type': 'application/json',

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
+import { usePathname } from 'next/navigation';
 import { getPosOrderSettings } from '@/lib/pos-order-client';
 
 // テーマカラー適用 (2026-09-02 追加)。Tom「画面イメージ色もカスタムできるようにしましょう！」
@@ -15,6 +16,13 @@ import { getPosOrderSettings } from '@/lib/pos-order-client';
 // (Tom「背景が切り替わらない」)。そのため --card / --popover も同じ色に揃えて、選んだ色が
 // 画面全体にちゃんと反映されるようにした。暗い色を選んだ場合に文字が読めなくならないよう、
 // --foreground / --card-foreground / --popover-foreground も明度に応じて自動で白/濃紺に切り替える。
+//
+// 2026-09-04 追加 (その2): 「色が変わらない」の真因判明。この Injector は /pos/layout.tsx に
+// 置いているため /pos/* 全体で1回しかマウントされない — 設定画面 (/pos/settings) で保存して
+// 「戻る」で /pos に router.push() しても Next.js のクライアント側遷移では layout ごと
+// 使い回されるため useEffect ([] 依存) が再実行されず、ブラウザを F5 で完全リロードしない限り
+// 新しい色が反映されなかった。usePathname() を依存配列に加えて /pos/* 内を移動するたびに
+// 設定を取り直すようにし、設定画面から戻ってきた瞬間に新しい色が効くようにした。
 //
 // 新規マイグレーション・APIは追加していない — 既存の pos.stores.settings (jsonb) に themeColor /
 // backgroundColor を項目追加しただけで、レジ画面が起動時に必ず読む /api/pos-order/settings
@@ -61,6 +69,8 @@ function foregroundHslFor(hex: string): string {
 }
 
 export function ThemeColorInjector() {
+  const pathname = usePathname();
+
   useEffect(() => {
     let cancelled = false;
     getPosOrderSettings()
@@ -105,7 +115,10 @@ export function ThemeColorInjector() {
     return () => {
       cancelled = true;
     };
-  }, []);
+    // pathname を依存に入れることで、設定画面 (/pos/settings) で保存して /pos/* 内を
+    // クライアント側遷移で移動するたびに最新の色を取り直す (詳細は上のコメント参照)。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname]);
 
   return null;
 }
