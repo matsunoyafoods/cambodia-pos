@@ -296,61 +296,16 @@ export function TicketMonitorScreen({ kind, ns, fontSizeStorageKey }: { kind: 'f
     }
   }
 
-  // テーブルカードの見出し部分をタップすると、そのテーブルの中で一番古い未完了品目を
-  // 1件だけ完了にする (2026-09-05 追加。Tomからの要望「軽くタップで一個減るようにして
-  // ほしいです」への対応)。
+  // 一括完了 (2026-09-04 追加) は、長押しジェスチャー→経過時間判定→2回タップ確認→
+  // window.confirm、と4通りの実装を試したが、Tomのタブレットのブラウザ/WebViewでは
+  // タップの回数・押している時間・指を離すイベントのいずれも信頼できず、そのたびに
+  // 「軽くタップしただけで一括完了になる」という同じ症状が再発した。
   //
-  // 一括完了 (2026-09-04 追加。Tomからの要望「注文商品が5個の場合、5回注文完了を押さないと
-  // 完了になりません。なのでこの機能を残しつつ2秒長押ししたら5個全て提供完了になるように」
-  // への対応) は、当初「2秒間押し続ける」という長押しジェスチャーで実装していたが、Tomの
-  // タブレットのブラウザでは指を押した/離したイベント (pointerdown/pointerup 等) や、
-  // 押してから click までの経過時間が信頼できず、setTimeout 方式・経過時間判定方式のどちらも
-  // 「軽くタップしただけで一括完了になってしまう」という同じ症状が繰り返し発生した。
-  //
-  // 2026-09-05 修正 (その3、これも不十分だった): 同じボタンを2回連続タップして確認する方式に
-  // 変更したが、それでも「軽くタップしただけで一括完了になった」との報告が続いた。1回の
-  // 物理的なタップに対してブラウザが click イベントを2回発火させてしまう(いわゆる ghost
-  // click。タッチ操作とマウス操作を両方エミュレートするタイプのブラウザ/WebViewでまれに
-  // 起こる)可能性が高く、同じ要素へのタップ回数で判定する方式そのものが、この端末では
-  // 信頼できないと判断した。
-  //
-  // 2026-09-05 修正 (最終): タップの回数や押している時間など「操作の物理的な特性」に一切
-  // 依存しない方式に変更した。一括完了は、ブラウザ標準の確認ダイアログ (window.confirm) を
-  // 使う。これは新旧問わずほぼ全てのブラウザ/WebViewが実装している最も基本的な機能で、
-  // ダイアログの「OK」を明示的にタップしない限り絶対に実行されない (ダイアログ自体は
-  // ブラウザ本体が描画するネイティブUIのため、ページ側のタップ判定バグの影響を受けない)。
-  function handleHeaderTap(group: TableGroup) {
-    const target = group.items[0];
-    if (!target || busyIds.has(target.id)) return;
-    handleDone(target);
-  }
-
-  function handleBulkButtonClick(group: TableGroup) {
-    if (!window.confirm(t(`${ns}.bulkConfirm`))) return;
-    handleBulkDone(group);
-  }
-
-  async function handleBulkDone(group: TableGroup) {
-    const ids = group.items.map((it) => it.id);
-    setBusyIds((s) => {
-      const next = new Set(s);
-      for (const id of ids) next.add(id);
-      return next;
-    });
-    try {
-      await Promise.all(ids.map((id) => markKitchenTicketDone(id, me.display_name)));
-      load();
-    } catch (err) {
-      setError(err instanceof PosOrderKitchenApiError ? err.message : t(`${ns}.actionError`));
-    } finally {
-      setBusyIds((s) => {
-        const next = new Set(s);
-        for (const id of ids) next.delete(id);
-        return next;
-      });
-    }
-  }
-
+  // 2026-09-05 最終判断: 一括完了機能そのものを廃止し、個別品目の「調理完了」ボタン
+  // (=このコンポーネントで一度も誤動作の報告がない、普通の onClick) だけに一本化した。
+  // Tomからの要望「個数が2個以上ある時に1個づつ完了できるいい表示のしかたないかな」に
+  // 応えるため、代わりに (1) カード見出しに「残り{n}点」バッジを表示して現在地が分かる
+  // ようにし、(2) 各品目の行全体をタップ領域にして (ボタン部分だけでなく) 押しやすくした。
   async function handleUndo(item: KitchenTicketItem) {
     setBusyIds((s) => new Set(s).add(item.id));
     try {
@@ -475,54 +430,52 @@ export function TicketMonitorScreen({ kind, ns, fontSizeStorageKey }: { kind: 'f
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {tableGroups.map((group) => {
                   const minutes = elapsedMinutes(group.oldestSentAt);
-                  const canBulkComplete = group.items.length >= 2;
                   return (
                     <div key={group.key} className={`flex flex-col gap-2.5 rounded-xl border-2 p-4 ${urgencyClass(minutes)}`}>
-                      <div
-                        className="cursor-pointer select-none"
-                        onClick={() => handleHeaderTap(group)}
-                        title={t(`${ns}.holdAllHint`)}
-                      >
+                      <div>
                         <div className="flex items-center justify-between">
                           <div className={`font-bold ${cls.table}`}>{group.tableCode ?? t(`${ns}.noTable`)}</div>
                           <div className={`rounded-full px-2 py-0.5 font-semibold ${cls.badge} ${urgencyBadgeClass(minutes)}`}>
                             {minutes === 0 ? t(`${ns}.justNow`) : t(`${ns}.elapsedMinutes`, { minutes: String(minutes) })}
                           </div>
                         </div>
-                        <div className="mt-1 text-[10px] text-muted-foreground">{t(`${ns}.holdAllHint`)}</div>
+                        {group.items.length >= 2 && (
+                          <div className="mt-1.5 inline-flex w-fit items-center rounded-full bg-secondary px-2 py-0.5 text-[10.5px] font-semibold text-muted-foreground">
+                            {t(`${ns}.itemsRemaining`, { count: String(group.items.length) })}
+                          </div>
+                        )}
                       </div>
-                      {canBulkComplete && (
-                        <button
-                          type="button"
-                          onClick={() => handleBulkButtonClick(group)}
-                          className="h-9 shrink-0 rounded-lg border border-border bg-card text-[12.5px] font-bold text-foreground"
-                        >
-                          {t(`${ns}.bulkAllButton`)}
-                        </button>
-                      )}
+                      {/* 品目の行全体を1つの大きなタップ領域にする (2026-09-05 変更。Tomからの
+                          要望「個数が2個以上ある時に1個づつ完了できるいい表示のしかたないかな」
+                          への対応)。従来は右端の小さいボタンだけがタップ対象だったが、行全体を
+                          押せるようにして押し間違い・押しにくさを減らした。番号バッジで
+                          「あと何点残っているか」も一目でわかるようにした。 */}
                       <div className="flex flex-col gap-2">
-                        {group.items.map((item) => {
+                        {group.items.map((item, index) => {
                           const optionsLabel = item.selected_options.map((o) => menuText(o.choiceLabel, o.translations)).join(' / ');
                           return (
-                            <div
+                            <button
                               key={item.id}
-                              className="flex items-center justify-between gap-2.5 border-t border-border/60 pt-2 first:border-t-0 first:pt-0"
+                              type="button"
+                              onClick={() => handleDone(item)}
+                              disabled={busyIds.has(item.id)}
+                              className="flex w-full items-center gap-3 rounded-lg border border-border/60 bg-background/40 px-3 py-2.5 text-left disabled:opacity-50"
                             >
-                              <div className="min-w-0 flex-1">
-                                <div className={`font-semibold leading-snug ${cls.name}`}>
+                              {group.items.length >= 2 && (
+                                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-secondary text-[12px] font-bold text-muted-foreground">
+                                  {index + 1}
+                                </span>
+                              )}
+                              <span className="min-w-0 flex-1">
+                                <span className={`block font-semibold leading-snug ${cls.name}`}>
                                   {menuText(item.menu_name, item.menu_translations)} × {item.qty}
-                                </div>
-                                {optionsLabel && <div className={`text-muted-foreground ${cls.options}`}>{optionsLabel}</div>}
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => handleDone(item)}
-                                disabled={busyIds.has(item.id)}
-                                className="h-10 shrink-0 rounded-lg bg-primary px-3 text-[13px] font-bold text-primary-foreground disabled:opacity-50"
-                              >
+                                </span>
+                                {optionsLabel && <span className={`block text-muted-foreground ${cls.options}`}>{optionsLabel}</span>}
+                              </span>
+                              <span className="shrink-0 rounded-lg bg-primary px-3 py-2 text-[13px] font-bold text-primary-foreground">
                                 {t(`${ns}.doneButton`)}
-                              </button>
-                            </div>
+                              </span>
+                            </button>
                           );
                         })}
                       </div>
