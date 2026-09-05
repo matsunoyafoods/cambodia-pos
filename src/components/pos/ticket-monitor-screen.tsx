@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useStaff } from './staff-context';
 import {
   getKitchenTickets,
-  markKitchenTicketDone,
+  completeOneKitchenTicketUnit,
   undoKitchenTicketDone,
   PosOrderKitchenApiError,
   type KitchenTicketItem,
@@ -280,10 +280,13 @@ export function TicketMonitorScreen({ kind, ns, fontSizeStorageKey }: { kind: 'f
     return () => clearInterval(id);
   }, []);
 
-  async function handleDone(item: KitchenTicketItem) {
+  // 品目1件をタップするたびに、数量のうち1個だけを完了にする (2026-09-05 変更。Tomからの
+  // 要望「Chicken Broccoli × 3 の3個のところを1個づつでも完了できて数量が減っていくように
+  // したい」への対応)。数量が1の品目は1回のタップでそのまま完了になる (今までと同じ)。
+  async function handleCompleteOne(item: KitchenTicketItem) {
     setBusyIds((s) => new Set(s).add(item.id));
     try {
-      await markKitchenTicketDone(item.id, me.display_name);
+      await completeOneKitchenTicketUnit(item.id, me.display_name);
       load();
     } catch (err) {
       setError(err instanceof PosOrderKitchenApiError ? err.message : t(`${ns}.actionError`));
@@ -453,11 +456,16 @@ export function TicketMonitorScreen({ kind, ns, fontSizeStorageKey }: { kind: 'f
                       <div className="flex flex-col gap-2">
                         {group.items.map((item, index) => {
                           const optionsLabel = item.selected_options.map((o) => menuText(o.choiceLabel, o.translations)).join(' / ');
+                          // 数量のうちまだ完了していない残数 (2026-09-05 追加。Tomからの要望
+                          // 「Chicken Broccoli × 3 の3個のところを1個づつでも完了できて数量が
+                          // 減っていくようにしたい」への対応)。タップするたびにこの数字が
+                          // 1ずつ減り、0になったらこの品目自体がリストから消える。
+                          const remainingQty = Math.max(item.qty - item.kitchen_done_qty, 1);
                           return (
                             <button
                               key={item.id}
                               type="button"
-                              onClick={() => handleDone(item)}
+                              onClick={() => handleCompleteOne(item)}
                               disabled={busyIds.has(item.id)}
                               className="flex w-full items-center gap-3 rounded-lg border border-border/60 bg-background/40 px-3 py-2.5 text-left disabled:opacity-50"
                             >
@@ -468,7 +476,7 @@ export function TicketMonitorScreen({ kind, ns, fontSizeStorageKey }: { kind: 'f
                               )}
                               <span className="min-w-0 flex-1">
                                 <span className={`block font-semibold leading-snug ${cls.name}`}>
-                                  {menuText(item.menu_name, item.menu_translations)} × {item.qty}
+                                  {menuText(item.menu_name, item.menu_translations)} × {remainingQty}
                                 </span>
                                 {optionsLabel && <span className={`block text-muted-foreground ${cls.options}`}>{optionsLabel}</span>}
                               </span>

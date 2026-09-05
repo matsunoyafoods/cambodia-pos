@@ -12,7 +12,7 @@ import type { SelectedOption, TranslationMap } from '@/lib/pos-types';
 // このサーバーから見えず、withPosStaff を使うとキッチンモニター画面自体が読めなくなる)。
 
 const orderItemSelect =
-  'id, order_id, menu_id, menu_name, qty, selected_options, sent_to_kitchen_at, kitchen_done_at, kitchen_done_by_name';
+  'id, order_id, menu_id, menu_name, qty, selected_options, sent_to_kitchen_at, kitchen_done_at, kitchen_done_by_name, kitchen_done_qty';
 
 // フード/ドリンク区分 (2026-09-04 追加。ドリンカーモニター対応)。品目の menu_id →
 // menu_items.category_id → menu_categories.kind で判定する。中カテゴリー自身に

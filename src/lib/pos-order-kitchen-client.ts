@@ -50,6 +50,9 @@ export type KitchenTicketItem = {
   sent_to_kitchen_at: string;
   kitchen_done_at: string | null;
   kitchen_done_by_name: string | null;
+  /** 完了済み数量 (2026-09-05 追加)。qty 未満ならまだ一部残っている状態。qty に達すると
+   * kitchen_done_at がセットされ、その品目は全数完了扱いになる。 */
+  kitchen_done_qty: number;
   /** フード/ドリンク区分 (2026-09-04 追加)。キッチンモニター/ドリンカーモニターの出し分けに使う。 */
   kind: 'food' | 'drink';
   /** 商品名の現在の翻訳 (menu_items.translations, 2026-09-04 追加)。menu_name はスナップショット
@@ -63,6 +66,12 @@ export function getKitchenTickets(): Promise<{ pending: KitchenTicketItem[]; rec
 
 export function markKitchenTicketDone(itemId: string, staffName?: string): Promise<{ item: KitchenTicketItem }> {
   return request(`/api/pos-order/kitchen-tickets/${itemId}`, { method: 'PATCH', body: JSON.stringify({ done: true, staffName }) });
+}
+
+/** 数量のうち1個だけ完了にする (2026-09-05 追加。キッチン/ドリンカーモニター専用)。
+ * qty に達すると自動的に全数完了 (kitchen_done_at セット) になる。 */
+export function completeOneKitchenTicketUnit(itemId: string, staffName?: string): Promise<{ item: KitchenTicketItem }> {
+  return request(`/api/pos-order/kitchen-tickets/${itemId}`, { method: 'PATCH', body: JSON.stringify({ action: 'completeOne', staffName }) });
 }
 
 export function undoKitchenTicketDone(itemId: string): Promise<{ item: KitchenTicketItem }> {
