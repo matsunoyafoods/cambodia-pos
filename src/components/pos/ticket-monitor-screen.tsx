@@ -6,6 +6,7 @@ import { useStaff } from './staff-context';
 import {
   getKitchenTickets,
   completeOneKitchenTicketUnit,
+  markKitchenTicketDone,
   undoKitchenTicketDone,
   PosOrderKitchenApiError,
   type KitchenTicketItem,
@@ -193,6 +194,9 @@ export function TicketMonitorScreen({ kind, ns, fontSizeStorageKey }: { kind: 'f
   const [allRecentlyDone, setAllRecentlyDone] = useState<KitchenTicketItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
+  // 数量が2以上残っている品目を「まとめて完了」する際の確認モーダル対象 (2026-09-05 追加。
+  // 詳細は handleCompleteAll の直前のコメント参照)。
+  const [bulkConfirmItem, setBulkConfirmItem] = useState<KitchenTicketItem | null>(null);
   const [, setTick] = useState(0);
   const [fontSize, setFontSize] = useState<FontSize>('md');
   const soundStorageKey = `posMonitorSound:${ns}`;
@@ -299,16 +303,35 @@ export function TicketMonitorScreen({ kind, ns, fontSizeStorageKey }: { kind: 'f
     }
   }
 
-  // 一括完了 (2026-09-04 追加) は、長押しジェスチャー→経過時間判定→2回タップ確認→
-  // window.confirm、と4通りの実装を試したが、Tomのタブレットのブラウザ/WebViewでは
-  // タップの回数・押している時間・指を離すイベントのいずれも信頼できず、そのたびに
-  // 「軽くタップしただけで一括完了になる」という同じ症状が再発した。
+  // 一括完了は、長押しジェスチャー→経過時間判定→同じボタンの2回タップ確認→window.confirm、
+  // と4通りの実装を試したが、Tomのタブレットのブラウザ/WebViewでは「タップの回数」「押して
+  // いる時間」「指を離すイベント」「ブラウザ標準の確認ダイアログ」のいずれも信頼できず、
+  // そのたびに「軽くタップしただけで一括完了になる」という同じ症状が再発した
+  // (window.confirm すら効かなかったことから、この端末のブラウザ/WebViewはJSダイアログを
+  // 正しく表示せずtrueを返している可能性が高いと考えている)。
   //
-  // 2026-09-05 最終判断: 一括完了機能そのものを廃止し、個別品目の「調理完了」ボタン
-  // (=このコンポーネントで一度も誤動作の報告がない、普通の onClick) だけに一本化した。
-  // Tomからの要望「個数が2個以上ある時に1個づつ完了できるいい表示のしかたないかな」に
-  // 応えるため、代わりに (1) カード見出しに「残り{n}点」バッジを表示して現在地が分かる
-  // ようにし、(2) 各品目の行全体をタップ領域にして (ボタン部分だけでなく) 押しやすくした。
+  // 2026-09-05 再設計: 時間・回数・ダイアログのいずれにも頼らない方式にした。「まとめて完了」
+  // は専用の小さいリンクにし (誤タップ防止のため主要なタップ領域とは別の場所に配置)、タップ
+  // すると画面中央にモーダルで確認を出す。確認ボタンは画面中央という全く別の座標に表示される
+  // ため、直前のタップと同じ座標に発生しうる二重発火 (ゴーストクリック等) では絶対に踏めない。
+  // 決定は「はい/いいえ」という別々の要素への1回ずつの明確なタップでのみ行われる。
+  async function handleCompleteAll(item: KitchenTicketItem) {
+    setBusyIds((s) => new Set(s).add(item.id));
+    try {
+      await markKitchenTicketDone(item.id, me.display_name);
+      load();
+    } catch (err) {
+      setError(err instanceof PosOrderKitchenApiError ? err.message : t(`${ns}.actionError`));
+    } finally {
+      setBusyIds((s) => {
+        const next = new Set(s);
+        next.delete(item.id);
+        return next;
+      });
+      setBulkConfirmItem(null);
+    }
+  }
+
   async function handleUndo(item: KitchenTicketItem) {
     setBusyIds((s) => new Set(s).add(item.id));
     try {
@@ -462,28 +485,42 @@ export function TicketMonitorScreen({ kind, ns, fontSizeStorageKey }: { kind: 'f
                           // 1ずつ減り、0になったらこの品目自体がリストから消える。
                           const remainingQty = Math.max(item.qty - item.kitchen_done_qty, 1);
                           return (
-                            <button
-                              key={item.id}
-                              type="button"
-                              onClick={() => handleCompleteOne(item)}
-                              disabled={busyIds.has(item.id)}
-                              className="flex w-full items-center gap-3 rounded-lg border border-border/60 bg-background/40 px-3 py-2.5 text-left disabled:opacity-50"
-                            >
-                              {group.items.length >= 2 && (
-                                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-secondary text-[12px] font-bold text-muted-foreground">
-                                  {index + 1}
+                            <div key={item.id} className="flex flex-col gap-1">
+                              <button
+                                type="button"
+                                onClick={() => handleCompleteOne(item)}
+                                disabled={busyIds.has(item.id)}
+                                className="flex w-full items-center gap-3 rounded-lg border border-border/60 bg-background/40 px-3 py-2.5 text-left disabled:opacity-50"
+                              >
+                                {group.items.length >= 2 && (
+                                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-secondary text-[12px] font-bold text-muted-foreground">
+                                    {index + 1}
+                                  </span>
+                                )}
+                                <span className="min-w-0 flex-1">
+                                  <span className={`block font-semibold leading-snug ${cls.name}`}>
+                                    {menuText(item.menu_name, item.menu_translations)} × {remainingQty}
+                                  </span>
+                                  {optionsLabel && <span className={`block text-muted-foreground ${cls.options}`}>{optionsLabel}</span>}
                                 </span>
+                                <span className="shrink-0 rounded-lg bg-primary px-3 py-2 text-[13px] font-bold text-primary-foreground">
+                                  {t(`${ns}.doneButton`)}
+                                </span>
+                              </button>
+                              {/* 「まとめて完了」は主要なタップ領域 (上のボタン) とは別の場所に置く
+                                  (2026-09-05 追加。詳細は handleCompleteAll の直前のコメント参照)。
+                                  数量が2以上残っているときだけ表示する。 */}
+                              {remainingQty >= 2 && (
+                                <button
+                                  type="button"
+                                  onClick={() => setBulkConfirmItem(item)}
+                                  disabled={busyIds.has(item.id)}
+                                  className="self-end px-2 py-1 text-[11px] font-semibold text-muted-foreground underline decoration-dotted underline-offset-2 disabled:opacity-50"
+                                >
+                                  {t(`${ns}.completeAllLink`)}
+                                </button>
                               )}
-                              <span className="min-w-0 flex-1">
-                                <span className={`block font-semibold leading-snug ${cls.name}`}>
-                                  {menuText(item.menu_name, item.menu_translations)} × {remainingQty}
-                                </span>
-                                {optionsLabel && <span className={`block text-muted-foreground ${cls.options}`}>{optionsLabel}</span>}
-                              </span>
-                              <span className="shrink-0 rounded-lg bg-primary px-3 py-2 text-[13px] font-bold text-primary-foreground">
-                                {t(`${ns}.doneButton`)}
-                              </span>
-                            </button>
+                            </div>
                           );
                         })}
                       </div>
@@ -522,6 +559,40 @@ export function TicketMonitorScreen({ kind, ns, fontSizeStorageKey }: { kind: 'f
           </div>
         </div>
       </div>
+      {/* 「まとめて完了」の確認モーダル (2026-09-05 追加)。画面中央という、直前にタップした
+          品目の行とは全く別の座標に「全部完了にする」ボタンを表示することで、タップ回数や
+          タイミングに依存する不具合の再発を避けている。詳細は handleCompleteAll 直前の
+          コメント参照。 */}
+      {bulkConfirmItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-5">
+          <div className="w-full max-w-sm rounded-2xl bg-card p-5 shadow-xl">
+            <div className="text-[15px] font-bold">{t(`${ns}.completeAllConfirmTitle`)}</div>
+            <div className="mt-2 text-[13px] text-muted-foreground">
+              {t(`${ns}.completeAllConfirmBody`, {
+                name: menuText(bulkConfirmItem.menu_name, bulkConfirmItem.menu_translations),
+                count: String(Math.max(bulkConfirmItem.qty - bulkConfirmItem.kitchen_done_qty, 1)),
+              })}
+            </div>
+            <div className="mt-5 flex gap-2.5">
+              <button
+                type="button"
+                onClick={() => setBulkConfirmItem(null)}
+                className="h-11 flex-1 rounded-lg border border-border text-[13.5px] font-semibold text-foreground"
+              >
+                {t('common.cancel')}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleCompleteAll(bulkConfirmItem)}
+                disabled={busyIds.has(bulkConfirmItem.id)}
+                className="h-11 flex-1 rounded-lg bg-primary text-[13.5px] font-bold text-primary-foreground disabled:opacity-50"
+              >
+                {t(`${ns}.completeAllConfirmButton`)}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
