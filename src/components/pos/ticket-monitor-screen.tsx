@@ -296,61 +296,57 @@ export function TicketMonitorScreen({ kind, ns, fontSizeStorageKey }: { kind: 'f
     }
   }
 
-  // テーブルカードを2秒長押しすると、そのテーブルの品目を全て一括で完了にする
-  // (2026-09-04 追加。Tomからの要望「注文商品が5個の場合、5回注文完了を押さないと完了に
-  // なりません。なのでこの機能を残しつつ2秒長押ししたら5個全て提供完了になるように」への
-  // 対応)。品目ごとの個別ボタンはそのまま残し、カード見出し部分の長押しで一括完了できる
-  // ようにする。一括APIは無いため Promise.all で個別APIを並行実行する。
+  // テーブルカードの見出し部分をタップすると、そのテーブルの中で一番古い未完了品目を
+  // 1件だけ完了にする (2026-09-05 追加。Tomからの要望「軽くタップで一個減るようにして
+  // ほしいです」への対応)。
   //
-  // 2026-09-05 修正 (その1、不十分だった): 最初は setTimeout で「押してから2秒後に自動で
-  // 一括完了する」実装にし、指を離した時のイベント (pointerup 等) でその setTimeout を
-  // キャンセルする方式にしていた。しかしTomのタブレットではタップ後「1個だけ消えてほしい
-  // のに全部消える」という報告が続いた。原因は、そのタブレットのブラウザが Pointer Events
-  // (pointerup/pointercancel等) を確実に発火させないことがあり、window 全体で保険をかけても
-  // なお取りこぼすケースがあったこと。setTimeout 方式は「指を離したことを検知できないと
-  // 誤って一括完了が実行されてしまう」という構造そのものが危険だった。
+  // 一括完了 (2026-09-04 追加。Tomからの要望「注文商品が5個の場合、5回注文完了を押さないと
+  // 完了になりません。なのでこの機能を残しつつ2秒長押ししたら5個全て提供完了になるように」
+  // への対応) は、当初「2秒間押し続ける」という長押しジェスチャーで実装していたが、Tomの
+  // タブレットのブラウザでは指を押した/離したイベント (pointerdown/pointerup 等) や、
+  // 押してから click までの経過時間が信頼できず、setTimeout 方式・経過時間判定方式のどちらも
+  // 「軽くタップしただけで一括完了になってしまう」という同じ症状が繰り返し発生した。
   //
-  // 2026-09-05 修正 (その2、現在の実装): 発火が不安定な「離した」イベントに一切頼らない
-  // 方式に変更した。押した瞬間の時刻を記録しておくだけにして、実際に「タップされた」ことが
-  // 確実にわかる click イベント (これはほぼ全てのブラウザ/WebViewで、ボタン等のタップ操作に
-  // 対して確実に発火する最も基本的なイベント) が発生した時に、押してから click までの
-  // 経過時間を計算し、2秒以上なら一括完了、それ未満 (=軽いタップ) なら一番古い未完了品目を
-  // 1件だけ完了にする。指を離すイベント自体は「進捗バーの表示を止める」という見た目の
-  // 演出にしか使っておらず、たとえ全く発火しなくても誤動作にはつながらない
-  // (万一 pointerdown 自体も拾えない環境では、経過時間が計測できず常に「軽いタップ」
-  // 扱いになるだけで、安全側に倒れる)。
-  const HOLD_DURATION_MS = 2000;
-  const [holdingGroupKey, setHoldingGroupKey] = useState<string | null>(null);
-  const pressStartRef = useRef<number | null>(null);
+  // 2026-09-05 修正 (最終): 押す・離す・経過時間など「タッチの物理的な特性」に一切依存しない
+  // 方式に変更した。一括完了は専用の別ボタン (「全部完了」) にし、誤タップ防止のため
+  // 2回連続でタップしないと実行されない (1回目のタップで「もう一度押すと全部完了」に変わり、
+  // 3秒以内に2回目をタップすると実行、3秒経つと通常表示に戻る) 確認方式にした。ボタンの
+  // タップ判定は個別品目の「調理完了」ボタンと全く同じ onClick を使っているだけなので、
+  // 実機での動作の信頼性は個別ボタンと同等になる。
+  const BULK_CONFIRM_TIMEOUT_MS = 3000;
+  const [confirmBulkKey, setConfirmBulkKey] = useState<string | null>(null);
+  const confirmBulkTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  function beginPress(group: TableGroup) {
-    if (group.items.length < 2) return; // 1品だけなら常に個別ボタン相当の動作で足りる
-    pressStartRef.current = Date.now();
-    setHoldingGroupKey(group.key);
-  }
-
-  // 指を離した (らしき) タイミングで進捗バーの表示だけを止める。実際に一括完了/単品完了の
-  // どちらを行うかはここでは判定しない (onClick 側でまとめて判定する)。
-  function endPressVisual() {
-    setHoldingGroupKey(null);
-  }
-
-  // カードをタップ (クリック) した瞬間に、押し始めてからの経過時間で単品完了/一括完了を
-  // 振り分ける。押し始めの記録が無い (= pointerdown 系が拾えなかった) 場合は安全側に倒して
-  // 単品完了にする。
-  function handleHeaderClick(group: TableGroup) {
-    const start = pressStartRef.current;
-    pressStartRef.current = null;
-    setHoldingGroupKey(null);
-    const heldMs = start === null ? 0 : Date.now() - start;
-    if (group.items.length >= 2 && heldMs >= HOLD_DURATION_MS) {
-      handleBulkDone(group);
-      return;
+  function clearBulkConfirmTimer() {
+    if (confirmBulkTimerRef.current) {
+      clearTimeout(confirmBulkTimerRef.current);
+      confirmBulkTimerRef.current = null;
     }
+  }
+
+  // カード見出しタップ = 一番古い未完了品目を1件だけ完了にする。
+  function handleHeaderTap(group: TableGroup) {
     const target = group.items[0];
     if (!target || busyIds.has(target.id)) return;
     handleDone(target);
   }
+
+  // 「全部完了」ボタンタップ = 1回目は確認表示に切り替えるだけ、2回目のタップで実行する。
+  function handleBulkButtonClick(group: TableGroup) {
+    if (confirmBulkKey === group.key) {
+      clearBulkConfirmTimer();
+      setConfirmBulkKey(null);
+      handleBulkDone(group);
+      return;
+    }
+    clearBulkConfirmTimer();
+    setConfirmBulkKey(group.key);
+    confirmBulkTimerRef.current = setTimeout(() => setConfirmBulkKey(null), BULK_CONFIRM_TIMEOUT_MS);
+  }
+
+  useEffect(() => {
+    return () => clearBulkConfirmTimer();
+  }, []);
 
   async function handleBulkDone(group: TableGroup) {
     const ids = group.items.map((it) => it.id);
@@ -498,18 +494,13 @@ export function TicketMonitorScreen({ kind, ns, fontSizeStorageKey }: { kind: 'f
                 {tableGroups.map((group) => {
                   const minutes = elapsedMinutes(group.oldestSentAt);
                   const canBulkComplete = group.items.length >= 2;
-                  const isHolding = holdingGroupKey === group.key;
+                  const isConfirmingBulk = confirmBulkKey === group.key;
                   return (
                     <div key={group.key} className={`flex flex-col gap-2.5 rounded-xl border-2 p-4 ${urgencyClass(minutes)}`}>
                       <div
-                        className={'select-none touch-none ' + (canBulkComplete ? 'cursor-pointer' : '')}
-                        onPointerDown={canBulkComplete ? () => beginPress(group) : undefined}
-                        onPointerUp={canBulkComplete ? endPressVisual : undefined}
-                        onPointerLeave={canBulkComplete ? endPressVisual : undefined}
-                        onPointerCancel={canBulkComplete ? endPressVisual : undefined}
-                        onContextMenu={canBulkComplete ? (e) => e.preventDefault() : undefined}
-                        onClick={() => handleHeaderClick(group)}
-                        title={canBulkComplete ? t(`${ns}.holdAllHint`) : undefined}
+                        className="cursor-pointer select-none"
+                        onClick={() => handleHeaderTap(group)}
+                        title={t(`${ns}.holdAllHint`)}
                       >
                         <div className="flex items-center justify-between">
                           <div className={`font-bold ${cls.table}`}>{group.tableCode ?? t(`${ns}.noTable`)}</div>
@@ -517,21 +508,22 @@ export function TicketMonitorScreen({ kind, ns, fontSizeStorageKey }: { kind: 'f
                             {minutes === 0 ? t(`${ns}.justNow`) : t(`${ns}.elapsedMinutes`, { minutes: String(minutes) })}
                           </div>
                         </div>
-                        {canBulkComplete && (
-                          <>
-                            <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-black/10">
-                              <div
-                                className="h-full rounded-full bg-primary"
-                                style={{
-                                  width: isHolding ? '100%' : '0%',
-                                  transition: isHolding ? `width ${HOLD_DURATION_MS}ms linear` : 'none',
-                                }}
-                              />
-                            </div>
-                            <div className="mt-1 text-[10px] text-muted-foreground">{t(`${ns}.holdAllHint`)}</div>
-                          </>
-                        )}
+                        <div className="mt-1 text-[10px] text-muted-foreground">{t(`${ns}.holdAllHint`)}</div>
                       </div>
+                      {canBulkComplete && (
+                        <button
+                          type="button"
+                          onClick={() => handleBulkButtonClick(group)}
+                          className={
+                            'h-9 shrink-0 rounded-lg border text-[12.5px] font-bold ' +
+                            (isConfirmingBulk
+                              ? 'border-destructive bg-destructive/10 text-destructive'
+                              : 'border-border bg-card text-foreground')
+                          }
+                        >
+                          {isConfirmingBulk ? t(`${ns}.bulkConfirm`) : t(`${ns}.bulkAllButton`)}
+                        </button>
+                      )}
                       <div className="flex flex-col gap-2">
                         {group.items.map((item) => {
                           const optionsLabel = item.selected_options.map((o) => menuText(o.choiceLabel, o.translations)).join(' / ');
