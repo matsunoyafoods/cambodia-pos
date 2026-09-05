@@ -301,6 +301,16 @@ export function TicketMonitorScreen({ kind, ns, fontSizeStorageKey }: { kind: 'f
   // なりません。なのでこの機能を残しつつ2秒長押ししたら5個全て提供完了になるように」への
   // 対応)。品目ごとの個別ボタンはそのまま残し、カード見出し部分の長押しで一括完了できる
   // ようにする。一括APIは無いため Promise.all で個別APIを並行実行する。
+  //
+  // 2026-09-05 修正: Tom「タップすると1個提供、2秒長押しで一括完了なんですがタップすると
+  // 一括完了してしまいます」。原因は、タブレットのブラウザによっては指を離した時の
+  // pointerup/pointerleave/pointercancel が (指がわずかに動く・ブラウザ側で長押しメニュー用の
+  // ジェスチャーを横取りする等の理由で) このカードの上で正しく発火しないことがあり、その場合
+  // cancelHold が一切呼ばれず、単なるタップのつもりでも2秒後の一括完了タイマーがそのまま
+  // 走りきってしまう、というもの。対策として (1) touch-none で長押し時のブラウザ標準ジェス
+  // チャー (スクロール・テキスト選択・コンテキストメニュー) を無効化し、(2) 保険として
+  // window 全体で pointerup/pointercancel を監視し、カード上で離したかどうかに関わらず
+  // 指を離した瞬間に必ずキャンセルされるようにした。
   const HOLD_DURATION_MS = 2000;
   const [holdingGroupKey, setHoldingGroupKey] = useState<string | null>(null);
   const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -321,6 +331,26 @@ export function TicketMonitorScreen({ kind, ns, fontSizeStorageKey }: { kind: 'f
       setHoldingGroupKey(null);
     }, HOLD_DURATION_MS);
   }
+
+  // 保険: カード要素自体が指のリリースを取りこぼした場合でも、画面のどこかで指/マウスが
+  // 離れたら必ず長押しをキャンセルする (上のコメント参照)。
+  useEffect(() => {
+    if (holdingGroupKey === null) return;
+    const handleRelease = () => cancelHold();
+    window.addEventListener('pointerup', handleRelease);
+    window.addEventListener('pointercancel', handleRelease);
+    window.addEventListener('touchend', handleRelease);
+    window.addEventListener('touchcancel', handleRelease);
+    window.addEventListener('mouseup', handleRelease);
+    return () => {
+      window.removeEventListener('pointerup', handleRelease);
+      window.removeEventListener('pointercancel', handleRelease);
+      window.removeEventListener('touchend', handleRelease);
+      window.removeEventListener('touchcancel', handleRelease);
+      window.removeEventListener('mouseup', handleRelease);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [holdingGroupKey]);
 
   async function handleBulkDone(group: TableGroup) {
     const ids = group.items.map((it) => it.id);
@@ -478,11 +508,12 @@ export function TicketMonitorScreen({ kind, ns, fontSizeStorageKey }: { kind: 'f
                   return (
                     <div key={group.key} className={`flex flex-col gap-2.5 rounded-xl border-2 p-4 ${urgencyClass(minutes)}`}>
                       <div
-                        className={'select-none ' + (canBulkComplete ? 'cursor-pointer' : '')}
+                        className={'select-none touch-none ' + (canBulkComplete ? 'cursor-pointer' : '')}
                         onPointerDown={canBulkComplete ? () => startHold(group) : undefined}
                         onPointerUp={canBulkComplete ? cancelHold : undefined}
                         onPointerLeave={canBulkComplete ? cancelHold : undefined}
                         onPointerCancel={canBulkComplete ? cancelHold : undefined}
+                        onContextMenu={canBulkComplete ? (e) => e.preventDefault() : undefined}
                         title={canBulkComplete ? t(`${ns}.holdAllHint`) : undefined}
                       >
                         <div className="flex items-center justify-between">
