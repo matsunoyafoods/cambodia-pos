@@ -10,8 +10,9 @@ function toVendor(row: { id: string; name: string; sort_order: number }): Expens
   return { id: row.id, name: row.name, sortOrder: row.sort_order };
 }
 
+// 2026-09-05: 上限を60→160に拡大 (POST 側と同じ理由。実データに60文字超の名前があるため)。
 const patchSchema = z.object({
-  name: z.string().trim().min(1).max(60).optional(),
+  name: z.string().trim().min(1).max(160).optional(),
   sortOrder: z.number().int().optional(),
 });
 

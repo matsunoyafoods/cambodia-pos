@@ -25,7 +25,10 @@ export const GET = withPosStaff('part_time', async () => {
   return NextResponse.json({ vendors: (data ?? []).map(toVendor) });
 });
 
-const postSchema = z.object({ name: z.string().trim().min(1).max(60) });
+// 2026-09-05: 上限を60→160に拡大。Tomの実データ (例:
+// 「MATSUZAKI TSUYOSHI AND MATSUZAKI YUKA AND ... (小口資金)」のような複数名併記) には
+// 60文字を超える仕入れ先名があり、まとめて登録した際に超過するものがあったため。
+const postSchema = z.object({ name: z.string().trim().min(1).max(160) });
 
 // 追加。manager 以上のみ。
 export const POST = withPosStaff('manager', async (_session, req) => {

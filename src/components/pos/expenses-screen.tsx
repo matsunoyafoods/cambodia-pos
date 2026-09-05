@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useStaff } from './staff-context';
 import {
@@ -308,6 +308,98 @@ function CashDepositForm({ onCreated }: { onCreated: () => void }) {
   );
 }
 
+// 費目/仕入れ先マスタが増えてきた (2026-09-05、松之屋フーズの実データで仕入れ先が約180件) ため、
+// 素の <select> だと目的の項目を探すのが大変になる。「仕入れ先の数が多いから探しやすいように
+// したい」への対応として、入力しながら候補を絞り込めるコンボボックスに置き換える。
+// マスタに無い名前をそのまま自由入力できる (＝ 従来の「その他 (自由入力)」の役割も兼ねる) ため、
+// 別途 "__other__" 選択肢や自由入力欄は不要になった。
+//
+// タブレットでのタップ挙動の不具合 (このファイル内、厨房モニターの長押し問題を参照) を踏まえ、
+// 候補選択は素の onClick のみを使い、閉じる判定も blur のタイミングに依存せず
+// document 全体の mousedown を見て「外側をタップしたら閉じる」方式にする。
+function ComboBoxField({
+  label,
+  value,
+  onChange,
+  options,
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: { id: string; name: string }[];
+  placeholder: string;
+}) {
+  const { t } = useLanguage();
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleOutside(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleOutside);
+    return () => document.removeEventListener('mousedown', handleOutside);
+  }, [open]);
+
+  const query = value.trim().toLowerCase();
+  const filtered = query ? options.filter((o) => o.name.toLowerCase().includes(query)) : options;
+
+  return (
+    <div ref={containerRef} className="relative">
+      <label className="flex flex-col gap-1 text-[11.5px] text-muted-foreground">
+        {label}
+        <div className="relative">
+          <input
+            value={value}
+            onChange={(e) => {
+              onChange(e.target.value);
+              setOpen(true);
+            }}
+            onFocus={() => setOpen(true)}
+            placeholder={placeholder}
+            className="h-10 w-48 rounded-lg border border-border px-2.5 pr-7 text-[13px] text-foreground"
+          />
+          {value && (
+            <button
+              type="button"
+              onClick={() => onChange('')}
+              aria-label={t('expenses.clearButtonLabel')}
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[15px] leading-none text-muted-foreground"
+            >
+              ×
+            </button>
+          )}
+        </div>
+      </label>
+      {open && (
+        <div className="absolute left-0 top-full z-20 mt-1 max-h-60 w-56 overflow-y-auto rounded-lg border border-border bg-card shadow-lg">
+          {filtered.length === 0 ? (
+            <div className="px-3 py-2 text-[12px] text-muted-foreground">{t('expenses.noMatches')}</div>
+          ) : (
+            filtered.map((o) => (
+              <button
+                key={o.id}
+                type="button"
+                onClick={() => {
+                  onChange(o.name);
+                  setOpen(false);
+                }}
+                className="block w-full truncate px-3 py-2 text-left text-[12.5px] text-foreground hover:bg-secondary/60"
+              >
+                {o.name}
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function QuickEntryForm({
   vendors,
   categories,
@@ -321,9 +413,7 @@ function QuickEntryForm({
   const [date, setDate] = useState(todayIso());
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState('');
-  const [categoryOther, setCategoryOther] = useState('');
   const [vendor, setVendor] = useState('');
-  const [vendorOther, setVendorOther] = useState('');
   const [note, setNote] = useState('');
   const [paymentStatus, setPaymentStatus] = useState<ExpensePaymentStatus>('paid');
   // 支払い元 (2026-09-02 追加)。レジの現金から払った経費は現金残高から自動で引かれるため、
@@ -336,8 +426,8 @@ function QuickEntryForm({
   const [photoWarning, setPhotoWarning] = useState<string | null>(null);
   const [done, setDone] = useState(false);
 
-  const resolvedCategory = category === '__other__' ? categoryOther.trim() : category;
-  const resolvedVendor = vendor === '__other__' ? vendorOther.trim() : vendor;
+  const resolvedCategory = category.trim();
+  const resolvedVendor = vendor.trim();
   const amountNum = Number(amount);
   const canSubmit = date && amountNum > 0 && resolvedCategory.length > 0 && !submitting;
 
@@ -416,43 +506,20 @@ function QuickEntryForm({
         </div>
 
         <div className="flex flex-wrap gap-2.5">
-          <label className="flex flex-col gap-1 text-[11.5px] text-muted-foreground">
-            {t('expenses.categoryLabel')}
-            <select value={category} onChange={(e) => setCategory(e.target.value)} className="h-10 w-48 rounded-lg border border-border px-2.5 text-[13px]">
-              <option value="">{t('expenses.selectPlaceholder')}</option>
-              {categories.map((c) => (
-                <option key={c.id} value={c.name}>
-                  {c.name}
-                </option>
-              ))}
-              <option value="__other__">{t('expenses.otherFreeInput')}</option>
-            </select>
-          </label>
-          {category === '__other__' && (
-            <label className="flex flex-col gap-1 text-[11.5px] text-muted-foreground">
-              {t('expenses.categoryNameLabel')}
-              <input value={categoryOther} onChange={(e) => setCategoryOther(e.target.value)} className="h-10 w-40 rounded-lg border border-border px-2.5 text-[13px]" />
-            </label>
-          )}
-
-          <label className="flex flex-col gap-1 text-[11.5px] text-muted-foreground">
-            {t('expenses.vendorLabel')}
-            <select value={vendor} onChange={(e) => setVendor(e.target.value)} className="h-10 w-48 rounded-lg border border-border px-2.5 text-[13px]">
-              <option value="">{t('expenses.noSelection')}</option>
-              {vendors.map((v) => (
-                <option key={v.id} value={v.name}>
-                  {v.name}
-                </option>
-              ))}
-              <option value="__other__">{t('expenses.otherFreeInput')}</option>
-            </select>
-          </label>
-          {vendor === '__other__' && (
-            <label className="flex flex-col gap-1 text-[11.5px] text-muted-foreground">
-              {t('expenses.vendorNameLabel')}
-              <input value={vendorOther} onChange={(e) => setVendorOther(e.target.value)} className="h-10 w-40 rounded-lg border border-border px-2.5 text-[13px]" />
-            </label>
-          )}
+          <ComboBoxField
+            label={t('expenses.categoryLabel')}
+            value={category}
+            onChange={setCategory}
+            options={categories}
+            placeholder={t('expenses.comboBoxPlaceholder')}
+          />
+          <ComboBoxField
+            label={t('expenses.vendorLabel')}
+            value={vendor}
+            onChange={setVendor}
+            options={vendors}
+            placeholder={t('expenses.comboBoxPlaceholder')}
+          />
         </div>
 
         <input value={note} onChange={(e) => setNote(e.target.value)} placeholder={t('common.notePlaceholder')} className="h-10 rounded-lg border border-border px-2.5 text-[13px]" />
@@ -854,8 +921,16 @@ function MasterListCard({
 }) {
   const { t } = useLanguage();
   const [newName, setNewName] = useState('');
+  const [search, setSearch] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // 仕入れ先マスタが約180件になった (2026-09-05) ため、探しやすいよう検索を追加。
+  // 件数が少ない (費目マスタ等) 場合は検索欄が邪魔にならないよう、一定件数を超えた時だけ表示する。
+  const filteredItems = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return q ? items.filter((item) => item.name.toLowerCase().includes(q)) : items;
+  }, [items, search]);
 
   async function add() {
     const name = newName.trim();
@@ -888,18 +963,31 @@ function MasterListCard({
 
   return (
     <div className="rounded-xl border border-border bg-card p-4">
-      <div className="mb-2.5 text-[13px] font-semibold">{title}</div>
+      <div className="mb-2.5 flex items-center justify-between gap-2">
+        <div className="text-[13px] font-semibold">{title}</div>
+        <div className="text-[11px] text-muted-foreground">{t('expenses.masterCountLabel', { count: String(items.length) })}</div>
+      </div>
+      {items.length > 8 && (
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder={t('expenses.masterSearchPlaceholder')}
+          className="mb-2 h-9 w-full rounded-lg border border-border px-2.5 text-[12.5px]"
+        />
+      )}
       {error && <div className="mb-2 text-[11.5px] text-destructive">{error}</div>}
-      <div className="mb-2.5 flex flex-col gap-1.5">
-        {items.map((item) => (
+      <div className="mb-2.5 flex max-h-72 flex-col gap-1.5 overflow-y-auto">
+        {filteredItems.map((item) => (
           <div key={item.id} className="flex items-center justify-between rounded-lg border border-border px-3 py-1.5 text-[12.5px]">
             {item.name}
-            <button disabled={busy} onClick={() => remove(item.id)} className="text-[11px] font-semibold text-destructive disabled:opacity-50">
+            <button disabled={busy} onClick={() => remove(item.id)} className="ml-2 shrink-0 text-[11px] font-semibold text-destructive disabled:opacity-50">
               {t('common.delete')}
             </button>
           </div>
         ))}
-        {items.length === 0 && <div className="text-[11.5px] text-muted-foreground">{t('expenses.masterEmpty')}</div>}
+        {filteredItems.length === 0 && (
+          <div className="text-[11.5px] text-muted-foreground">{search ? t('expenses.masterNoMatches') : t('expenses.masterEmpty')}</div>
+        )}
       </div>
       <div className="flex gap-2">
         <input

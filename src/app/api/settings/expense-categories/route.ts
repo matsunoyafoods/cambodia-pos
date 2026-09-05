@@ -25,7 +25,9 @@ export const GET = withPosStaff('part_time', async () => {
   return NextResponse.json({ categories: (data ?? []).map(toCategory) });
 });
 
-const postSchema = z.object({ name: z.string().trim().min(1).max(60) });
+// 2026-09-05: 上限を60→160に拡大。Tomの実データ (例: 相殺勘定の複数名併記など) には
+// 60文字を超える名前があり、まとめて登録した際に超過するものがあったため。
+const postSchema = z.object({ name: z.string().trim().min(1).max(160) });
 
 // 追加。manager 以上のみ。
 export const POST = withPosStaff('manager', async (_session, req) => {
