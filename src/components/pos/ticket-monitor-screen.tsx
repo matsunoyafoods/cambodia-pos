@@ -311,9 +311,17 @@ export function TicketMonitorScreen({ kind, ns, fontSizeStorageKey }: { kind: 'f
   // チャー (スクロール・テキスト選択・コンテキストメニュー) を無効化し、(2) 保険として
   // window 全体で pointerup/pointercancel を監視し、カード上で離したかどうかに関わらず
   // 指を離した瞬間に必ずキャンセルされるようにした。
+  //
+  // 2026-09-05 追加: Tom「軽くタップで一個減るようにしてほしいです。現在は一括完了しか
+  // できないです。両方できるようにしてください。」への対応。カード見出しを軽くタップした
+  // 場合は (一括完了のタイマーが発火する前に指が離れた場合は) 一番古い未完了品目を1件だけ
+  // 完了にし、2秒間押し続けた場合のみ従来通り全品目を一括完了する。2秒間押し続けてから指を
+  // 離すとブラウザはそのまま click イベントも発火させるため、一括完了が実際に発火した直後の
+  // click では単品完了を実行しないよう bulkFiredRef で判定する。
   const HOLD_DURATION_MS = 2000;
   const [holdingGroupKey, setHoldingGroupKey] = useState<string | null>(null);
   const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const bulkFiredRef = useRef(false);
 
   function cancelHold() {
     if (holdTimerRef.current) {
@@ -325,11 +333,26 @@ export function TicketMonitorScreen({ kind, ns, fontSizeStorageKey }: { kind: 'f
 
   function startHold(group: TableGroup) {
     if (group.items.length < 2) return; // 1品だけなら個別ボタンで十分
+    bulkFiredRef.current = false;
     setHoldingGroupKey(group.key);
     holdTimerRef.current = setTimeout(() => {
+      bulkFiredRef.current = true;
       handleBulkDone(group);
       setHoldingGroupKey(null);
     }, HOLD_DURATION_MS);
+  }
+
+  // カード見出しの軽いタップ (= 長押しに至らなかった press) で、そのテーブルの中で最も古い
+  // 未完了品目を1件だけ完了にする。直前に2秒長押しで一括完了が発火した場合は、その解放時に
+  // 続けて発火する click を無視する (二重実行防止)。
+  function handleHeaderTap(group: TableGroup) {
+    if (bulkFiredRef.current) {
+      bulkFiredRef.current = false;
+      return;
+    }
+    const target = group.items[0];
+    if (!target || busyIds.has(target.id)) return;
+    handleDone(target);
   }
 
   // 保険: カード要素自体が指のリリースを取りこぼした場合でも、画面のどこかで指/マウスが
@@ -514,6 +537,7 @@ export function TicketMonitorScreen({ kind, ns, fontSizeStorageKey }: { kind: 'f
                         onPointerLeave={canBulkComplete ? cancelHold : undefined}
                         onPointerCancel={canBulkComplete ? cancelHold : undefined}
                         onContextMenu={canBulkComplete ? (e) => e.preventDefault() : undefined}
+                        onClick={canBulkComplete ? () => handleHeaderTap(group) : undefined}
                         title={canBulkComplete ? t(`${ns}.holdAllHint`) : undefined}
                       >
                         <div className="flex items-center justify-between">
