@@ -307,46 +307,28 @@ export function TicketMonitorScreen({ kind, ns, fontSizeStorageKey }: { kind: 'f
   // 押してから click までの経過時間が信頼できず、setTimeout 方式・経過時間判定方式のどちらも
   // 「軽くタップしただけで一括完了になってしまう」という同じ症状が繰り返し発生した。
   //
-  // 2026-09-05 修正 (最終): 押す・離す・経過時間など「タッチの物理的な特性」に一切依存しない
-  // 方式に変更した。一括完了は専用の別ボタン (「全部完了」) にし、誤タップ防止のため
-  // 2回連続でタップしないと実行されない (1回目のタップで「もう一度押すと全部完了」に変わり、
-  // 3秒以内に2回目をタップすると実行、3秒経つと通常表示に戻る) 確認方式にした。ボタンの
-  // タップ判定は個別品目の「調理完了」ボタンと全く同じ onClick を使っているだけなので、
-  // 実機での動作の信頼性は個別ボタンと同等になる。
-  const BULK_CONFIRM_TIMEOUT_MS = 3000;
-  const [confirmBulkKey, setConfirmBulkKey] = useState<string | null>(null);
-  const confirmBulkTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  function clearBulkConfirmTimer() {
-    if (confirmBulkTimerRef.current) {
-      clearTimeout(confirmBulkTimerRef.current);
-      confirmBulkTimerRef.current = null;
-    }
-  }
-
-  // カード見出しタップ = 一番古い未完了品目を1件だけ完了にする。
+  // 2026-09-05 修正 (その3、これも不十分だった): 同じボタンを2回連続タップして確認する方式に
+  // 変更したが、それでも「軽くタップしただけで一括完了になった」との報告が続いた。1回の
+  // 物理的なタップに対してブラウザが click イベントを2回発火させてしまう(いわゆる ghost
+  // click。タッチ操作とマウス操作を両方エミュレートするタイプのブラウザ/WebViewでまれに
+  // 起こる)可能性が高く、同じ要素へのタップ回数で判定する方式そのものが、この端末では
+  // 信頼できないと判断した。
+  //
+  // 2026-09-05 修正 (最終): タップの回数や押している時間など「操作の物理的な特性」に一切
+  // 依存しない方式に変更した。一括完了は、ブラウザ標準の確認ダイアログ (window.confirm) を
+  // 使う。これは新旧問わずほぼ全てのブラウザ/WebViewが実装している最も基本的な機能で、
+  // ダイアログの「OK」を明示的にタップしない限り絶対に実行されない (ダイアログ自体は
+  // ブラウザ本体が描画するネイティブUIのため、ページ側のタップ判定バグの影響を受けない)。
   function handleHeaderTap(group: TableGroup) {
     const target = group.items[0];
     if (!target || busyIds.has(target.id)) return;
     handleDone(target);
   }
 
-  // 「全部完了」ボタンタップ = 1回目は確認表示に切り替えるだけ、2回目のタップで実行する。
   function handleBulkButtonClick(group: TableGroup) {
-    if (confirmBulkKey === group.key) {
-      clearBulkConfirmTimer();
-      setConfirmBulkKey(null);
-      handleBulkDone(group);
-      return;
-    }
-    clearBulkConfirmTimer();
-    setConfirmBulkKey(group.key);
-    confirmBulkTimerRef.current = setTimeout(() => setConfirmBulkKey(null), BULK_CONFIRM_TIMEOUT_MS);
+    if (!window.confirm(t(`${ns}.bulkConfirm`))) return;
+    handleBulkDone(group);
   }
-
-  useEffect(() => {
-    return () => clearBulkConfirmTimer();
-  }, []);
 
   async function handleBulkDone(group: TableGroup) {
     const ids = group.items.map((it) => it.id);
@@ -494,7 +476,6 @@ export function TicketMonitorScreen({ kind, ns, fontSizeStorageKey }: { kind: 'f
                 {tableGroups.map((group) => {
                   const minutes = elapsedMinutes(group.oldestSentAt);
                   const canBulkComplete = group.items.length >= 2;
-                  const isConfirmingBulk = confirmBulkKey === group.key;
                   return (
                     <div key={group.key} className={`flex flex-col gap-2.5 rounded-xl border-2 p-4 ${urgencyClass(minutes)}`}>
                       <div
@@ -514,14 +495,9 @@ export function TicketMonitorScreen({ kind, ns, fontSizeStorageKey }: { kind: 'f
                         <button
                           type="button"
                           onClick={() => handleBulkButtonClick(group)}
-                          className={
-                            'h-9 shrink-0 rounded-lg border text-[12.5px] font-bold ' +
-                            (isConfirmingBulk
-                              ? 'border-destructive bg-destructive/10 text-destructive'
-                              : 'border-border bg-card text-foreground')
-                          }
+                          className="h-9 shrink-0 rounded-lg border border-border bg-card text-[12.5px] font-bold text-foreground"
                         >
-                          {isConfirmingBulk ? t(`${ns}.bulkConfirm`) : t(`${ns}.bulkAllButton`)}
+                          {t(`${ns}.bulkAllButton`)}
                         </button>
                       )}
                       <div className="flex flex-col gap-2">
