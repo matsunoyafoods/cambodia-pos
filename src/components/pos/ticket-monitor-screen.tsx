@@ -302,78 +302,55 @@ export function TicketMonitorScreen({ kind, ns, fontSizeStorageKey }: { kind: 'f
   // 対応)。品目ごとの個別ボタンはそのまま残し、カード見出し部分の長押しで一括完了できる
   // ようにする。一括APIは無いため Promise.all で個別APIを並行実行する。
   //
-  // 2026-09-05 修正: Tom「タップすると1個提供、2秒長押しで一括完了なんですがタップすると
-  // 一括完了してしまいます」。原因は、タブレットのブラウザによっては指を離した時の
-  // pointerup/pointerleave/pointercancel が (指がわずかに動く・ブラウザ側で長押しメニュー用の
-  // ジェスチャーを横取りする等の理由で) このカードの上で正しく発火しないことがあり、その場合
-  // cancelHold が一切呼ばれず、単なるタップのつもりでも2秒後の一括完了タイマーがそのまま
-  // 走りきってしまう、というもの。対策として (1) touch-none で長押し時のブラウザ標準ジェス
-  // チャー (スクロール・テキスト選択・コンテキストメニュー) を無効化し、(2) 保険として
-  // window 全体で pointerup/pointercancel を監視し、カード上で離したかどうかに関わらず
-  // 指を離した瞬間に必ずキャンセルされるようにした。
+  // 2026-09-05 修正 (その1、不十分だった): 最初は setTimeout で「押してから2秒後に自動で
+  // 一括完了する」実装にし、指を離した時のイベント (pointerup 等) でその setTimeout を
+  // キャンセルする方式にしていた。しかしTomのタブレットではタップ後「1個だけ消えてほしい
+  // のに全部消える」という報告が続いた。原因は、そのタブレットのブラウザが Pointer Events
+  // (pointerup/pointercancel等) を確実に発火させないことがあり、window 全体で保険をかけても
+  // なお取りこぼすケースがあったこと。setTimeout 方式は「指を離したことを検知できないと
+  // 誤って一括完了が実行されてしまう」という構造そのものが危険だった。
   //
-  // 2026-09-05 追加: Tom「軽くタップで一個減るようにしてほしいです。現在は一括完了しか
-  // できないです。両方できるようにしてください。」への対応。カード見出しを軽くタップした
-  // 場合は (一括完了のタイマーが発火する前に指が離れた場合は) 一番古い未完了品目を1件だけ
-  // 完了にし、2秒間押し続けた場合のみ従来通り全品目を一括完了する。2秒間押し続けてから指を
-  // 離すとブラウザはそのまま click イベントも発火させるため、一括完了が実際に発火した直後の
-  // click では単品完了を実行しないよう bulkFiredRef で判定する。
+  // 2026-09-05 修正 (その2、現在の実装): 発火が不安定な「離した」イベントに一切頼らない
+  // 方式に変更した。押した瞬間の時刻を記録しておくだけにして、実際に「タップされた」ことが
+  // 確実にわかる click イベント (これはほぼ全てのブラウザ/WebViewで、ボタン等のタップ操作に
+  // 対して確実に発火する最も基本的なイベント) が発生した時に、押してから click までの
+  // 経過時間を計算し、2秒以上なら一括完了、それ未満 (=軽いタップ) なら一番古い未完了品目を
+  // 1件だけ完了にする。指を離すイベント自体は「進捗バーの表示を止める」という見た目の
+  // 演出にしか使っておらず、たとえ全く発火しなくても誤動作にはつながらない
+  // (万一 pointerdown 自体も拾えない環境では、経過時間が計測できず常に「軽いタップ」
+  // 扱いになるだけで、安全側に倒れる)。
   const HOLD_DURATION_MS = 2000;
   const [holdingGroupKey, setHoldingGroupKey] = useState<string | null>(null);
-  const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const bulkFiredRef = useRef(false);
+  const pressStartRef = useRef<number | null>(null);
 
-  function cancelHold() {
-    if (holdTimerRef.current) {
-      clearTimeout(holdTimerRef.current);
-      holdTimerRef.current = null;
-    }
+  function beginPress(group: TableGroup) {
+    if (group.items.length < 2) return; // 1品だけなら常に個別ボタン相当の動作で足りる
+    pressStartRef.current = Date.now();
+    setHoldingGroupKey(group.key);
+  }
+
+  // 指を離した (らしき) タイミングで進捗バーの表示だけを止める。実際に一括完了/単品完了の
+  // どちらを行うかはここでは判定しない (onClick 側でまとめて判定する)。
+  function endPressVisual() {
     setHoldingGroupKey(null);
   }
 
-  function startHold(group: TableGroup) {
-    if (group.items.length < 2) return; // 1品だけなら個別ボタンで十分
-    bulkFiredRef.current = false;
-    setHoldingGroupKey(group.key);
-    holdTimerRef.current = setTimeout(() => {
-      bulkFiredRef.current = true;
+  // カードをタップ (クリック) した瞬間に、押し始めてからの経過時間で単品完了/一括完了を
+  // 振り分ける。押し始めの記録が無い (= pointerdown 系が拾えなかった) 場合は安全側に倒して
+  // 単品完了にする。
+  function handleHeaderClick(group: TableGroup) {
+    const start = pressStartRef.current;
+    pressStartRef.current = null;
+    setHoldingGroupKey(null);
+    const heldMs = start === null ? 0 : Date.now() - start;
+    if (group.items.length >= 2 && heldMs >= HOLD_DURATION_MS) {
       handleBulkDone(group);
-      setHoldingGroupKey(null);
-    }, HOLD_DURATION_MS);
-  }
-
-  // カード見出しの軽いタップ (= 長押しに至らなかった press) で、そのテーブルの中で最も古い
-  // 未完了品目を1件だけ完了にする。直前に2秒長押しで一括完了が発火した場合は、その解放時に
-  // 続けて発火する click を無視する (二重実行防止)。
-  function handleHeaderTap(group: TableGroup) {
-    if (bulkFiredRef.current) {
-      bulkFiredRef.current = false;
       return;
     }
     const target = group.items[0];
     if (!target || busyIds.has(target.id)) return;
     handleDone(target);
   }
-
-  // 保険: カード要素自体が指のリリースを取りこぼした場合でも、画面のどこかで指/マウスが
-  // 離れたら必ず長押しをキャンセルする (上のコメント参照)。
-  useEffect(() => {
-    if (holdingGroupKey === null) return;
-    const handleRelease = () => cancelHold();
-    window.addEventListener('pointerup', handleRelease);
-    window.addEventListener('pointercancel', handleRelease);
-    window.addEventListener('touchend', handleRelease);
-    window.addEventListener('touchcancel', handleRelease);
-    window.addEventListener('mouseup', handleRelease);
-    return () => {
-      window.removeEventListener('pointerup', handleRelease);
-      window.removeEventListener('pointercancel', handleRelease);
-      window.removeEventListener('touchend', handleRelease);
-      window.removeEventListener('touchcancel', handleRelease);
-      window.removeEventListener('mouseup', handleRelease);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [holdingGroupKey]);
 
   async function handleBulkDone(group: TableGroup) {
     const ids = group.items.map((it) => it.id);
@@ -395,12 +372,6 @@ export function TicketMonitorScreen({ kind, ns, fontSizeStorageKey }: { kind: 'f
       });
     }
   }
-
-  useEffect(() => {
-    return () => {
-      if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
-    };
-  }, []);
 
   async function handleUndo(item: KitchenTicketItem) {
     setBusyIds((s) => new Set(s).add(item.id));
@@ -532,12 +503,12 @@ export function TicketMonitorScreen({ kind, ns, fontSizeStorageKey }: { kind: 'f
                     <div key={group.key} className={`flex flex-col gap-2.5 rounded-xl border-2 p-4 ${urgencyClass(minutes)}`}>
                       <div
                         className={'select-none touch-none ' + (canBulkComplete ? 'cursor-pointer' : '')}
-                        onPointerDown={canBulkComplete ? () => startHold(group) : undefined}
-                        onPointerUp={canBulkComplete ? cancelHold : undefined}
-                        onPointerLeave={canBulkComplete ? cancelHold : undefined}
-                        onPointerCancel={canBulkComplete ? cancelHold : undefined}
+                        onPointerDown={canBulkComplete ? () => beginPress(group) : undefined}
+                        onPointerUp={canBulkComplete ? endPressVisual : undefined}
+                        onPointerLeave={canBulkComplete ? endPressVisual : undefined}
+                        onPointerCancel={canBulkComplete ? endPressVisual : undefined}
                         onContextMenu={canBulkComplete ? (e) => e.preventDefault() : undefined}
-                        onClick={canBulkComplete ? () => handleHeaderTap(group) : undefined}
+                        onClick={() => handleHeaderClick(group)}
                         title={canBulkComplete ? t(`${ns}.holdAllHint`) : undefined}
                       >
                         <div className="flex items-center justify-between">
