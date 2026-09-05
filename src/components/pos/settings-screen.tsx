@@ -97,6 +97,23 @@ import { LanguageProvider, useLanguage, STAFF_LANGUAGE_STORAGE_KEY } from './lan
 // 被せていないので、他の管理画面 (kitchen-screen.tsx 等) と同じく画面側で自前にラップする。
 type TFunc = ReturnType<typeof useLanguage>['t'];
 
+// API エラーの表示メッセージ変換 (2026-09-04 追加。Tom「これはなんのエラー？」→保存ボタンの
+// 横に "unauthorized" と生の英語エラーコードがそのまま出ていた件への対応)。withPosStaff は
+// 認証切れ (セッションCookie無し/期限切れ) を { error: 'unauthorized' } (401)、権限不足を
+// { error: 'forbidden' } (403) として返すが、settings-client.ts/api-client.ts の request() は
+// その文字列をそのまま Error.message にしてしまうため、翻訳されない英語のエラーコードが
+// 画面にそのまま出てしまっていた。ここで status を見て、分かりやすい翻訳済みメッセージに
+// 差し替える (それ以外のエラーは元のメッセージ、例えばサーバー側のバリデーションエラー文言
+// をそのまま表示する)。
+function authAwareErrorMessage(err: unknown, t: TFunc, fallback: string): string {
+  if (err instanceof PosSettingsApiError || err instanceof PosApiError) {
+    if (err.status === 401) return t('common.sessionExpiredError');
+    if (err.status === 403) return t('common.forbiddenError');
+    return err.message;
+  }
+  return fallback;
+}
+
 type Tab = 'general' | 'printer' | 'payment' | 'staff' | 'menu' | 'translations' | 'layout' | 'handy' | 'integration';
 
 const NAV: { key: Tab; labelKey: string }[] = [
@@ -877,7 +894,7 @@ function HandyGroupsSection({ canManageSettings }: { canManageSettings: boolean 
         setSavedSnapshot(JSON.stringify(handyGroups.groups));
         setLoaded(true);
       } catch (err) {
-        if (!cancelled) setLoadError(err instanceof PosSettingsApiError ? err.message : t('settings.handy.fetchError'));
+        if (!cancelled) setLoadError(authAwareErrorMessage(err, t, t('settings.handy.fetchError')));
       }
     })();
     return () => {
@@ -921,7 +938,7 @@ function HandyGroupsSection({ canManageSettings }: { canManageSettings: boolean 
       setSavedSnapshot(JSON.stringify(saved));
       setSavedJustNow(true);
     } catch (err) {
-      setSaveError(err instanceof PosSettingsApiError ? err.message : t('common.saveError'));
+      setSaveError(authAwareErrorMessage(err, t, t('common.saveError')));
     } finally {
       setSaving(false);
     }
@@ -1242,9 +1259,7 @@ function SettingsScreenInner() {
       }
       setSaved(true);
     } catch (err) {
-      const message =
-        err instanceof PosSettingsApiError || err instanceof PosApiError ? err.message : t('common.saveError');
-      setSaveError(message);
+      setSaveError(authAwareErrorMessage(err, t, t('common.saveError')));
     } finally {
       setSaving(false);
     }
@@ -4277,7 +4292,7 @@ function IntegrationTab() {
     getIntegrationSettings()
       .then(({ menuSource }) => setMode(menuSource))
       .catch((err) => {
-        setLoadError(err instanceof PosSettingsApiError ? err.message : t('settings.integration.fetchError'));
+        setLoadError(authAwareErrorMessage(err, t, t('settings.integration.fetchError')));
       });
   }, [t]);
 
@@ -4311,7 +4326,7 @@ function IntegrationTab() {
       const { menuSource } = await updateIntegrationSettings(next);
       setMode(menuSource);
     } catch (err) {
-      setSwitchError(err instanceof PosSettingsApiError ? err.message : t('settings.integration.switchError'));
+      setSwitchError(authAwareErrorMessage(err, t, t('settings.integration.switchError')));
     } finally {
       setSwitching(false);
     }
