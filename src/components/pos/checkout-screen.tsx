@@ -45,11 +45,14 @@ function OrderDiscountEditor({
 
   return (
     <div>
-      <div className="flex items-center justify-between text-[12.5px]">
+      <div className="flex items-center justify-between gap-2">
         <button
           type="button"
           onClick={() => setEditing((v) => !v)}
-          className={'text-left font-semibold ' + (discount ? 'text-brand' : 'text-muted-foreground underline decoration-dotted')}
+          className={
+            'h-10 flex-1 rounded-lg border-2 px-3.5 text-left text-[13.5px] font-bold ' +
+            (discount ? 'border-brand bg-brand/5 text-brand' : 'border-dashed border-border text-muted-foreground')
+          }
         >
           {discount
             ? t(
@@ -58,7 +61,7 @@ function OrderDiscountEditor({
               )
             : t('checkout.addDiscount')}
         </button>
-        {discount && <span className="text-brand">-${money(amount)}</span>}
+        {discount && <span className="text-[15px] font-bold text-brand">-${money(amount)}</span>}
       </div>
       {editing && (
         <div className="mt-1.5 flex items-center gap-1.5 rounded-md border border-dashed border-border p-1.5">
@@ -320,9 +323,17 @@ export function CheckoutScreen({
               <span>-${money(totals.couponDiscount)}</span>
             </div>
           )}
-          <div className="pt-1">
-            <OrderDiscountEditor discount={orderDiscount} amount={totals.orderDiscount} onSet={onSetOrderDiscount} />
-          </div>
+          {orderDiscount && (
+            <div className="flex justify-between text-[12.5px] text-brand">
+              <span>
+                {t(
+                  orderDiscount.type === 'percent' ? 'checkout.discountAppliedPercent' : 'checkout.discountAppliedFixed',
+                  { value: orderDiscount.type === 'percent' ? orderDiscount.value : orderDiscount.value.toFixed(2) },
+                )}
+              </span>
+              <span>-${money(totals.orderDiscount)}</span>
+            </div>
+          )}
           <div className="mt-1 flex justify-between border-t border-dashed border-border pt-2 text-[17px] font-bold">
             <span>{t('totals.total')}</span>
             <span>${money(totals.total)}</span>
@@ -399,6 +410,14 @@ export function CheckoutScreen({
               ))}
             </div>
           )}
+        </div>
+
+        {/* 会計合計からの値引き。以前は左側の内訳欄の細い文字リンクだけで気づきにくかったため
+            (Tom「あった!」まで見つからず苦労した)、決済方法を選ぶこの位置にカードとして
+            大きく独立させた (2026-09-15)。 */}
+        <div className="rounded-xl border border-border p-3.5">
+          <div className="mb-2 text-xs font-semibold text-muted-foreground">{t('checkout.discountCardTitle')}</div>
+          <OrderDiscountEditor discount={orderDiscount} amount={totals.orderDiscount} onSet={onSetOrderDiscount} />
         </div>
 
         {!remainingSettled && paymentMethods.length === 0 && (
