@@ -56,6 +56,25 @@ function StaffGateInner({ children }: { children: React.ReactNode }) {
     };
   }, [router]);
 
+  // PINセッションのスライディング延長 (2026-09-15 追加)。Cookie自体は
+  // /api/staff/session 側で「チェックが通るたびに有効期限を延長」するようにしたが、
+  // このガードは元々マウント時に1回しかチェックしないため、タブを開けっぱなしの
+  // 営業中は何もCookieを更新しに行かない。実際に使われている (=このタブが開いている)
+  // 限り定期的にpingして延長され続けるようにする (30分毎。TTL 12時間に対して十分短い)。
+  useEffect(() => {
+    if (!staff || staff.authMode !== 'pos_native') return;
+    const interval = setInterval(
+      () => {
+        checkPosStaffSession().catch(() => {
+          /* 失敗しても次回のポーリングに任せる。本当に期限切れなら次回ページ遷移時に
+             staff-gate の resolve() が dine へフォールバック or ログイン画面へ誘導する */
+        });
+      },
+      30 * 60 * 1000,
+    );
+    return () => clearInterval(interval);
+  }, [staff]);
+
   if (staff === undefined) {
     return (
       <div className="flex min-h-dvh items-center justify-center text-muted-foreground">
