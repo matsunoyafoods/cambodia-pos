@@ -37,6 +37,8 @@ export async function GET() {
     themeColor: typeof stored.themeColor === 'string' ? stored.themeColor : DEFAULT_SETTINGS.themeColor,
     backgroundColor: typeof stored.backgroundColor === 'string' ? stored.backgroundColor : DEFAULT_SETTINGS.backgroundColor,
     quickMenuKeys: Array.isArray(stored.quickMenuKeys) ? stored.quickMenuKeys : DEFAULT_SETTINGS.quickMenuKeys,
+    registerFloatUsd:
+      typeof stored.registerFloatUsd === 'number' ? stored.registerFloatUsd : DEFAULT_SETTINGS.registerFloatUsd,
   };
   return NextResponse.json(settings);
 }

@@ -63,6 +63,14 @@ async function getKhrRate(supabase: ReturnType<typeof createPosAdminClient>, sto
   return typeof stored?.khrRate === 'number' ? stored.khrRate : 4100;
 }
 
+// レジ金 (開店時にレジへ入れておく釣銭用の基準額。2026-09-19 追加)。未設定なら0
+// (従来通り、システム現金売上とカウント額をそのまま比較する)。
+async function getRegisterFloat(supabase: ReturnType<typeof createPosAdminClient>, storeId: string): Promise<number> {
+  const { data } = await supabase.from('stores').select('settings').eq('id', storeId).maybeSingle();
+  const stored = data?.settings as { registerFloatUsd?: number } | null;
+  return typeof stored?.registerFloatUsd === 'number' ? stored.registerFloatUsd : 0;
+}
+
 type ClosingRow = {
   id: string;
   date: string;
@@ -73,6 +81,7 @@ type ClosingRow = {
   counted_khr_bills: Record<string, number>;
   counted_total_usd: number;
   difference_usd: number;
+  register_float_usd: number;
   confirmed_by_name: string | null;
   confirmed_at: string;
 };
@@ -88,13 +97,14 @@ function toApi(row: ClosingRow) {
     countedKhrBills: row.counted_khr_bills ?? {},
     countedTotalUsd: Number(row.counted_total_usd),
     differenceUsd: Number(row.difference_usd),
+    registerFloatUsd: Number(row.register_float_usd ?? 0),
     confirmedByName: row.confirmed_by_name,
     confirmedAt: row.confirmed_at,
   };
 }
 
 const closingSelectCols =
-  'id, date, shift, system_cash_total, system_totals_by_method, counted_usd_bills, counted_khr_bills, counted_total_usd, difference_usd, confirmed_by_name, confirmed_at';
+  'id, date, shift, system_cash_total, system_totals_by_method, counted_usd_bills, counted_khr_bills, counted_total_usd, difference_usd, register_float_usd, confirmed_by_name, confirmed_at';
 
 // 指定日のレジ締め状況を取得。既に確定済みならその記録を、未確定ならその場で集計したシステム
 // 合計 (未確定・実査待ち) を返す。staff 以上 (締め作業はシフトの担当者が誰でも行えるように)。
@@ -122,7 +132,8 @@ export const GET = withPosStaff('part_time', async (_session, req) => {
 
   try {
     const totals = await computeSystemTotals(supabase, storeId, date);
-    return NextResponse.json({ confirmed: false, ...totals });
+    const registerFloatUsd = await getRegisterFloat(supabase, storeId);
+    return NextResponse.json({ confirmed: false, ...totals, registerFloatUsd });
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : '集計に失敗しました' }, { status: 500 });
   }
@@ -160,11 +171,15 @@ export const POST = withPosStaff('part_time', async (session, req) => {
     return NextResponse.json({ error: err instanceof Error ? err.message : '集計に失敗しました' }, { status: 500 });
   }
   const khrRate = await getKhrRate(supabase, storeId);
+  // レジ金 (2026-09-19 追加)。開店時から常にレジに入っている釣銭分は「その日の現金売上」には
+  // 含まれないため、実際に数えた現金と比較する基準額に加算する。確定時点の値をスナップショットで
+  // register_closings 側にも保存し、後で設定を変更しても過去の記録の差額計算根拠は変わらないようにする。
+  const registerFloatUsd = await getRegisterFloat(supabase, storeId);
 
   const usdSubtotal = USD_DENOMS.reduce((sum, denom) => sum + denom * (d.countedUsdBills[String(denom)] ?? 0), 0);
   const khrSubtotal = KHR_DENOMS.reduce((sum, denom) => sum + denom * (d.countedKhrBills[String(denom)] ?? 0), 0);
   const countedTotalUsd = usdSubtotal + khrSubtotal / khrRate;
-  const differenceUsd = countedTotalUsd - totals.systemCashTotal;
+  const differenceUsd = countedTotalUsd - (totals.systemCashTotal + registerFloatUsd);
 
   const { data, error } = await supabase
     .from('register_closings')
@@ -178,6 +193,7 @@ export const POST = withPosStaff('part_time', async (session, req) => {
       counted_khr_bills: d.countedKhrBills,
       counted_total_usd: countedTotalUsd,
       difference_usd: differenceUsd,
+      register_float_usd: registerFloatUsd,
       confirmed_by: session.staffId,
       confirmed_by_name: session.displayName,
     })

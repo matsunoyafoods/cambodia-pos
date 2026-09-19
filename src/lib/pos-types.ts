@@ -173,6 +173,12 @@ export type PosSettings = {
    * 6個だけTOP画面にアイコン表示できるようにしてほしい」への対応)。QuickMenuKey の配列、最大6件
    * (pos-quick-menu.ts 参照)。 */
   quickMenuKeys: string[];
+  /** レジ金 (開始時点にレジに入れておく釣銭用の基準額。2026-09-19 追加。Tom「最初に入ってる
+   * レジ金設定がないからレジ締めの時にお金が合わない」への対応)。レジ締め (register-closing-screen.tsx)
+   * で「実際に数えた現金 − (その日の現金売上 + このレジ金)」を差額として計算するようにし、
+   * 開店時から常にレジに入っている釣銭分が毎回「過剰」として出てしまうのを防ぐ。
+   * POSネイティブ運用のみ (dine連携店舗では使わない)。未設定 = 0。 */
+  registerFloatUsd: number;
 };
 
 // プリンター実装 (2026-08-31 追加)。レジ画面 (Vercel/クラウド) から店舗LAN内のプリンターへ
@@ -270,6 +276,7 @@ export const DEFAULT_SETTINGS: PosSettings = {
   // pos-quick-menu.ts の DEFAULT_QUICK_MENU_KEYS と同じ値にしておくこと (lucide-react への
   // 依存を pos-types.ts に持ち込みたくないため、ここでは文字列として直接持つ)。
   quickMenuKeys: ['kitchen', 'drinks', 'handy', 'reservations', 'timecard', 'tableLayout'],
+  registerFloatUsd: 0,
 };
 
 // ---------- 経費管理 (2026-08-31 追加。データ収集・AI分析機能 第一弾) ----------

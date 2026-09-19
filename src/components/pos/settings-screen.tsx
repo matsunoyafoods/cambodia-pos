@@ -1234,6 +1234,7 @@ function SettingsScreenInner() {
           themeColor,
           backgroundColor,
           quickMenuKeys,
+          registerFloatUsd,
         } = settings;
         const s = await updateGeneralSettings({
           vatRate,
@@ -1250,6 +1251,7 @@ function SettingsScreenInner() {
           themeColor,
           backgroundColor,
           quickMenuKeys,
+          registerFloatUsd,
         });
         setSettings((prev) => ({ ...prev, ...s }));
       } else {
@@ -1376,6 +1378,21 @@ function SettingsScreenInner() {
                 />
                 <div className="mt-1.5 text-[11px] text-muted-foreground">{t('settings.general.khrRateDesc')}</div>
               </Field>
+
+              {isPosNative && (
+                <Field label={t('settings.general.registerFloatLabel')}>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[13.5px] font-semibold text-muted-foreground">$</span>
+                    <input
+                      value={settings.registerFloatUsd}
+                      disabled={!canManageSettings}
+                      onChange={(e) => update('registerFloatUsd', Math.max(0, parseFloat(e.target.value) || 0))}
+                      className="h-10 w-40 rounded-lg border border-border px-3 text-[13.5px] disabled:opacity-60"
+                    />
+                  </div>
+                  <div className="mt-1.5 text-[11px] text-muted-foreground">{t('settings.general.registerFloatDesc')}</div>
+                </Field>
+              )}
 
               {isPosNative && (
                 <Field label={t('settings.general.menuImageStyleLabel')}>

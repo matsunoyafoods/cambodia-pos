@@ -45,13 +45,21 @@ export type RegisterClosingRecord = {
   countedKhrBills: Record<string, number>;
   countedTotalUsd: number;
   differenceUsd: number;
+  /** レジ金 (開店時にレジへ入れておく釣銭用の基準額。2026-09-19 追加)。確定時点の設定値のスナップショット */
+  registerFloatUsd: number;
   confirmedByName: string | null;
   confirmedAt: string;
 };
 
 export type RegisterClosingStatus =
   | { confirmed: true; closing: RegisterClosingRecord }
-  | { confirmed: false; systemCashTotal: number; systemTotalsByMethod: Record<string, number>; salesTotal: number };
+  | {
+      confirmed: false;
+      systemCashTotal: number;
+      systemTotalsByMethod: Record<string, number>;
+      salesTotal: number;
+      registerFloatUsd: number;
+    };
 
 export function getRegisterClosingStatus(date: string): Promise<RegisterClosingStatus> {
   return request(`/api/register-closings?date=${encodeURIComponent(date)}`);

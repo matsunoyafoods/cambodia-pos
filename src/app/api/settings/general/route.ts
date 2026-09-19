@@ -32,6 +32,8 @@ function toPosSettings(storeId: string, raw: unknown): PosSettings {
     themeColor: typeof stored.themeColor === 'string' ? stored.themeColor : DEFAULT_SETTINGS.themeColor,
     backgroundColor: typeof stored.backgroundColor === 'string' ? stored.backgroundColor : DEFAULT_SETTINGS.backgroundColor,
     quickMenuKeys: Array.isArray(stored.quickMenuKeys) ? stored.quickMenuKeys : DEFAULT_SETTINGS.quickMenuKeys,
+    registerFloatUsd:
+      typeof stored.registerFloatUsd === 'number' ? stored.registerFloatUsd : DEFAULT_SETTINGS.registerFloatUsd,
   };
 }
 
@@ -72,6 +74,7 @@ const patchSchema = z.object({
     .nullable()
     .optional(),
   quickMenuKeys: z.array(z.string()).max(6).optional(),
+  registerFloatUsd: z.number().min(0).optional(),
 });
 
 // 更新。manager 以上のみ。

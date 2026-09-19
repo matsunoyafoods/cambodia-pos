@@ -115,7 +115,14 @@ function RegisterClosingScreenInner() {
           ) : status?.confirmed ? (
             <ConfirmedClosingView closing={status.closing} canManage={canManage} onReopen={load} />
           ) : status ? (
-            <ClosingForm date={date} systemCashTotal={status.systemCashTotal} systemTotalsByMethod={status.systemTotalsByMethod} khrRate={khrRate} onConfirmed={load} />
+            <ClosingForm
+              date={date}
+              systemCashTotal={status.systemCashTotal}
+              systemTotalsByMethod={status.systemTotalsByMethod}
+              registerFloatUsd={status.registerFloatUsd}
+              khrRate={khrRate}
+              onConfirmed={load}
+            />
           ) : null}
         </div>
       </div>
@@ -158,8 +165,9 @@ function ConfirmedClosingView({ closing, canManage, onReopen }: { closing: Regis
         )}
       </div>
       {error && <div className="mb-2 text-[12.5px] text-destructive">{error}</div>}
-      <div className="grid grid-cols-2 gap-4 text-[13px] sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 text-[13px] sm:grid-cols-5">
         <Stat label={t('registerClosing.systemCashLabel')} value={`$${closing.systemCashTotal.toFixed(2)}`} />
+        <Stat label={t('registerClosing.registerFloatLabel')} value={`$${closing.registerFloatUsd.toFixed(2)}`} />
         <Stat label={t('registerClosing.countedTotalLabel')} value={`$${closing.countedTotalUsd.toFixed(2)}`} />
         <Stat
           label={t('registerClosing.differenceLabel')}
@@ -194,12 +202,14 @@ function ClosingForm({
   date,
   systemCashTotal,
   systemTotalsByMethod,
+  registerFloatUsd,
   khrRate,
   onConfirmed,
 }: {
   date: string;
   systemCashTotal: number;
   systemTotalsByMethod: Record<string, number>;
+  registerFloatUsd: number;
   khrRate: number;
   onConfirmed: () => void;
 }) {
@@ -220,7 +230,11 @@ function ClosingForm({
   const khrSubtotal = KHR_DENOMS.reduce((a, d) => a + d * khr[d], 0);
   const khrInUsd = khrSubtotal / khrRate;
   const countedTotal = usdSubtotal + khrInUsd;
-  const diff = countedTotal - systemCashTotal;
+  // 現金の基準額 = その日の現金売上 + レジ金 (開店時から常にレジに入っている釣銭分)。
+  // レジ金を考慮しないと、実際は正しく数えられていても毎回「レジ金の分だけ過剰」という
+  // 誤差が出てしまう (Tom「最初に入ってるレジ金設定がないからレジ締めの時にお金が合わない」)。
+  const cashBasis = systemCashTotal + registerFloatUsd;
+  const diff = countedTotal - cashBasis;
   const diffOk = Math.abs(diff) < 0.005;
 
   const salesTotal = useMemo(() => Object.values(systemTotalsByMethod).reduce((a, b) => a + b, 0), [systemTotalsByMethod]);
@@ -260,6 +274,12 @@ function ClosingForm({
             <span>{t('registerClosing.salesTotalLabel')}</span>
             <span>${salesTotal.toFixed(2)}</span>
           </div>
+          {registerFloatUsd > 0 && (
+            <div className="flex justify-between text-[12.5px] text-muted-foreground">
+              <span>{t('registerClosing.registerFloatLabel')}</span>
+              <span>+${registerFloatUsd.toFixed(2)}</span>
+            </div>
+          )}
         </div>
 
         <div className={'rounded-xl p-3.5 ' + (diffOk ? 'bg-emerald-50' : diff > 0 ? 'bg-sky-50' : 'bg-red-50')}>
@@ -269,7 +289,13 @@ function ClosingForm({
             {Math.abs(diff).toFixed(2)}
           </div>
           <div className="mt-1 text-[11.5px] text-muted-foreground">
-            {t('registerClosing.countedMinusSystem', { counted: countedTotal.toFixed(2), system: systemCashTotal.toFixed(2) })}
+            {registerFloatUsd > 0
+              ? t('registerClosing.countedMinusSystemWithFloat', {
+                  counted: countedTotal.toFixed(2),
+                  system: systemCashTotal.toFixed(2),
+                  float: registerFloatUsd.toFixed(2),
+                })
+              : t('registerClosing.countedMinusSystem', { counted: countedTotal.toFixed(2), system: systemCashTotal.toFixed(2) })}
           </div>
         </div>
         <div className="text-[11px] leading-relaxed text-muted-foreground">
