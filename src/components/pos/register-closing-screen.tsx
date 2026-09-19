@@ -24,7 +24,7 @@ import { localeForLang } from '@/lib/i18n/lang';
 // 経費画面の「現金残高」(/pos/expenses) に積み上がっていく。
 
 const USD_DENOMS = [100, 50, 20, 10, 5, 1];
-const KHR_DENOMS = [100000, 50000, 20000, 10000, 5000, 2000, 1000, 500];
+const KHR_DENOMS = [100000, 50000, 20000, 10000, 5000, 2000, 1000, 500, 100];
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);

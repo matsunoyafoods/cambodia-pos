@@ -12,7 +12,7 @@ import { withPosStaff } from '@/lib/pos-auth';
 // 1日1回のレジ締めを前提にする (store_id, date の unique制約。シフトごとの複数回締めは今回のスコープ外)。
 
 const USD_DENOMS = [100, 50, 20, 10, 5, 1];
-const KHR_DENOMS = [100000, 50000, 20000, 10000, 5000, 2000, 1000, 500];
+const KHR_DENOMS = [100000, 50000, 20000, 10000, 5000, 2000, 1000, 500, 100];
 
 // カンボジアはDST無しの固定 UTC+7。
 function dayRangeUtc(date: string): { startIso: string; endIso: string } {
