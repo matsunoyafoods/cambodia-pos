@@ -12,8 +12,11 @@ export class PosSalesReportApiError extends Error {
   }
 }
 
-async function request<T>(path: string): Promise<T> {
-  const res = await fetch(path);
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(path, {
+    ...init,
+    headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+  });
   if (!res.ok) {
     let message = `Request failed (${res.status})`;
     try {
@@ -63,4 +66,32 @@ export type TableSalesReport = {
 
 export function getTableSalesReport(month: string): Promise<TableSalesReport> {
   return request(`/api/sales-report/tables?month=${encodeURIComponent(month)}`);
+}
+
+// 会計取消 (2026-09-20 追加)。Tom「会計を間違えて後から訂正する」への対応。
+
+export function voidOrder(orderId: string, reason?: string): Promise<{ ok: true }> {
+  return request(`/api/orders/${encodeURIComponent(orderId)}/void`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  });
+}
+
+export type VoidLogRow = {
+  id: string;
+  orderId: string;
+  tableCode: string;
+  voidedTotal: number;
+  reason: string | null;
+  voidedByName: string | null;
+  voidedAt: string;
+};
+
+export type VoidHistory = {
+  month: string;
+  rows: VoidLogRow[];
+};
+
+export function getVoidHistory(month: string): Promise<VoidHistory> {
+  return request(`/api/orders/void-history?month=${encodeURIComponent(month)}`);
 }

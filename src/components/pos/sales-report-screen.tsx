@@ -1,9 +1,18 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useStaff } from './staff-context';
-import { getDailySales, getTableSalesReport, PosSalesReportApiError, type DailySales, type TableSalesReport } from '@/lib/sales-report-client';
+import {
+  getDailySales,
+  getTableSalesReport,
+  getVoidHistory,
+  voidOrder,
+  PosSalesReportApiError,
+  type DailySales,
+  type TableSalesReport,
+  type VoidHistory,
+} from '@/lib/sales-report-client';
 import { downloadCsv } from '@/lib/csv-export';
 import { LanguageProvider, useLanguage, STAFF_LANGUAGE_STORAGE_KEY } from './language-context';
 
@@ -71,18 +80,22 @@ function SalesReportPanel() {
   const [month, setMonth] = useState(currentMonth());
   const [daily, setDaily] = useState<DailySales | null>(null);
   const [tables, setTables] = useState<TableSalesReport | null>(null);
+  const [voidHistory, setVoidHistory] = useState<VoidHistory | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 会計取消 (2026-09-20 追加)。取消対象の orderId を保持している間だけ確認モーダルを表示する。
+  const [voidTarget, setVoidTarget] = useState<string | null>(null);
 
-  useEffect(() => {
+  const reload = useCallback(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    Promise.all([getDailySales(month), getTableSalesReport(month)])
-      .then(([d, t]) => {
+    Promise.all([getDailySales(month), getTableSalesReport(month), getVoidHistory(month)])
+      .then(([d, tbl, v]) => {
         if (cancelled) return;
         setDaily(d);
-        setTables(t);
+        setTables(tbl);
+        setVoidHistory(v);
       })
       .catch((err) => {
         if (cancelled) return;
@@ -95,6 +108,8 @@ function SalesReportPanel() {
       cancelled = true;
     };
   }, [month, t]);
+
+  useEffect(() => reload(), [reload]);
 
   function handleDailyCsvExport() {
     if (!daily || daily.days.length === 0) return;
@@ -202,6 +217,7 @@ function SalesReportPanel() {
                     <th className="px-3 py-2 text-left font-semibold">{t('salesReport.csvEthnicity')}</th>
                     <th className="px-3 py-2 text-right font-semibold">{t('salesReport.csvPartySize')}</th>
                     <th className="px-3 py-2 text-right font-semibold">{t('salesReport.unitPriceColumn')}</th>
+                    <th className="px-3 py-2 text-right font-semibold">{t('salesReport.voidActionColumn')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -213,6 +229,14 @@ function SalesReportPanel() {
                       <td className="px-3 py-2">{r.ethnicity.length > 0 ? r.ethnicity.map((e) => `${e.label}${e.count}`).join(' / ') : t('salesReport.notRecorded')}</td>
                       <td className="px-3 py-2 text-right">{r.partySize}</td>
                       <td className="px-3 py-2 text-right">{r.unitPrice != null ? `$${r.unitPrice.toFixed(2)}` : '-'}</td>
+                      <td className="px-3 py-2 text-right">
+                        <button
+                          onClick={() => setVoidTarget(r.orderId)}
+                          className="h-7 rounded-md border border-destructive/40 px-2.5 text-[11.5px] font-semibold text-destructive hover:bg-destructive/5"
+                        >
+                          {t('salesReport.voidButton')}
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -221,6 +245,94 @@ function SalesReportPanel() {
           )}
         </div>
       )}
+
+      {voidHistory && !loading && (
+        <div className="rounded-xl border border-border bg-card p-5">
+          <div className="mb-3 text-[13.5px] font-semibold">{t('salesReport.voidHistoryTitle')}</div>
+          <p className="mb-3 text-[11.5px] text-muted-foreground">{t('salesReport.voidHistoryNote')}</p>
+          {voidHistory.rows.length === 0 ? (
+            <div className="text-[13px] text-muted-foreground">{t('salesReport.noVoidHistory')}</div>
+          ) : (
+            <div className="max-h-[320px] overflow-auto rounded-lg border border-border">
+              <table className="w-full text-[12.5px]">
+                <thead className="sticky top-0 bg-secondary/60">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-semibold">{t('salesReport.voidHistoryAtColumn')}</th>
+                    <th className="px-3 py-2 text-left font-semibold">{t('salesReport.voidHistoryTableColumn')}</th>
+                    <th className="px-3 py-2 text-right font-semibold">{t('salesReport.voidHistoryAmountColumn')}</th>
+                    <th className="px-3 py-2 text-left font-semibold">{t('salesReport.voidHistoryReasonColumn')}</th>
+                    <th className="px-3 py-2 text-left font-semibold">{t('salesReport.voidHistoryByColumn')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {voidHistory.rows.map((v) => (
+                    <tr key={v.id} className="border-t border-border">
+                      <td className="px-3 py-2">{v.voidedAt}</td>
+                      <td className="px-3 py-2">{v.tableCode}</td>
+                      <td className="px-3 py-2 text-right">${v.voidedTotal.toFixed(2)}</td>
+                      <td className="px-3 py-2">{v.reason || t('salesReport.voidHistoryNoReason')}</td>
+                      <td className="px-3 py-2">{v.voidedByName ?? '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {voidTarget && <VoidOrderModal orderId={voidTarget} onClose={() => setVoidTarget(null)} onVoided={reload} />}
+    </div>
+  );
+}
+
+function VoidOrderModal({ orderId, onClose, onVoided }: { orderId: string; onClose: () => void; onVoided: () => void }) {
+  const { t } = useLanguage();
+  const [reason, setReason] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleConfirm() {
+    setSubmitting(true);
+    setError(null);
+    try {
+      await voidOrder(orderId, reason.trim() || undefined);
+      onVoided();
+      onClose();
+    } catch (err) {
+      setError(err instanceof PosSalesReportApiError ? err.message : t('salesReport.voidError'));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div className="w-full max-w-[420px] rounded-xl bg-card p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-2 text-[15px] font-bold">{t('salesReport.voidModalTitle')}</div>
+        <p className="mb-4 text-[12.5px] leading-relaxed text-muted-foreground">{t('salesReport.voidModalBody')}</p>
+        <label className="mb-1 block text-[12.5px] font-semibold">{t('salesReport.voidReasonLabel')}</label>
+        <textarea
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder={t('salesReport.voidReasonPlaceholder')}
+          rows={2}
+          className="mb-3 w-full resize-none rounded-lg border border-border p-2.5 text-[13px]"
+        />
+        {error && <div className="mb-3 text-[12.5px] text-destructive">{error}</div>}
+        <div className="flex justify-end gap-2.5">
+          <button onClick={onClose} disabled={submitting} className="h-9 rounded-lg border border-border px-3.5 text-[13px] font-semibold disabled:opacity-60">
+            {t('common.cancel')}
+          </button>
+          <button
+            onClick={handleConfirm}
+            disabled={submitting}
+            className="h-9 rounded-lg bg-destructive px-3.5 text-[13px] font-bold text-destructive-foreground disabled:opacity-60"
+          >
+            {submitting ? t('salesReport.voidSubmitting') : t('salesReport.voidConfirmButton')}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
