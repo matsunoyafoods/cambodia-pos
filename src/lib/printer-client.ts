@@ -4,6 +4,7 @@
  */
 
 import type { PaymentMethodConfig, PrinterConfig } from '@/lib/pos-types';
+import { printWebUsbEscPos, requestWebUsbPrinterPairing } from '@/lib/webusb-printer';
 
 export class PosPrinterApiError extends Error {
   constructor(
@@ -71,11 +72,16 @@ export async function deletePrinter(id: string): Promise<void> {
 // passprnt (2026-09-03 追加、中継機不要でこの端末に直接印刷する方式) の場合、サーバーは
 // キューに積まずHTMLをそのまま返してくる。その場で starpassprnt:// URLスキームを開いて
 // PassPRNTへ渡す (この端末自体がプリンターとペアリングされている前提)。
+// webusb (2026-09-21 追加、中継機不要でこの端末のブラウザから直接USBプリンターへ印刷する方式。
+// Android Chromeのみ) の場合、サーバーはESC/POSの生バイト列(base64)を返してくる。ここで
+// WebUSB経由でペアリング済みのプリンターへそのまま書き込む。失敗した場合はテスト印刷なので
+// エラーを投げて設定画面に表示させる。
 export async function testPrint(id: string): Promise<void> {
-  const res = await request<{ ok: true; passPrntJob?: { printerId: string; html: string; sizeDots: number; cut: string } }>(
-    `/api/settings/printers/${id}/test`,
-    { method: 'POST' },
-  );
+  const res = await request<{
+    ok: true;
+    passPrntJob?: { printerId: string; html: string; sizeDots: number; cut: string };
+    webusbJob?: { printerId: string; vendorId: number; productId: number; dataBase64: string };
+  }>(`/api/settings/printers/${id}/test`, { method: 'POST' });
   if (res.passPrntJob && typeof window !== 'undefined') {
     const params = new URLSearchParams({
       html: res.passPrntJob.html,
@@ -85,6 +91,15 @@ export async function testPrint(id: string): Promise<void> {
     });
     window.location.href = `starpassprnt://v1/print/nopreview?${params.toString()}`;
   }
+  if (res.webusbJob) {
+    await printWebUsbEscPos(res.webusbJob.vendorId, res.webusbJob.productId, res.webusbJob.dataBase64);
+  }
+}
+
+// 設定画面の「USBペアリング」ボタンから呼ぶ (WebUSB、2026-09-21 追加)。ブラウザ標準の
+// デバイス選択ダイアログが出るので、必ずクリックハンドラーの中で (await を挟まず) 呼び出すこと。
+export async function pairWebUsbPrinter(): Promise<{ deviceName: string; productName: string | null }> {
+  return requestWebUsbPrinterPairing();
 }
 
 export async function getPrintAgentToken(): Promise<string | null> {

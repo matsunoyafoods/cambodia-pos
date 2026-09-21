@@ -86,9 +86,11 @@ import {
   updatePrinter,
   updateReceiptFormat,
   uploadReceiptLogo,
+  pairWebUsbPrinter,
   PosPrinterApiError,
   type CreatePrinterInput,
 } from '@/lib/printer-client';
+import { isWebUsbSupported } from '@/lib/webusb-printer';
 import type { HandyTableGroup, PaymentMethodConfig, PrinterConfig } from '@/lib/pos-types';
 import { QUICK_MENU_ITEMS, MAX_QUICK_MENU_ITEMS } from '@/lib/pos-quick-menu';
 import { LanguageProvider, useLanguage, STAFF_LANGUAGE_STORAGE_KEY } from './language-context';
@@ -140,6 +142,7 @@ function printerConnectionLabel(t: TFunc, type: PrinterConfig['connectionType'])
   if (type === 'usb_agent') return t('settings.printer.connection.usbAgent');
   if (type === 'lan') return t('settings.printer.connection.lan');
   if (type === 'bluetooth') return t('settings.printer.connection.bluetooth');
+  if (type === 'webusb') return t('settings.printer.connection.webusb');
   return t('settings.printer.connection.passprnt');
 }
 
@@ -156,6 +159,11 @@ function AddPrinterForm({ onAdd, disabled }: { onAdd: (input: CreatePrinterInput
   const [lanIp, setLanIp] = useState('');
   const [lanPort, setLanPort] = useState('9100');
   const [submitting, setSubmitting] = useState(false);
+  // webusb用 (2026-09-21 追加)。ペアリングで得たデバイス名(vendorId:productId)とは別に、
+  // 確認表示用にプリンターの製品名も保持しておく。
+  const [webusbProductName, setWebusbProductName] = useState<string | null>(null);
+  const [webusbPairing, setWebusbPairing] = useState(false);
+  const [webusbError, setWebusbError] = useState<string | null>(null);
 
   function reset() {
     setName('');
@@ -165,6 +173,8 @@ function AddPrinterForm({ onAdd, disabled }: { onAdd: (input: CreatePrinterInput
     setDeviceName('');
     setLanIp('');
     setLanPort('9100');
+    setWebusbProductName(null);
+    setWebusbError(null);
     setOpen(false);
   }
 
@@ -177,13 +187,32 @@ function AddPrinterForm({ onAdd, disabled }: { onAdd: (input: CreatePrinterInput
         role,
         connectionType,
         paperWidthMm,
-        deviceName: connectionType === 'usb_agent' || connectionType === 'bluetooth' ? deviceName.trim() || undefined : undefined,
+        deviceName:
+          connectionType === 'usb_agent' || connectionType === 'bluetooth' || connectionType === 'webusb'
+            ? deviceName.trim() || undefined
+            : undefined,
         lanIp: connectionType === 'lan' ? lanIp.trim() || undefined : undefined,
         lanPort: connectionType === 'lan' ? parseInt(lanPort, 10) || 9100 : undefined,
       });
       reset();
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  // 「USBペアリング」ボタン。クリックハンドラーの中で直接 requestDevice を呼ぶ必要があるため
+  // (ユーザー操作なしで呼ぶとブラウザに拒否される)、await を挟まず最初に呼び出している。
+  async function handleWebUsbPair() {
+    setWebusbError(null);
+    setWebusbPairing(true);
+    try {
+      const result = await pairWebUsbPrinter();
+      setDeviceName(result.deviceName);
+      setWebusbProductName(result.productName);
+    } catch (err) {
+      setWebusbError(err instanceof Error ? err.message : 'ペアリングに失敗しました');
+    } finally {
+      setWebusbPairing(false);
     }
   }
 
@@ -236,6 +265,7 @@ function AddPrinterForm({ onAdd, disabled }: { onAdd: (input: CreatePrinterInput
             <option value="lan">{t('settings.printer.connection.lan')}</option>
             <option value="passprnt">{t('settings.printer.connection.passprntShort')}</option>
             <option value="bluetooth">{t('settings.printer.connection.bluetoothShort')}</option>
+            <option value="webusb">{t('settings.printer.connection.webusbShort')}</option>
           </select>
         </div>
         <div>
@@ -274,6 +304,34 @@ function AddPrinterForm({ onAdd, disabled }: { onAdd: (input: CreatePrinterInput
         <div className="rounded-lg bg-muted/50 p-3 text-[11.5px] leading-relaxed text-muted-foreground">
           {t('settings.printer.passprntInfo')}
         </div>
+      ) : connectionType === 'webusb' ? (
+        <div className="flex flex-col gap-2">
+          <div className="rounded-lg bg-muted/50 p-3 text-[11.5px] leading-relaxed text-muted-foreground">
+            {t('settings.printer.webusbInfo')}
+          </div>
+          {!isWebUsbSupported() ? (
+            <div className="rounded-lg bg-destructive/10 p-3 text-[11.5px] leading-relaxed text-destructive">
+              {t('settings.printer.webusbUnsupported')}
+            </div>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={handleWebUsbPair}
+                disabled={webusbPairing}
+                className="h-9 w-fit rounded-lg border border-border px-3.5 text-[12.5px] font-semibold disabled:opacity-60"
+              >
+                {webusbPairing ? t('settings.printer.webusbPairingEllipsis') : t('settings.printer.webusbPairButton')}
+              </button>
+              {deviceName && (
+                <div className="text-[11.5px] text-emerald-600">
+                  {t('settings.printer.webusbPaired')}: {webusbProductName ?? deviceName} ({deviceName})
+                </div>
+              )}
+              {webusbError && <div className="text-[11.5px] text-destructive">{webusbError}</div>}
+            </>
+          )}
+        </div>
       ) : (
         <div className="flex gap-3">
           <div className="flex-1">
@@ -299,7 +357,7 @@ function AddPrinterForm({ onAdd, disabled }: { onAdd: (input: CreatePrinterInput
         <button
           type="button"
           onClick={submit}
-          disabled={submitting || !name.trim()}
+          disabled={submitting || !name.trim() || (connectionType === 'webusb' && !deviceName)}
           className="h-9 rounded-lg bg-primary px-4 text-[12.5px] font-semibold text-primary-foreground disabled:opacity-60"
         >
           {submitting ? t('settings.printer.addingEllipsis') : t('settings.printer.addSubmit')}
@@ -1194,6 +1252,19 @@ function SettingsScreenInner() {
     }
   }
 
+  // 既存のwebusbプリンターの再ペアリング (2026-09-21 追加。別のUSBプリンターに挿し替えた場合や、
+  // ブラウザ側の許可が切れてしまった場合に使う)。クリックハンドラーの中で直接呼ぶ必要がある。
+  async function handleRepairWebUsb(p: PrinterConfig) {
+    setPrinterError(null);
+    try {
+      const result = await pairWebUsbPrinter();
+      const updated = await updatePrinter(p.id, { deviceName: result.deviceName });
+      setPrinters((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
+    } catch (err) {
+      setPrinterError(err instanceof Error ? err.message : t('settings.printer.addError'));
+    }
+  }
+
   async function handleTestPrint(id: string) {
     setPrinterError(null);
     setTestingId(id);
@@ -1616,7 +1687,10 @@ function SettingsScreenInner() {
                           </div>
                           <div className="mt-0.5 text-[11.5px] text-muted-foreground">
                             {printerConnectionLabel(t, p.connectionType)} ・ {p.paperWidthMm}mm
-                            {(p.connectionType === 'usb_agent' || p.connectionType === 'bluetooth') && p.deviceName ? ` ・ ${p.deviceName}` : ''}
+                            {(p.connectionType === 'usb_agent' || p.connectionType === 'bluetooth' || p.connectionType === 'webusb') && p.deviceName
+                              ? ` ・ ${p.deviceName}`
+                              : ''}
+                            {p.connectionType === 'webusb' && !p.deviceName ? ` ・ ${t('settings.printer.webusbNotPaired')}` : ''}
                             {p.connectionType === 'lan' && p.lanIp ? ` ・ ${p.lanIp}:${p.lanPort ?? 9100}` : ''}
                           </div>
                         </div>
@@ -1633,6 +1707,16 @@ function SettingsScreenInner() {
                             <span className={'inline-block h-2 w-2 rounded-full ' + (p.enabled ? 'bg-emerald-500' : 'bg-border')} />
                             {p.enabled ? t('settings.payment.enabled') : t('settings.payment.disabled')}
                           </button>
+                          {p.connectionType === 'webusb' && (
+                            <button
+                              type="button"
+                              disabled={!canManageSettings || !isWebUsbSupported()}
+                              onClick={() => handleRepairWebUsb(p)}
+                              className="h-[34px] rounded-lg border border-border px-3.5 text-[12.5px] font-semibold disabled:opacity-60"
+                            >
+                              {t('settings.printer.webusbRepairButton')}
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={() => handleTestPrint(p.id)}

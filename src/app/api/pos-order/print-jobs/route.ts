@@ -9,6 +9,8 @@ import {
   wrapAsPassPrntHtml,
 } from '@/lib/receipt-format';
 import { pngBase64ToEscPosRasterBase64 } from '@/lib/escpos-logo';
+import { buildEscPosFrame } from '@/lib/escpos-frame';
+import { parseWebUsbDeviceName } from '@/lib/webusb-printer';
 import type { ReceiptFormatSettings } from '@/lib/pos-types';
 
 // レジ画面から「印刷したい」内容をキューに積む (2026-08-31 プリンター実装で追加)。
@@ -79,7 +81,7 @@ export async function POST(req: Request) {
   const [{ data: printers, error: printersError }, { data: store, error: storeError }] = await Promise.all([
     supabase
       .from('printers')
-      .select('id, paper_width_mm, connection_type')
+      .select('id, paper_width_mm, connection_type, device_name')
       .eq('store_id', storeId)
       .eq('role', role)
       .eq('enabled', true),
@@ -95,10 +97,13 @@ export async function POST(req: Request) {
   // print_jobs キューに積んでも誰も拾わない (ポーリングするエージェントが存在しない)。
   // そのためHTMLを組み立ててレスポンスで返し、呼び出し元 (レジ画面、この端末自体が
   // プリンターとペアリングされている) がその場で starpassprnt:// URLスキームを開く。
-  const queuePrinters = printers.filter((p) => p.connection_type !== 'passprnt');
+  // webusb (2026-09-21 追加。USB接続のプリンターにレジ端末 (Android Chrome) から直接印刷する方式)
+  // も passprnt と同じ理由でキューに積まない (ポーリングするエージェントが存在しない)。
+  const queuePrinters = printers.filter((p) => p.connection_type !== 'passprnt' && p.connection_type !== 'webusb');
   const passPrntPrinters = printers.filter((p) => p.connection_type === 'passprnt');
-  if (queuePrinters.length === 0 && passPrntPrinters.length === 0) {
-    return NextResponse.json({ ok: true, printersQueued: 0, passPrntJobs: [] });
+  const webusbPrinters = printers.filter((p) => p.connection_type === 'webusb');
+  if (queuePrinters.length === 0 && passPrntPrinters.length === 0 && webusbPrinters.length === 0) {
+    return NextResponse.json({ ok: true, printersQueued: 0, passPrntJobs: [], webusbJobs: [] });
   }
 
   const storeName = store?.name ?? "I'mHungry";
@@ -181,5 +186,23 @@ export async function POST(req: Request) {
     };
   });
 
-  return NextResponse.json({ ok: true, printersQueued: rows.length, passPrntJobs });
+  // ペアリング未完了 (device_name未設定) のwebusbプリンターは静かにスキップする
+  // (レジ操作自体は止めない。設定画面のテスト印刷であれば明示的にエラーを返す)。
+  const webusbJobs = webusbPrinters.flatMap((p) => {
+    const parsed = parseWebUsbDeviceName(p.device_name);
+    if (!parsed) return [];
+    const content = buildContent(p.paper_width_mm);
+    const logoBase64 =
+      d.kind !== 'kitchen' && logoPngBase64 ? pngBase64ToEscPosRasterBase64(logoPngBase64, p.paper_width_mm) : null;
+    return [
+      {
+        printerId: p.id,
+        vendorId: parsed.vendorId,
+        productId: parsed.productId,
+        dataBase64: buildEscPosFrame(content, logoBase64).toString('base64'),
+      },
+    ];
+  });
+
+  return NextResponse.json({ ok: true, printersQueued: rows.length, passPrntJobs, webusbJobs });
 }

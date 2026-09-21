@@ -196,7 +196,12 @@ export type PrinterRole = 'receipt' | 'kitchen';
 // 会計完了時にURLスキーム (starpassprnt://) でレシートHTMLをPassPRNTへ渡し、PassPRNTが印刷して
 // 元のブラウザに戻る。この方式は「ブラウザとプリンターが同一端末」であることが前提 (iOS Safari は
 // Web Bluetooth 非対応だが、PassPRNT はネイティブアプリなのでこの制約を受けない)。
-export type PrinterConnectionType = 'usb_agent' | 'lan' | 'bluetooth' | 'passprnt';
+// webusb (2026-09-21 追加。店内にPCが無く、USB接続のレシートプリンターをレジ端末に直接挿す
+// 運用向け): ブラウザ標準のWebUSB APIで、中継PC・専用アプリ無しにレジ端末から直接USBプリンターへ
+// 印刷する。Android Chromeでのみ対応 (iPad/iPhoneのSafariはWebUSB非対応なので使えない。iOSで
+// USBプリンターを使いたい場合は usb_agent 方式で中継Mac/PCが必要)。設定画面で一度「USBペアリング」
+// を行うとブラウザがオリジン単位で許可を記憶するため、以後は会計時も追加操作なしで印刷できる。
+export type PrinterConnectionType = 'usb_agent' | 'lan' | 'bluetooth' | 'passprnt' | 'webusb';
 
 export type PrinterConfig = {
   id: string;
@@ -206,7 +211,9 @@ export type PrinterConfig = {
   paperWidthMm: number;
   /** usb_agent の場合: エージェント側のプリンターキュー名 (例: macOSの `lpstat -p` で確認できる名前)。
    * bluetooth の場合: OSでペアリング後に割り当てられるデバイスパス (例: macOSの `/dev/tty.TSP650II`、
-   * Windowsの `COM5` 等)。usb_agent と同じカラムを意味だけ変えて流用している。 */
+   * Windowsの `COM5` 等)。webusb の場合: ペアリングしたUSBデバイスの `vendorId:productId`
+   * (例: `0519:0001`、settings-screen.tsx の「USBペアリング」ボタンが自動で設定する)。
+   * usb_agent と同じカラムを意味だけ変えて流用している。 */
   deviceName: string | null;
   /** lan の場合の接続先 */
   lanIp: string | null;

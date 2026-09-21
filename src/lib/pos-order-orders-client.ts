@@ -5,6 +5,7 @@
 
 import type { CartLine, GuestEthnicity } from '@/lib/pos-types';
 import { cartLineDiscountLabel, cartLineNetTotal } from '@/lib/cart';
+import { printWebUsbEscPos } from '@/lib/webusb-printer';
 
 export class PosOrderOrdersApiError extends Error {
   constructor(
@@ -209,7 +210,10 @@ export function resetTable(tableCode: string): Promise<{ ok: true; hadOpenOrder:
 // Star Micronics純正の無料アプリ「PassPRNT」経由でプリンターとBluetoothペアリングされている
 // 前提で、starpassprnt:// URLスキームを開いてPassPRNTへ印刷を渡す。
 export type PassPrntJob = { printerId: string; html: string; sizeDots: number; cut: string };
-type PrintJobResult = { ok: true; printersQueued: number; passPrntJobs?: PassPrntJob[] };
+// webusb (2026-09-21 追加、中継機不要でこの端末のブラウザから直接USBプリンターへ印刷する方式。
+// Android Chromeのみ)。サーバーはESC/POSの生バイト列(base64)をそのまま返してくる。
+export type WebUsbJob = { printerId: string; vendorId: number; productId: number; dataBase64: string };
+type PrintJobResult = { ok: true; printersQueued: number; passPrntJobs?: PassPrntJob[]; webusbJobs?: WebUsbJob[] };
 
 // PassPRNT (https://star-m.jp) のURLスキーム仕様に沿って starpassprnt:// のURLを組み立てる。
 // back (呼び出し元へ戻るURLスキーム) は、このWebアプリ自身がカスタムURLスキームを持たない
@@ -233,11 +237,22 @@ function buildPassPrntUrl(job: PassPrntJob): string {
 // 注意: passprnt 方式のプリンターは通常1台 (レジ端末自体) を想定しており、同時に複数台
 // あるとURLスキーム遷移が後勝ちになり最初の1件しか実行されない。複数台運用が必要になったら
 // setTimeout等での逐次実行に変更すること。
+//
+// webusb (2026-09-21 追加) も同じ関数から一緒に処理する。こちらはURLスキーム遷移ではなく
+// WebUSBで直接プリンターへ書き込むため複数台でも問題ない。会計・注文確定の流れを止めたくない
+// ため await せず fire-and-forget にし、失敗時はコンソールにログを残すだけにする
+// (印刷失敗でレジ操作自体が止まらないようにする。他の印刷経路 (passprnt/usb_agent等) と同じ方針)。
 export function triggerPassPrntJobs(result: PrintJobResult): void {
   if (typeof window === 'undefined') return;
   const jobs = result.passPrntJobs ?? [];
-  if (jobs.length === 0) return;
-  window.location.href = buildPassPrntUrl(jobs[0]);
+  if (jobs.length > 0) {
+    window.location.href = buildPassPrntUrl(jobs[0]);
+  }
+  for (const job of result.webusbJobs ?? []) {
+    printWebUsbEscPos(job.vendorId, job.productId, job.dataBase64).catch((err) => {
+      console.error('[webusb] 印刷に失敗しました:', err);
+    });
+  }
 }
 
 export function enqueueKitchenPrintJob(input: {
