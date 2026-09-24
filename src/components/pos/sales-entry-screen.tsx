@@ -11,7 +11,7 @@ import {
   PosSalesEntryApiError,
   type ManualDailySalesMonth,
 } from '@/lib/sales-entry-client';
-import { MANUAL_SALES_METHODS, type ManualSalesMethod } from '@/lib/pos-types';
+import { MANUAL_SALES_METHODS, ETHNICITY_KEYS, type ManualSalesMethod, type EthnicityKey, type GuestEthnicity } from '@/lib/pos-types';
 import { downloadCsv } from '@/lib/csv-export';
 import { LanguageProvider, useLanguage, STAFF_LANGUAGE_STORAGE_KEY } from './language-context';
 
@@ -19,6 +19,8 @@ import { LanguageProvider, useLanguage, STAFF_LANGUAGE_STORAGE_KEY } from './lan
 // 何月何日に現金売上とカード/QR等の売上がわかるようにしたい」への対応。
 // /pos/sales-report (pos.orders 由来の自動集計) とは別のデータソース。owner/manager限定
 // (sub_manager は締め出す。/pos/sales-report と同じ方針)。
+// 客層(人種)もその日の合計人数として記録できる (2026-09-24 追加。Tom「人種も入力できるように」)。
+// ラベルは guest-demographics-modal.tsx と同じ共有i18nキー (guestDemo.ethnicityX) を再利用する。
 
 const METHOD_LABEL_KEY: Record<ManualSalesMethod, string> = {
   cash: 'salesEntry.methodCash',
@@ -30,10 +32,41 @@ const METHOD_LABEL_KEY: Record<ManualSalesMethod, string> = {
   voucher: 'salesEntry.methodVoucher',
 };
 
+const ETHNICITY_LABEL_KEY: Record<EthnicityKey, string> = {
+  khmer: 'guestDemo.ethnicityKhmer',
+  japanese: 'guestDemo.ethnicityJapanese',
+  chinese: 'guestDemo.ethnicityChinese',
+  korean: 'guestDemo.ethnicityKorean',
+  western: 'guestDemo.ethnicityWestern',
+  other: 'guestDemo.ethnicityOther',
+};
+
 type FormAmounts = Record<ManualSalesMethod, string>;
+type FormEthnicity = Record<EthnicityKey, string>;
 
 function emptyAmounts(): FormAmounts {
   return { cash: '', creditCard: '', abaQr: '', kbQr: '', ppcbQr: '', delivery: '', voucher: '' };
+}
+
+function emptyEthnicity(): FormEthnicity {
+  return { khmer: '', japanese: '', chinese: '', korean: '', western: '', other: '' };
+}
+
+function ethnicityToForm(ethnicity: GuestEthnicity): FormEthnicity {
+  const form = emptyEthnicity();
+  for (const key of ETHNICITY_KEYS) {
+    const v = ethnicity[key];
+    if (v) form[key] = String(v);
+  }
+  return form;
+}
+
+function ethnicityTotal(form: FormEthnicity): number {
+  return ETHNICITY_KEYS.reduce((sum, k) => sum + (Number(form[k]) || 0), 0);
+}
+
+function ethnicityBreakdown(t: (key: string, vars?: Record<string, string | number>) => string, ethnicity: GuestEthnicity): { label: string; count: number }[] {
+  return ETHNICITY_KEYS.map((k) => ({ label: t(ETHNICITY_LABEL_KEY[k]), count: ethnicity[k] ?? 0 })).filter((e) => e.count > 0);
 }
 
 function todayDate() {
@@ -128,6 +161,7 @@ function SalesEntryPanel() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [date, setDate] = useState(todayDate());
   const [amounts, setAmounts] = useState<FormAmounts>(emptyAmounts());
+  const [ethnicity, setEthnicity] = useState<FormEthnicity>(emptyEthnicity());
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -173,10 +207,12 @@ function SalesEntryPanel() {
             delivery: String(entry.deliveryUsd),
             voucher: String(entry.voucherUsd),
           });
+          setEthnicity(ethnicityToForm(entry.ethnicity));
           setNote(entry.note ?? '');
         } else {
           setEditingId(null);
           setAmounts(emptyAmounts());
+          setEthnicity(emptyEthnicity());
           setNote('');
         }
       })
@@ -200,6 +236,7 @@ function SalesEntryPanel() {
       delivery: String(entry.deliveryUsd),
       voucher: String(entry.voucherUsd),
     });
+    setEthnicity(ethnicityToForm(entry.ethnicity));
     setNote(entry.note ?? '');
     setFormError(null);
   }
@@ -208,6 +245,7 @@ function SalesEntryPanel() {
     setDate(todayDate());
     setEditingId(null);
     setAmounts(emptyAmounts());
+    setEthnicity(emptyEthnicity());
     setNote('');
     setFormError(null);
   }
@@ -225,6 +263,10 @@ function SalesEntryPanel() {
         ppcbQrUsd: Number(amounts.ppcbQr) || 0,
         deliveryUsd: Number(amounts.delivery) || 0,
         voucherUsd: Number(amounts.voucher) || 0,
+        ethnicity: ETHNICITY_KEYS.reduce((acc, k) => {
+          acc[k] = Number(ethnicity[k]) || 0;
+          return acc;
+        }, {} as GuestEthnicity),
         note: note.trim() || undefined,
       });
       resetForm();
@@ -255,11 +297,20 @@ function SalesEntryPanel() {
     if (!data || data.days.length === 0) return;
     downloadCsv(
       `${t('salesEntry.csvFilename')}_${month}`,
-      [t('salesEntry.csvDate'), ...MANUAL_SALES_METHODS.map((m) => t(METHOD_LABEL_KEY[m])), t('salesEntry.colTotal'), t('salesEntry.colNote')],
+      [
+        t('salesEntry.csvDate'),
+        ...MANUAL_SALES_METHODS.map((m) => t(METHOD_LABEL_KEY[m])),
+        t('salesEntry.colTotal'),
+        ...ETHNICITY_KEYS.map((k) => t(ETHNICITY_LABEL_KEY[k])),
+        t('salesEntry.colGuests'),
+        t('salesEntry.colNote'),
+      ],
       data.days.map((d) => [
         d.date,
         ...MANUAL_SALES_METHODS.map((m) => amountForMethod(d, m).toFixed(2)),
         (d.cashUsd + d.creditCardUsd + d.abaQrUsd + d.kbQrUsd + d.ppcbQrUsd + d.deliveryUsd + d.voucherUsd).toFixed(2),
+        ...ETHNICITY_KEYS.map((k) => d.ethnicity[k] ?? 0),
+        ETHNICITY_KEYS.reduce((sum, k) => sum + (d.ethnicity[k] ?? 0), 0),
         d.note ?? '',
       ]),
     );
@@ -295,6 +346,29 @@ function SalesEntryPanel() {
               />
             </div>
           ))}
+        </div>
+        <div className="mb-3">
+          <div className="mb-1.5 flex items-center justify-between">
+            <span className="text-[12.5px] font-semibold">{t('salesEntry.ethnicityTitle')}</span>
+            <span className="text-[11.5px] text-muted-foreground">{t('guestDemo.totalCount', { count: ethnicityTotal(ethnicity) })}</span>
+          </div>
+          <div className="grid grid-cols-3 gap-3 sm:grid-cols-6">
+            {ETHNICITY_KEYS.map((k) => (
+              <div key={k}>
+                <label className="mb-1 block text-[11.5px] font-semibold text-muted-foreground">{t(ETHNICITY_LABEL_KEY[k])}</label>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  step="1"
+                  value={ethnicity[k]}
+                  onChange={(e) => setEthnicity((prev) => ({ ...prev, [k]: e.target.value }))}
+                  placeholder="0"
+                  className="h-10 w-full rounded-lg border border-border px-2.5 text-[13px]"
+                />
+              </div>
+            ))}
+          </div>
         </div>
         <div className="mb-3">
           <label className="mb-1 block text-[12.5px] font-semibold">{t('salesEntry.noteLabel')}</label>
@@ -365,12 +439,14 @@ function SalesEntryPanel() {
                         </th>
                       ))}
                       <th className="px-3 py-2 text-right font-semibold">{t('salesEntry.colTotal')}</th>
+                      <th className="px-3 py-2 text-left font-semibold">{t('salesEntry.colGuests')}</th>
                       <th className="px-3 py-2 text-right font-semibold">{t('salesEntry.colActions')}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {data.days.map((d) => {
                       const rowTotal = d.cashUsd + d.creditCardUsd + d.abaQrUsd + d.kbQrUsd + d.ppcbQrUsd + d.deliveryUsd + d.voucherUsd;
+                      const ethBreakdown = ethnicityBreakdown(t, d.ethnicity);
                       return (
                         <tr key={d.id} className="border-t border-border">
                           <td className="px-3 py-2">{d.date}</td>
@@ -382,6 +458,9 @@ function SalesEntryPanel() {
                           <td className="px-3 py-2 text-right">${d.deliveryUsd.toFixed(2)}</td>
                           <td className="px-3 py-2 text-right">${d.voucherUsd.toFixed(2)}</td>
                           <td className="px-3 py-2 text-right font-semibold">${rowTotal.toFixed(2)}</td>
+                          <td className="px-3 py-2 text-[11.5px] text-muted-foreground">
+                            {ethBreakdown.length > 0 ? ethBreakdown.map((e) => `${e.label} ${e.count}`).join(' / ') : '—'}
+                          </td>
                           <td className="px-3 py-2 text-right">
                             <div className="flex justify-end gap-1.5">
                               <button onClick={() => loadForEdit(d)} className="h-7 rounded-md border border-border px-2.5 text-[11.5px] font-semibold">

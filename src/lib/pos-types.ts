@@ -337,6 +337,9 @@ export type ManualDailySalesRecord = {
   ppcbQrUsd: number;
   deliveryUsd: number;
   voucherUsd: number;
+  /** その日の客層(人種)人数。/pos/sales-report のテーブル別詳細と同じ GuestEthnicity 構造
+   *  (2026-09-24 追加。Tom「人種も入力できるようにしてください」)。 */
+  ethnicity: GuestEthnicity;
   note: string | null;
   createdByName: string | null;
   updatedByName: string | null;

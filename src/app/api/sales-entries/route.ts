@@ -2,15 +2,16 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createPosAdminClient, getPosStoreId } from '@/lib/supabase/admin';
 import { withPosStaff } from '@/lib/pos-auth';
-import type { ManualDailySalesRecord } from '@/lib/pos-types';
+import { ETHNICITY_KEYS, type ManualDailySalesRecord, type GuestEthnicity } from '@/lib/pos-types';
 
 // 手入力売上 (2026-09-24 追加)。オーダー・会計機能を一時的に使わない間、
 // 「何月何日に現金売上といくら、カード/QR売上がいくらか」を手入力で記録するための機能。
 // pos.orders 由来の /api/sales-report とは別データソース (オーダー機能停止中は常に0件になるため)。
 // 売上が見える情報のため manager 以上限定・sub_manager は締め出す (/api/sales-report と同じ方針)。
+// 客層(人種)も日単位の合計人数として記録できる (2026-09-24 追加。Tom「人種も入力できるように」)。
 
 const selectCols =
-  'id, date, cash_usd, credit_card_usd, aba_qr_usd, kb_qr_usd, ppcb_qr_usd, delivery_usd, voucher_usd, note, created_by_name, updated_by_name, created_at, updated_at';
+  'id, date, cash_usd, credit_card_usd, aba_qr_usd, kb_qr_usd, ppcb_qr_usd, delivery_usd, voucher_usd, ethnicity, note, created_by_name, updated_by_name, created_at, updated_at';
 
 type Row = {
   id: string;
@@ -22,6 +23,7 @@ type Row = {
   ppcb_qr_usd: number;
   delivery_usd: number;
   voucher_usd: number;
+  ethnicity: GuestEthnicity | null;
   note: string | null;
   created_by_name: string | null;
   updated_by_name: string | null;
@@ -40,6 +42,7 @@ function toRecord(row: Row): ManualDailySalesRecord {
     ppcbQrUsd: Number(row.ppcb_qr_usd),
     deliveryUsd: Number(row.delivery_usd),
     voucherUsd: Number(row.voucher_usd),
+    ethnicity: row.ethnicity ?? {},
     note: row.note,
     createdByName: row.created_by_name,
     updatedByName: row.updated_by_name,
@@ -97,7 +100,16 @@ export const GET = withPosStaff(
       { cashUsd: 0, creditCardUsd: 0, abaQrUsd: 0, kbQrUsd: 0, ppcbQrUsd: 0, deliveryUsd: 0, voucherUsd: 0 },
     );
     const grandTotal = Object.values(monthTotals).reduce((s, v) => s + v, 0);
-    return NextResponse.json({ month, days, monthTotals, grandTotal });
+
+    const ethnicityMonthTotals = days.reduce(
+      (acc, d) => {
+        for (const key of ETHNICITY_KEYS) acc[key] = (acc[key] ?? 0) + (d.ethnicity[key] ?? 0);
+        return acc;
+      },
+      {} as Record<(typeof ETHNICITY_KEYS)[number], number>,
+    );
+
+    return NextResponse.json({ month, days, monthTotals, grandTotal, ethnicityMonthTotals });
   },
   GATE_OPTS,
 );
@@ -108,6 +120,7 @@ function nextMonth(month: string): string {
 }
 
 const amountField = z.number().min(0).max(999999).default(0);
+const ethnicityCountField = z.number().int().min(0).max(9999).optional();
 
 const postSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, '日付は YYYY-MM-DD 形式で入力してください'),
@@ -118,6 +131,18 @@ const postSchema = z.object({
   ppcbQrUsd: amountField,
   deliveryUsd: amountField,
   voucherUsd: amountField,
+  ethnicity: z
+    .object({
+      khmer: ethnicityCountField,
+      japanese: ethnicityCountField,
+      chinese: ethnicityCountField,
+      korean: ethnicityCountField,
+      western: ethnicityCountField,
+      other: ethnicityCountField,
+    })
+    .partial()
+    .optional()
+    .default({}),
   note: z.string().trim().max(500).optional(),
 });
 
@@ -136,6 +161,13 @@ export const POST = withPosStaff(
 
     const { data: existing } = await supabase.from('manual_daily_sales').select('id, created_by_name').eq('store_id', storeId).eq('date', d.date).maybeSingle();
 
+    // 0人のキーは保存せず間引く (見た目・CSV出力をすっきりさせるため)。
+    const ethnicity: GuestEthnicity = {};
+    for (const key of ETHNICITY_KEYS) {
+      const v = d.ethnicity[key];
+      if (v && v > 0) ethnicity[key] = v;
+    }
+
     const { data, error } = await supabase
       .from('manual_daily_sales')
       .upsert(
@@ -149,6 +181,7 @@ export const POST = withPosStaff(
           ppcb_qr_usd: d.ppcbQrUsd,
           delivery_usd: d.deliveryUsd,
           voucher_usd: d.voucherUsd,
+          ethnicity,
           note: d.note || null,
           created_by: existing ? undefined : session.staffId,
           created_by_name: existing ? existing.created_by_name : session.displayName,

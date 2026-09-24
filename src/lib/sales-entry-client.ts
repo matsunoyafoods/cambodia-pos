@@ -4,7 +4,7 @@
  * 記録するための機能。pos.orders 由来の sales-report-client.ts とは別データ。
  */
 
-import type { ManualDailySalesRecord, ManualSalesMethod } from './pos-types';
+import type { ManualDailySalesRecord, ManualSalesMethod, EthnicityKey, GuestEthnicity } from './pos-types';
 
 export class PosSalesEntryApiError extends Error {
   constructor(
@@ -36,11 +36,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export type ManualSalesMonthTotals = Record<ManualSalesMethod, number>;
 
+export type ManualEthnicityMonthTotals = Partial<Record<EthnicityKey, number>>;
+
 export type ManualDailySalesMonth = {
   month: string;
   days: ManualDailySalesRecord[];
   monthTotals: ManualSalesMonthTotals;
   grandTotal: number;
+  ethnicityMonthTotals: ManualEthnicityMonthTotals;
 };
 
 export function getManualDailySalesMonth(month: string): Promise<ManualDailySalesMonth> {
@@ -60,6 +63,7 @@ export type SaveManualDailySalesInput = {
   ppcbQrUsd: number;
   deliveryUsd: number;
   voucherUsd: number;
+  ethnicity?: GuestEthnicity;
   note?: string;
 };
 
