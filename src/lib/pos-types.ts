@@ -319,6 +319,31 @@ export type ExpenseRecord = {
   createdAt: string;
 };
 
+// ---------- 手入力売上 (2026-09-24 追加) ----------
+// オーダー・会計機能を一時的に使わない間、日々の売上を手入力で記録するための機能。
+// pos.orders/pos.payments 由来の集計 (sales-report-client.ts) とは別データ。
+
+/** 手入力売上の支払い方法キー。店舗設定で増減させる想定ではないため固定。 */
+export const MANUAL_SALES_METHODS = ['cash', 'creditCard', 'abaQr', 'kbQr', 'ppcbQr', 'delivery', 'voucher'] as const;
+export type ManualSalesMethod = (typeof MANUAL_SALES_METHODS)[number];
+
+export type ManualDailySalesRecord = {
+  id: string;
+  date: string; // 'YYYY-MM-DD'
+  cashUsd: number;
+  creditCardUsd: number;
+  abaQrUsd: number;
+  kbQrUsd: number;
+  ppcbQrUsd: number;
+  deliveryUsd: number;
+  voucherUsd: number;
+  note: string | null;
+  createdByName: string | null;
+  updatedByName: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 // ---------- 勤怠・人件費 (2026-08-31 追加。データ収集・AI分析機能 第一弾) ----------
 // シフト作成機能は含めない (Tom確認済み)。出勤・休憩・退勤の記録のみ。
 
