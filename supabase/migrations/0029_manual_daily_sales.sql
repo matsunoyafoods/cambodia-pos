@@ -4,6 +4,10 @@
 -- オーダー機能停止中は常に0件になってしまうため、別テーブルで手入力の日次売上を記録する。
 -- 支払い方法の内訳は Tom の実際の運用 (credit card / ABA QR / KB QR / PPCB QR / Delivery /
 -- voucher) に合わせて固定カラムにした (店舗設定で自由に増減する要件ではないため)。
+--
+-- created_by/updated_by は pos.staff(id) への FK を付けない (0019_payroll.sql のコメント通り、
+-- 店舗を跨いだ誤参照の事故が過去に複数回起きたため、pos.staff へのFKは付けずアプリ層
+-- (API ルート) で store_id・staff_id の整合性を検証する方針に統一されている)。
 
 create table pos.manual_daily_sales (
   id                uuid primary key default gen_random_uuid(),
@@ -17,9 +21,9 @@ create table pos.manual_daily_sales (
   delivery_usd      numeric(10,2) not null default 0,
   voucher_usd       numeric(10,2) not null default 0,
   note              text,
-  created_by        uuid references public.staff(id),
+  created_by        uuid,
   created_by_name   text,
-  updated_by        uuid references public.staff(id),
+  updated_by        uuid,
   updated_by_name   text,
   created_at        timestamptz not null default now(),
   updated_at        timestamptz not null default now(),
