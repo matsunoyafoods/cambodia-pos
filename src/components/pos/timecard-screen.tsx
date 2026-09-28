@@ -34,12 +34,11 @@ type TFunc = ReturnType<typeof useLanguage>['t'];
 // 「勤怠レポート」サブタブから呼ばれる。この画面には打刻 (PunchCard) だけが残っている。
 //
 // 2026-09-28: 本日の打刻履歴表示を拡張 (Tom「みんなの履歴が残るようにしてください。タイムカード
-// は削除と編集ができるようにしてください。編集できるのはマネージャーだけです」への対応)。
-// 他人の打刻閲覧・編集・削除は元々 manager 以上限定の方針 (timecard-client.ts 冒頭コメント、
-// api/timecards/route.ts 参照。人件費 = 給与に関わる情報のため)。そのためこの拡張は role で
-// 出し分ける: owner/manager/sub_manager には全スタッフの本日履歴 (TeamHistory、編集・削除ボタン
-// 付き、api/timecards/[id]/route.ts の既存 manager-only PATCH/DELETE をそのまま使う) を表示し、
-// それ以外のロールには従来通り自分の履歴のみ (TodayHistory) を表示する。
+// は削除と編集ができるようにしてください。編集できるのはマネージャーだけです」
+// →「履歴は全員見れるようにしてください」)。
+// 全スタッフの本日履歴 (TeamHistory) を全ロールに表示する。編集・削除ボタンは
+// owner/manager/sub_manager のみ表示し、実際の権限チェックも api/timecards/[id]/route.ts の
+// 既存 manager-only PATCH/DELETE のまま (UI側で見せる/隠すだけでなく API 側でも二重に保護)。
 
 function statusLabel(status: MyTimecardStatus['status'], t: TFunc): string {
   return t(`timecardScreen.status.${status}`);
@@ -226,47 +225,20 @@ function PunchCard() {
         </button>
       </div>
 
-      {canManage ? <TeamHistory lang={lang} t={t} /> : <TodayHistory punches={status?.todayPunches ?? []} lang={lang} t={t} />}
+      <TeamHistory lang={lang} t={t} canManage={canManage} />
     </div>
   );
 }
 
-// 本日の打刻履歴 (2026-09-28 追加。Tom「出勤・退勤しても同じ画面に履歴が残るようにしてほしい」
-// への対応)。選択中のスタッフ (selectedStaffId) の記録だけを表示する — API側 (status/route.ts)
-// が対象スタッフで絞り込んだ todayPunches をそのまま渡しているだけなので、個人ごとに独立して
-// 表示される。「設定した時間に消える」は API 側の historyWindowStartIso() (店舗設定
-// timecardHistoryResetTime) によるフィルタで実現しており、この画面は渡された一覧をそのまま出すだけ。
-function TodayHistory({ punches, lang, t }: { punches: MyTimecardStatus['todayPunches']; lang: Lang; t: TFunc }) {
-  return (
-    <div className="mt-4 border-t border-border pt-3">
-      <div className="mb-2 text-[12.5px] font-semibold text-muted-foreground">{t('timecardScreen.historyTitle')}</div>
-      {punches.length === 0 ? (
-        <div className="text-[12.5px] text-muted-foreground">{t('timecardScreen.historyEmpty')}</div>
-      ) : (
-        <div className="flex flex-col gap-1.5">
-          {punches.map((p) => (
-            <div key={p.id} className="flex items-center justify-between rounded-lg bg-secondary/30 px-3 py-2 text-[12.5px]">
-              <span>
-                {fmtTime(p.clockIn, lang)} 〜 {p.clockOut ? fmtTime(p.clockOut, lang) : t('timecardScreen.status.working')}
-              </span>
-              {p.breaks.length > 0 && (
-                <span className="text-muted-foreground">{t('timecardScreen.breakCountShort', { count: p.breaks.length })}</span>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// 全スタッフの本日履歴 (2026-09-28 追加。owner/manager/sub_manager のみ表示 — 他人の打刻は
-// 給与に関わる情報のため manager 以上限定という既存方針に合わせた。api/timecards/today から
-// 取得し、行ごとに common.edit / common.delete ボタンを出す。編集は attendance-report-tab.tsx
-// と同じ TimecardEditForm をそのまま再利用 (フィールド構成・API呼び出しの重複を避けるため)。
-// 削除・編集の API 側権限チェック (withPosStaff('manager', ...)) は変更していない — ここは
-// あくまで UI 側の出し分けで、実際のガードは既存の api/timecards/[id]/route.ts のまま。
-function TeamHistory({ lang, t }: { lang: Lang; t: TFunc }) {
+// 全スタッフの本日履歴 (2026-09-28 追加。閲覧は全ロールに表示 (Tom「履歴は全員見れるように
+// してください」)。編集・削除ボタンは canManage (owner/manager/sub_manager) の時だけ出す —
+// 他人の打刻の編集・削除は給与に関わる操作のため manager 以上限定という既存方針は維持。
+// api/timecards/today (part_time 以上で閲覧可) から取得し、行ごとに common.edit /
+// common.delete ボタンを出す (canManage の時のみ)。編集は attendance-report-tab.tsx と同じ
+// TimecardEditForm をそのまま再利用 (フィールド構成・API呼び出しの重複を避けるため)。
+// 削除・編集の API 側権限チェック (api/timecards/[id]/route.ts、withPosStaff('manager', ...))
+// は変更していない — UI側で隠すだけでなく API 側でも二重に保護されている。
+function TeamHistory({ lang, t, canManage }: { lang: Lang; t: TFunc; canManage: boolean }) {
   const [records, setRecords] = useState<TimecardRecord[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -313,15 +285,19 @@ function TeamHistory({ lang, t }: { lang: Lang; t: TFunc }) {
                 <span className="flex items-center gap-2 text-muted-foreground">
                   {r.breaks.length > 0 && <span>{t('timecardScreen.breakCountShort', { count: r.breaks.length })}</span>}
                   {r.editedAt && <span className="text-amber-600">{t('timecardScreen.editedBadge')}</span>}
-                  <button onClick={() => setEditingId((v) => (v === r.id ? null : r.id))} className="rounded-md border border-border px-2 py-1 text-[11.5px] font-semibold">
-                    {t('common.edit')}
-                  </button>
-                  <button onClick={() => handleDelete(r.id)} className="rounded-md border border-border px-2 py-1 text-[11.5px] font-semibold text-destructive">
-                    {t('common.delete')}
-                  </button>
+                  {canManage && (
+                    <>
+                      <button onClick={() => setEditingId((v) => (v === r.id ? null : r.id))} className="rounded-md border border-border px-2 py-1 text-[11.5px] font-semibold">
+                        {t('common.edit')}
+                      </button>
+                      <button onClick={() => handleDelete(r.id)} className="rounded-md border border-border px-2 py-1 text-[11.5px] font-semibold text-destructive">
+                        {t('common.delete')}
+                      </button>
+                    </>
+                  )}
                 </span>
               </div>
-              {editingId === r.id && (
+              {canManage && editingId === r.id && (
                 <TimecardEditForm
                   record={r}
                   onDone={() => {

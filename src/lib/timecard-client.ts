@@ -93,8 +93,9 @@ export async function listTimecards(filter?: { from?: string; to?: string }): Pr
   return timecards;
 }
 
-// 本日の全スタッフ打刻履歴 (2026-09-28 追加。manager 以上のみ。打刻画面 /pos/timecard の
-// 「みんなの履歴」表示用。Tom「みんなの履歴が残るようにしてください」への対応)。
+// 本日の全スタッフ打刻履歴 (2026-09-28 追加。打刻画面 /pos/timecard の「みんなの履歴」表示用。
+// Tom「みんなの履歴が残るようにしてください」「履歴は全員見れるようにしてください」への対応。
+// 閲覧は全スタッフ (part_time 以上) に開放。編集・削除は別途 manager 以上のみ)。
 export async function listTodayTimecards(): Promise<TimecardRecord[]> {
   const { timecards } = await request<{ timecards: TimecardRecord[] }>('/api/timecards/today');
   return timecards;
