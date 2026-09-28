@@ -67,29 +67,78 @@ export function findBestMatch<T extends { name: string }>(text: string, candidat
   return best;
 }
 
+// ---------- ABA銀行アプリ等の送金確認画面向けの調整 (2026-09-28 追加) ----------
+// Tomの利用は「紙のレシートより銀行アプリの送金確認画面がメイン」とのことなので、その画面
+// レイアウトに合わせて精度を上げる。共通パターン: 金額だけの行 (例 "-2.95 USD") の次の行に
+// 店名 (受取人名) が来る。このパターンをまず優先的に探し、見つからない場合のみ従来の
+// 汎用ヒューリスティックにフォールバックする。
+//
+// 重要: 送金確認画面には「Original amount: 14,500.00 KHR」のようにリエル建ての金額も
+// 印字されることがある (USDへの自動換算前の元金額)。数値としてはUSD建ての金額より大幅に
+// 大きくなるため、「本文中で一番大きい数値」のような単純な推測だと誤って採用してしまう。
+// そのため KHR/៛ が含まれる行は金額候補から常に除外する。
+
+function lineHasRielMarker(s: string): boolean {
+  return /KHR|៛/i.test(s);
+}
+
 /** 金額・電話番号・取引番号など「店名ではなさそうな」行かどうかを判定する。
  * (2026-09-28 追加。銀行アプリの送金確認画面をスキャンした際、ポップアップ通知と重なって
  * OCRが「E」(店名の一部) と「2.95 USD」(金額) を1行に混ぜてしまい、"E-2.95 USD" という
- * 店名候補を返してしまう事例があったための対策。) */
+ * 店名候補を返してしまう事例があったための対策。「Original amount:」「Purchase #:」等の
+ * ラベル行 (末尾がコロン) や、電話番号・口座番号・取引番号の断片 (3桁以上の連続する数字)
+ * も除外する。) */
 function looksLikeNonVendorLine(s: string): boolean {
   if (/(?:USD|US\$|\$|KHR|៛)/i.test(s)) return true;
   if (/\b[0-9]{1,6}(?:,[0-9]{3})*\.[0-9]{2}\b/.test(s)) return true;
+  if (/\d{3,}/.test(s)) return true;
+  if (/[:：]\s*$/.test(s)) return true;
   const digitCount = (s.match(/[0-9]/g) ?? []).length;
   if (digitCount >= s.length * 0.4) return true;
   return false;
 }
 
+/** 「-2.95 USD」のように、金額とUSD表記だけで構成された行 (前後に他の文字が無いもの) を
+ * 全て探す。ABA等の送金確認画面のヘッダー部分にほぼ必ず現れる形式。通知トーストのプレビュー
+ * や「Original amount: 69.31 USD」のようにラベルと値が別行になったケースなど、同じ画面に
+ * 複数回現れることがあるため、行番号付きで全件返す (呼び出し側で「次の行が店名として妥当な
+ * 最初の一致」を選ぶ)。 */
+function findAmountHeaderLines(lines: string[]): { amount: number; lineIndex: number }[] {
+  const re = /^-?\$?\s*([0-9]{1,3}(?:,[0-9]{3})*\.[0-9]{2})\s*USD\.?$/i;
+  const matches: { amount: number; lineIndex: number }[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(re);
+    if (m) {
+      const num = Number(m[1].replace(/,/g, ''));
+      if (Number.isFinite(num) && num > 0) matches.push({ amount: num, lineIndex: i });
+    }
+  }
+  return matches;
+}
+
 /** 既存マスタに一致しなかった場合の「店名っぽい行」の推測 (新規仕入れ先の登録提案用)。
- * レシートは通常、先頭付近に店名が印字されるため、意味のありそうな最初の行を採用する
- * (数字・記号だけの行、金額・電話番号らしき行は除外)。あくまで簡易的な推測 — ユーザーが
- * 確認・修正できる前提 (仕入れ先は元々自由入力欄のため、間違っていてもその場で書き換えられる)。 */
+ * まず「金額行の次の行」(送金確認画面の受取人名パターン) を、複数の金額行候補それぞれで
+ * 順番に試し、最初に「店名として妥当」と判定できたものを採用する (例: 通知トーストの次の
+ * 行が「口座から支払いました」のようなKhmerの案内文だった場合はスキップし、本体カードの
+ * 次の行にある実際の店名を採用する)。どれも妥当でなければレシート先頭付近の意味のありそうな
+ * 行を採用する (数字・記号だけの行、金額・電話番号らしき行は除外)。あくまで簡易的な推測 —
+ * ユーザーが確認・修正できる前提 (仕入れ先は元々自由入力欄のため、間違っていてもその場で
+ * 書き換えられる)。 */
 export function guessVendorNameFromText(text: string): string | null {
-  const lines = text
-    .split('\n')
-    .map((l) => l.trim())
+  const lines = text.split('\n').map((l) => l.trim());
+
+  const headers = findAmountHeaderLines(lines);
+  for (const header of headers) {
+    const candidate = lines[header.lineIndex + 1]?.trim();
+    if (candidate && candidate.length >= 2 && !looksLikeNonVendorLine(candidate)) {
+      return candidate;
+    }
+  }
+
+  const fallback = lines
     .filter((l) => l.length >= 2 && !/^[\d\s\-#:/.]+$/.test(l))
     .filter((l) => !looksLikeNonVendorLine(l));
-  return lines[0] ?? null;
+  return fallback[0] ?? null;
 }
 
 // ---------- 金額・日付の推測 (2026-09-28 追加) ----------
@@ -116,7 +165,8 @@ const AMOUNT_KEYWORDS = [
 
 /** 1行 (または任意の文字列) の中から、通貨記号付き・または小数点2桁付きの金額のうち
  * 最大のものを取り出す。レシート番号や電話番号などの整数の誤検出を避けるため、通貨記号
- * なしの場合は必ず小数点以下2桁を要求する。 */
+ * なしの場合は必ず小数点以下2桁を要求する。KHR/៛ を含む行は呼び出し側で除外してから渡す
+ * こと (元のリエル建て金額をUSDと誤認しないため)。 */
 function extractLargestAmount(s: string): number | null {
   const re = /(?:USD|US\$|\$)\s*([0-9]{1,6}(?:,[0-9]{3})*(?:\.[0-9]{1,2})?)|\b([0-9]{1,6}(?:,[0-9]{3})*\.[0-9]{2})\b/g;
   let best: number | null = null;
@@ -131,17 +181,25 @@ function extractLargestAmount(s: string): number | null {
   return best;
 }
 
-/** レシート全文から合計金額 (USD) を推測する。「合計」「TOTAL」等のキーワード行 (無ければ
- * 次の行も見る) を優先し、見つからなければ本文中で一番大きい金額らしき数値を採用する
- * (グランドトータルは通常、個々の商品単価より大きいため)。 */
+/** レシート全文から合計金額 (USD) を推測する。
+ * 1. まず「-2.95 USD」のような金額単独行 (送金確認画面のヘッダー) を探す — 見つかれば最優先。
+ * 2. 無ければ「合計」「TOTAL」等のキーワード行 (無ければ次の行も見る) を採用する。
+ * 3. それでも無ければ本文中で一番大きい金額らしき数値を採用する。
+ * いずれの段階でも KHR/៛ を含む行は候補から除外する (リエル建ての「Original amount」等を
+ * USD建てと誤認しないため)。 */
 export function guessAmountFromText(text: string): number | null {
   const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
 
+  const headers = findAmountHeaderLines(lines);
+  if (headers.length > 0) return headers[0].amount;
+
+  const usdLines = lines.filter((l) => !lineHasRielMarker(l));
+
   let bestFromKeyword: number | null = null;
-  for (let i = 0; i < lines.length; i++) {
-    const lower = lines[i].toLowerCase();
+  for (let i = 0; i < usdLines.length; i++) {
+    const lower = usdLines[i].toLowerCase();
     if (AMOUNT_KEYWORDS.some((kw) => lower.includes(kw))) {
-      const amt = extractLargestAmount(lines[i]) ?? extractLargestAmount(lines[i + 1] ?? '');
+      const amt = extractLargestAmount(usdLines[i]) ?? extractLargestAmount(usdLines[i + 1] ?? '');
       if (amt !== null && (bestFromKeyword === null || amt > bestFromKeyword)) {
         bestFromKeyword = amt;
       }
@@ -149,7 +207,7 @@ export function guessAmountFromText(text: string): number | null {
   }
   if (bestFromKeyword !== null) return bestFromKeyword;
 
-  return extractLargestAmount(text);
+  return extractLargestAmount(usdLines.join('\n'));
 }
 
 const MONTH_NAMES: Record<string, number> = {
