@@ -204,6 +204,37 @@ function PunchCard() {
           {t('timecardScreen.action.clockOut')}
         </button>
       </div>
+
+      <TodayHistory punches={status?.todayPunches ?? []} lang={lang} t={t} />
+    </div>
+  );
+}
+
+// 本日の打刻履歴 (2026-09-28 追加。Tom「出勤・退勤しても同じ画面に履歴が残るようにしてほしい」
+// への対応)。選択中のスタッフ (selectedStaffId) の記録だけを表示する — API側 (status/route.ts)
+// が対象スタッフで絞り込んだ todayPunches をそのまま渡しているだけなので、個人ごとに独立して
+// 表示される。「設定した時間に消える」は API 側の historyWindowStartIso() (店舗設定
+// timecardHistoryResetTime) によるフィルタで実現しており、この画面は渡された一覧をそのまま出すだけ。
+function TodayHistory({ punches, lang, t }: { punches: MyTimecardStatus['todayPunches']; lang: Lang; t: TFunc }) {
+  return (
+    <div className="mt-4 border-t border-border pt-3">
+      <div className="mb-2 text-[12.5px] font-semibold text-muted-foreground">{t('timecardScreen.historyTitle')}</div>
+      {punches.length === 0 ? (
+        <div className="text-[12.5px] text-muted-foreground">{t('timecardScreen.historyEmpty')}</div>
+      ) : (
+        <div className="flex flex-col gap-1.5">
+          {punches.map((p) => (
+            <div key={p.id} className="flex items-center justify-between rounded-lg bg-secondary/30 px-3 py-2 text-[12.5px]">
+              <span>
+                {fmtTime(p.clockIn, lang)} 〜 {p.clockOut ? fmtTime(p.clockOut, lang) : t('timecardScreen.status.working')}
+              </span>
+              {p.breaks.length > 0 && (
+                <span className="text-muted-foreground">{t('timecardScreen.breakCountShort', { count: p.breaks.length })}</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

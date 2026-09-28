@@ -1306,6 +1306,7 @@ function SettingsScreenInner() {
           backgroundColor,
           quickMenuKeys,
           registerFloatUsd,
+          timecardHistoryResetTime,
         } = settings;
         const s = await updateGeneralSettings({
           vatRate,
@@ -1323,6 +1324,7 @@ function SettingsScreenInner() {
           backgroundColor,
           quickMenuKeys,
           registerFloatUsd,
+          timecardHistoryResetTime,
         });
         setSettings((prev) => ({ ...prev, ...s }));
       } else {
@@ -1623,6 +1625,20 @@ function SettingsScreenInner() {
                       />
                     </Field>
                   </div>
+
+                  <div className="mt-2 border-t border-border pt-4 text-[13.5px] font-bold">
+                    {t('settings.general.timecardHistoryHeading')}
+                  </div>
+                  <div className="text-[11.5px] text-muted-foreground">{t('settings.general.timecardHistoryDesc')}</div>
+                  <Field label={t('settings.general.timecardHistoryResetLabel')}>
+                    <input
+                      type="time"
+                      value={settings.timecardHistoryResetTime}
+                      disabled={!canManageSettings}
+                      onChange={(e) => update('timecardHistoryResetTime', e.target.value)}
+                      className="h-10 w-36 rounded-lg border border-border px-3 text-[13.5px] disabled:opacity-60"
+                    />
+                  </Field>
                 </>
               )}
             </div>

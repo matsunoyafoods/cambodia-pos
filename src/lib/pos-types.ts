@@ -180,6 +180,12 @@ export type PosSettings = {
    * 開店時から常にレジに入っている釣銭分が毎回「過剰」として出てしまうのを防ぐ。
    * POSネイティブ運用のみ (dine連携店舗では使わない)。未設定 = 0。 */
   registerFloatUsd: number;
+  /** タイムカード画面 (/pos/timecard) に表示する「本日の打刻履歴」が、店舗タイムゾーン基準で
+   * この時刻を過ぎたら表示上クリアされる (2026-09-28 追加。Tom「出勤・退勤の履歴が同じ画面に
+   * 残るように、その履歴表示は設定した時間に消えるようにしてほしい。毎日見た目もスッキリさせたい」
+   * への対応)。打刻の実データ (pos.timecards) は一切削除されず、あくまで画面表示のフィルタ条件
+   * (「本日」の起点) を変えるだけ。'HH:MM' 形式。デフォルト '00:00' (深夜0時、通常の日付境界)。 */
+  timecardHistoryResetTime: string;
 };
 
 // プリンター実装 (2026-08-31 追加)。レジ画面 (Vercel/クラウド) から店舗LAN内のプリンターへ
@@ -285,6 +291,7 @@ export const DEFAULT_SETTINGS: PosSettings = {
   // 依存を pos-types.ts に持ち込みたくないため、ここでは文字列として直接持つ)。
   quickMenuKeys: ['kitchen', 'drinks', 'handy', 'reservations', 'timecard', 'tableLayout'],
   registerFloatUsd: 0,
+  timecardHistoryResetTime: '00:00',
 };
 
 // ---------- 経費管理 (2026-08-31 追加。データ収集・AI分析機能 第一弾) ----------

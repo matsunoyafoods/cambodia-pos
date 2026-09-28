@@ -39,6 +39,10 @@ export async function GET() {
     quickMenuKeys: Array.isArray(stored.quickMenuKeys) ? stored.quickMenuKeys : DEFAULT_SETTINGS.quickMenuKeys,
     registerFloatUsd:
       typeof stored.registerFloatUsd === 'number' ? stored.registerFloatUsd : DEFAULT_SETTINGS.registerFloatUsd,
+    timecardHistoryResetTime:
+      typeof stored.timecardHistoryResetTime === 'string'
+        ? stored.timecardHistoryResetTime
+        : DEFAULT_SETTINGS.timecardHistoryResetTime,
   };
   return NextResponse.json(settings);
 }

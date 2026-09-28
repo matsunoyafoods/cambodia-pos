@@ -34,6 +34,10 @@ function toPosSettings(storeId: string, raw: unknown): PosSettings {
     quickMenuKeys: Array.isArray(stored.quickMenuKeys) ? stored.quickMenuKeys : DEFAULT_SETTINGS.quickMenuKeys,
     registerFloatUsd:
       typeof stored.registerFloatUsd === 'number' ? stored.registerFloatUsd : DEFAULT_SETTINGS.registerFloatUsd,
+    timecardHistoryResetTime:
+      typeof stored.timecardHistoryResetTime === 'string'
+        ? stored.timecardHistoryResetTime
+        : DEFAULT_SETTINGS.timecardHistoryResetTime,
   };
 }
 
@@ -75,6 +79,7 @@ const patchSchema = z.object({
     .optional(),
   quickMenuKeys: z.array(z.string()).max(6).optional(),
   registerFloatUsd: z.number().min(0).optional(),
+  timecardHistoryResetTime: z.string().regex(HHMM_RE, 'HH:MM 形式で入力してください').optional(),
 });
 
 // 更新。manager 以上のみ。

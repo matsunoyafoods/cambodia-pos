@@ -47,9 +47,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 // 打刻できるようにするため、全関数が任意で対象スタッフID (staffId) を受け取れるようにした。
 // 省略時は従来通りログイン中の本人。
 
+export type TimecardTodayPunch = { id: string; clockIn: string; clockOut: string | null; breaks: TimecardBreak[] };
+
 export type MyTimecardStatus = {
   status: TimecardStatus;
   timecard: { id: string; clockIn: string; breaks: TimecardBreak[] } | null;
+  /** 本日の打刻履歴 (2026-09-28 追加)。店舗設定の履歴リセット時刻を起点に、対象スタッフの
+   * 打刻記録だけを新しい順に返す。打刻画面 (/pos/timecard) の履歴表示に使う。 */
+  todayPunches: TimecardTodayPunch[];
 };
 
 export function getTimecardStatus(staffId?: string): Promise<MyTimecardStatus> {
