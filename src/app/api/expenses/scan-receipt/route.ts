@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createPosAdminClient, getPosStoreId } from '@/lib/supabase/admin';
 import { withPosStaff } from '@/lib/pos-auth';
-import { extractReceiptText, findBestMatch, guessAmountFromText, guessDateFromText, guessVendorNameFromText, ReceiptOcrError } from '@/lib/receipt-ocr';
+import { extractReceiptText, findBestMatch, findCategoryHint, guessAmountFromText, guessDateFromText, guessVendorNameFromText, ReceiptOcrError } from '@/lib/receipt-ocr';
 import type { ExpenseCategory, ExpenseVendor } from '@/lib/pos-types';
 
 const MAX_BYTES = 5 * 1024 * 1024; // 5MB (スマホカメラ写真を想定。receipt route と同じ上限)
@@ -13,14 +13,18 @@ const ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/h
 // 入力補助として、マッチした仕入れ先・費目の候補を返すだけ。実際の登録は通常通り
 // POST /api/expenses (この画面のQuickEntryForm) で行う。
 //
-// 費目の推測は「同じ仕入れ先の過去の経費 (直近20件) で一番よく使われている費目」のみを使う
-// (仕入れ先がマッチし、かつ過去の記録がある場合)。以前はレシート本文とマスタ費目名の文字列
-// 一致 (findBestMatch) もフォールバックで試していたが、「Mobile Joint (小口資金)」という
-// 費目名が、送金確認画面に印字される送金元口座名「Mobile Joint Savings」と偶然一致してしまい、
-// 全く無関係な費目が自動入力される事故が起きた (2026-09-29 Tom報告)。費目は金額と違って
-// レシートに直接印字されるものではなく、文字列一致による推測はそもそも精度が低く事故りやすい
-// ため、このフォールバックは廃止した。過去の購入履歴が無い新規仕入れ先の場合は、費目欄は
-// 空のまま (ユーザーに手入力してもらう) が安全。
+// 費目の推測は次の優先順で試す:
+//   1. 同じ仕入れ先の過去の経費 (直近20件) で一番よく使われている費目 (仕入れ先がマッチし、
+//      かつ過去の記録がある場合。このお店自身の最近の実際の使い方を反映するため最優先)
+//   2. Tom自身のExcel台帳から取り込んだ「支払先→費目」の対応ヒント (findCategoryHint、
+//      2026-09-29 追加。新しい仕入れ先で過去の記録がまだない場合に使う)
+// 以前はレシート本文とマスタ費目名の文字列一致 (findBestMatch(text, categories)) もフォール
+// バックで試していたが、「Mobile Joint (小口資金)」という費目名が、送金確認画面に印字される
+// 送金元口座名「Mobile Joint Savings」と偶然一致してしまい、全く無関係な費目が自動入力される
+// 事故が起きた (2026-09-29 Tom報告)。費目マスタの名前は「レシートに実際に印字される文字列」
+// として作られたものではないため文字列一致に使うのは危険と判断し、代わりにTom自身が
+// 「実際に印字される文字列」として確認済みのヒント一覧 (2.) を使うようにした。どちらにも
+// 一致しない場合は費目欄は空のまま (ユーザーに手入力してもらう) が安全。
 //
 // 権限は経費の新規登録 (POST /api/expenses) と同じ part_time 以上 (現場のスタッフもレシート
 // スキャンで入力補助を受けられるように)。ただし新規仕入れ先の登録は既存方針通り manager 以上
@@ -103,6 +107,13 @@ export const POST = withPosStaff('part_time', async (_session, req) => {
       }
     }
   }
+  if (!matchedCategory) {
+    const hintCategory = findCategoryHint(text);
+    if (hintCategory) {
+      matchedCategory = categories.find((c) => c.name === hintCategory) ?? { id: '', name: hintCategory, sortOrder: -1 };
+    }
+  }
+
   const amountGuess = guessAmountFromText(text, khrRate);
   const dateGuess = guessDateFromText(text);
 

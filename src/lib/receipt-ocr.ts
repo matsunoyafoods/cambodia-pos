@@ -51,33 +51,106 @@ function normalize(s: string): string {
   return s.toLowerCase().replace(/[\s　]+/g, '').trim();
 }
 
-/** 日本語 (ひらがな・カタカナ・漢字・全角記号) を取り除いた部分だけを取り出す。マスタの
- * 仕入れ先名に「E-BAKERY (パン屋)」のように日本語の補足メモが付いていると、レシート本文
- * (英語・クメール語) とは完全一致しなくなり、毎回「未登録」と誤判定されてしまうため
- * (2026-09-28 追加。Tom「登録名に日本語が入っているから新しい登録と勘違いしている。英語の
- * 完全一致でお願いしたい」への対応)。 */
-function stripJapanese(s: string): string {
-  return s
-    .replace(/[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\u3000-\u303F\uFF00-\uFFEF]/g, '')
-    .replace(/[()[\]{}]/g, '') // 日本語部分を囲んでいた半角カッコ等の残骸を除去
-    .replace(/\s{2,}/g, ' ')
-    .trim();
+/** マスタ名の末尾についている「注記」(括弧書き) を取り除く。マスタの仕入れ先名は
+ * 「E-BAKERY (パン屋)」のように日本語の補足メモが付いていることが多いが、レシート本文
+ * (英語・クメール語) にはこの注記は印字されないため、そのままでは毎回「未登録」と誤判定
+ * されてしまう (2026-09-28 追加。Tom「登録名に日本語が入っているから新しい登録と勘違い
+ * している。英語の完全一致でお願いしたい」への対応)。
+ *
+ * 当初は日本語の文字種 (ひらがな・カタカナ・漢字) だけを取り除いていたが、
+ * 「CHHAT KANTHEA 018208464 (Staff)」のように注記が英語の場合はこの方法では取り除けず、
+ * 依然としてマッチしない仕入れ先が多数残っていた (2026-09-29 発見)。注記は言語を問わず
+ * 「名前の末尾の括弧書き」という位置で判別できるため、末尾の括弧を (全角/半角どちらも、
+ * 複数連続していても) まるごと取り除く方式に変更した。
+ * 例: 「Smart Mobile (PIN-less) 010308894 (携帯代)」→ 末尾の「(携帯代)」だけを除去し、
+ * 実際の名前の一部である中間の「(PIN-less)」は残す。 */
+function stripTrailingNote(s: string): string {
+  let result = s;
+  for (;;) {
+    const stripped = result.replace(/[\s　]*[(（][^()（）]*[)）]\s*$/, '').trim();
+    if (stripped === result) return result;
+    result = stripped;
+  }
 }
 
 /** OCRテキストの中に、既存マスタ (仕入れ先・費目) の名前がそのまま含まれているか探す。
- * 一番長く一致した候補を採用する (短い名前の偶然一致を避けるため)。マスタ名に日本語の
- * 補足メモが付いている場合は、その部分を除いた英数字部分だけで照合する (日本語部分だけ
- * のマスタ名など、除去すると短すぎる/空になる場合は元の名前のまま照合する)。 */
+ * 一番長く一致した候補を採用する (短い名前の偶然一致を避けるため)。マスタ名の末尾に
+ * 注記 (括弧書き、日本語・英語問わず) が付いている場合は、その部分を除いた本体部分だけで
+ * 照合する (注記を除くと短すぎる/空になる場合は元の名前のまま照合する)。 */
 export function findBestMatch<T extends { name: string }>(text: string, candidates: T[]): T | null {
   const normText = normalize(text);
   let best: T | null = null;
   let bestLen = 0;
   for (const c of candidates) {
-    const latinOnly = stripJapanese(c.name);
-    const name = normalize(latinOnly.length >= 2 ? latinOnly : c.name);
+    const withoutNote = stripTrailingNote(c.name);
+    const name = normalize(withoutNote.length >= 2 ? withoutNote : c.name);
     if (name.length >= 2 && normText.includes(name) && name.length > bestLen) {
       best = c;
       bestLen = name.length;
+    }
+  }
+  return best;
+}
+
+// ---------- 支払先の文字列→費目の対応ヒント (2026-09-29 追加) ----------
+// Tomが日頃使っているExcel台帳「支払先→内容候補」シートに基づく、送金確認画面等に印字される
+// 送金元/受取人名の一部と費目の対応表。以前は費目マスタの名前をそのままOCR本文と文字列一致
+// させていたが、費目「Mobile Joint (小口資金)」が送金元口座名「Mobile Joint Savings」に
+// 偶然一致してしまう事故が起きたため廃止した (route.ts参照)。ここのキーはTom自身が
+// 「レシートに実際に印字される文字列」として1件ずつ確認・登録したものなので、部分一致で
+// 使っても安全 (無関係な一致が起きないよう銀行口座番号付きで登録されているものも多い)。
+// 「HORY LINA」のように費目が変わりやすい支払先はExcel側でも候補なし (手動確認) として
+// 空欄になっているため、ここでも対象外にしている。
+const VENDOR_CATEGORY_HINTS: { match: string; category: string }[] = [
+  { match: 'VISA Merchant Deposit', category: 'payment processing Fee (支払い手数料)' },
+  { match: 'MasterCard Merchant Deposit', category: 'payment processing Fee (支払い手数料)' },
+  { match: 'JCB Merchant Deposit', category: 'payment processing Fee (支払い手数料)' },
+  { match: 'TENG CHEK 007786167', category: 'Personnel expenses (人件費)' },
+  { match: 'SANG REAKSA 004848042', category: 'Personnel expenses (人件費)' },
+  { match: 'CHHAT KANTHEA 018208464', category: 'Personnel expenses (人件費)' },
+  { match: 'SEM PISETH 008979712', category: 'Personnel expenses (人件費)' },
+  { match: 'THAM THAMEAN 000348424', category: 'Personnel expenses (人件費)' },
+  {
+    match: 'MATSUZAKI TSUYOSHI AND MATSUZAKI YUKA AND THAM THAMEAN AND SANG REAKSA AND GOTO YASUHIKO 014790368',
+    category: 'Petty Cash (小口現金用)',
+  },
+  { match: 'SEANG CHANTHA 002048257', category: 'Rent ond others (賃料他)' },
+  { match: 'Electricite du Cambodge - EDC 5655410', category: 'Utility (光熱費)' },
+  { match: 'Electricite du Cambodge', category: 'Utility (光熱費)' },
+  { match: 'PP WATER SUPPLY', category: 'Utility (光熱費)' },
+  { match: 'BROWN', category: 'Business Meeting Expenses (業務上の会議費)' },
+  { match: 'SAKURA BOEUNG TRABEK', category: 'cooking supplies (調理用品)' },
+  { match: 'HOR NAIKUOY', category: 'Supplies expense (消耗品費)' },
+  { match: 'HOEU SREYLEAKHOEU SREYLEAK 500035185', category: 'ingredients (材料仕入れ)' },
+  { match: 'HOEU SREYLEAK 015373709', category: 'ingredients (材料仕入れ)' },
+  { match: 'HOEU SREYLEAK', category: 'ingredients (材料仕入れ)' },
+  { match: 'ANGKOR MART', category: 'ingredients (材料仕入れ)' },
+  { match: 'ANGKOR MARKET', category: 'ingredients (材料仕入れ)' },
+  { match: 'Lucky Toul Tom Poung', category: 'ingredients (材料仕入れ)' },
+  { match: 'DFI LUCKY TOUL TUMPONG 2', category: 'ingredients (材料仕入れ)' },
+  { match: 'LY CHHAY', category: 'ingredients (材料仕入れ)' },
+  { match: 'CMRT 371 SUPERMARKET', category: 'ingredients (材料仕入れ)' },
+  { match: 'E-BAKERY', category: 'ingredients (材料仕入れ)' },
+  { match: 'MORN NITH', category: 'ingredients (材料仕入れ)' },
+  { match: 'PROEM PHEAROM', category: 'ice (氷代)' },
+  { match: 'TRY KIMCHHAY', category: 'ingredients (材料仕入れ)' },
+  { match: 'For You Copy by R.SO', category: 'print (印刷代)' },
+  { match: 'YOUHOUR by K.SIM', category: 'Liqual drinks (酒代)' },
+  { match: 'MAO SREYPINE', category: 'Liqual drinks (酒代)' },
+  { match: 'Smart Mobile (PIN-less) 010308894', category: 'Communication Expenses (通信費)' },
+];
+
+/** レシート本文がTom curated の支払先ヒントに一致するか調べ、対応する費目名を返す。
+ * 一番長く一致したものを採用する (findBestMatchと同じ考え方)。 */
+export function findCategoryHint(text: string): string | null {
+  const normText = normalize(text);
+  let best: string | null = null;
+  let bestLen = 0;
+  for (const hint of VENDOR_CATEGORY_HINTS) {
+    const key = normalize(hint.match);
+    if (key.length >= 3 && normText.includes(key) && key.length > bestLen) {
+      best = hint.category;
+      bestLen = key.length;
     }
   }
   return best;
