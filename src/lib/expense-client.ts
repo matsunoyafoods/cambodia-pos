@@ -182,3 +182,33 @@ export async function uploadExpenseReceipt(expenseId: string, file: File): Promi
 export async function deleteExpenseReceipt(expenseId: string): Promise<void> {
   await request(`/api/expenses/${expenseId}/receipt`, { method: 'DELETE' });
 }
+
+// ---------- レシートOCR (2026-09-28 追加。Tom「レシートを読み込んで、既存設定の科目と受領名を
+// 自動で選択されるようにしたい」への対応) ----------
+// アップロードと同じく multipart/form-data で送るため、共通 request() は使わずここだけ個別に fetch する。
+// この時点では expenses テーブルには何も保存しない (経費登録前の入力補助、プレビュー専用)。
+
+export type ScanReceiptResult = {
+  matchedVendor: { id: string; name: string } | null;
+  /** 既存の仕入れ先マスタに一致しなかった場合の「店名っぽい」推測。新規登録の確認ダイアログや、
+   * 手入力欄のヒント (placeholder) に使う。 */
+  vendorNameGuess: string | null;
+  matchedCategory: { id: string; name: string } | null;
+};
+
+export async function scanExpenseReceipt(file: File): Promise<ScanReceiptResult> {
+  const form = new FormData();
+  form.append('file', file);
+  const res = await fetch('/api/expenses/scan-receipt', { method: 'POST', body: form });
+  if (!res.ok) {
+    let message = `Request failed (${res.status})`;
+    try {
+      const body = (await res.json()) as { error?: string };
+      if (body?.error) message = body.error;
+    } catch {
+      // ignore
+    }
+    throw new PosExpenseApiError(message, res.status);
+  }
+  return res.json() as Promise<ScanReceiptResult>;
+}

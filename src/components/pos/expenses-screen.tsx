@@ -15,6 +15,7 @@ import {
   listExpenseVendors,
   listExpenses,
   PosExpenseApiError,
+  scanExpenseReceipt,
   settleExpense,
   updateExpense,
   uploadExpenseReceipt,
@@ -31,6 +32,15 @@ import { localeForLang } from '@/lib/i18n/lang';
 // - 上部: 誰でも使えるクイック入力フォーム (立て替え購入をその場で記録)
 // - 下部: manager 以上限定のレポート (期間絞り込み・合計・編集・削除・買掛の精算) と
 //   仕入れ先/費目マスタの管理
+//
+// 2026-09-28 追加: レシート写真からOCRで費目・仕入れ先を自動入力 (Tom「レシートを読み込んで、
+// 既存設定の科目と受領名を自動で選択されるようにしたい。今までにないのは登録しますか？と出る。
+// その場合科目だけ自動で受領側は手入力」への対応)。実装は QuickEntryForm 内 scanReceiptAndFill()。
+// Google Cloud Vision API (src/lib/receipt-ocr.ts、POST /api/expenses/scan-receipt) を使う —
+// Vercel環境変数 GOOGLE_CLOUD_VISION_API_KEY が未設定の間は「準備中」の案内を出し、手入力に
+// フォールバックする (機能自体は壊れない)。新規仕入れ先の登録確認は既存方針通り manager 以上のみ
+// (POST /api/settings/expense-vendors が manager 限定のため)、staff には確認ダイアログを出さず
+// 手入力欄にヒントを出すだけに留める。
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
@@ -100,6 +110,7 @@ function ExpensesScreenInner() {
                   vendors={vendors}
                   categories={categories}
                   onCreated={() => setRefreshKey((k) => k + 1)}
+                  onVendorRegistered={loadMasters}
                 />
               </div>
               {canManage && (
@@ -404,12 +415,17 @@ function QuickEntryForm({
   vendors,
   categories,
   onCreated,
+  onVendorRegistered,
 }: {
   vendors: ExpenseVendor[];
   categories: ExpenseCategory[];
   onCreated: () => void;
+  /** OCRで見つからなかった仕入れ先をその場で新規登録した時に呼ぶ (マスタ一覧の再取得用)。 */
+  onVendorRegistered?: () => void;
 }) {
   const { t } = useLanguage();
+  const me = useStaff();
+  const canManage = me.role === 'owner' || me.role === 'manager' || me.role === 'sub_manager';
   const [date, setDate] = useState(todayIso());
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState('');
@@ -425,6 +441,11 @@ function QuickEntryForm({
   const [error, setError] = useState<string | null>(null);
   const [photoWarning, setPhotoWarning] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  // レシートOCR (2026-09-28 追加)
+  const [scanning, setScanning] = useState(false);
+  const [ocrWarning, setOcrWarning] = useState<string | null>(null);
+  // マッチしなかった仕入れ先の推測名 (自動入力はせず、手入力欄のヒントとしてだけ表示する)
+  const [vendorHint, setVendorHint] = useState<string | null>(null);
 
   const resolvedCategory = category.trim();
   const resolvedVendor = vendor.trim();
@@ -438,6 +459,47 @@ function QuickEntryForm({
       if (prev) URL.revokeObjectURL(prev);
       return file ? URL.createObjectURL(file) : null;
     });
+    setOcrWarning(null);
+    setVendorHint(null);
+    if (file) void scanReceiptAndFill(file);
+  }
+
+  // レシートOCRで費目・仕入れ先を自動入力 (2026-09-28 追加)。写真を選んだ瞬間に自動実行する。
+  // 仕入れ先がマスタに無い場合、manager 以上には新規登録の確認ダイアログを出す (登録すると
+  // 自動選択、断ると手入力ヒントのみ)。staff には確認ダイアログを出さず手入力ヒントのみ
+  // (新規仕入れ先の登録は既存方針通り manager 以上限定のため)。失敗しても経費登録自体は
+  // 止めない — 常に手入力へフォールバックできる。
+  async function scanReceiptAndFill(file: File) {
+    setScanning(true);
+    try {
+      const result = await scanExpenseReceipt(file);
+      if (result.matchedCategory) setCategory(result.matchedCategory.name);
+      if (result.matchedVendor) {
+        setVendor(result.matchedVendor.name);
+      } else if (result.vendorNameGuess) {
+        if (canManage) {
+          if (confirm(t('expenses.registerNewVendorConfirm', { name: result.vendorNameGuess }))) {
+            try {
+              const created = await createExpenseVendor(result.vendorNameGuess);
+              setVendor(created.name);
+              onVendorRegistered?.();
+            } catch {
+              setVendorHint(result.vendorNameGuess);
+            }
+          } else {
+            setVendorHint(result.vendorNameGuess);
+          }
+        } else {
+          setVendorHint(result.vendorNameGuess);
+        }
+      }
+    } catch (err) {
+      setOcrWarning(
+        err instanceof PosExpenseApiError && err.message === 'ocr_not_configured' ? t('expenses.ocrNotConfigured') : t('expenses.ocrScanFailed'),
+      );
+    } finally {
+      setScanning(false);
+    }
   }
 
   async function submit() {
@@ -518,7 +580,7 @@ function QuickEntryForm({
             value={vendor}
             onChange={setVendor}
             options={vendors}
-            placeholder={t('expenses.comboBoxPlaceholder')}
+            placeholder={vendorHint ?? t('expenses.comboBoxPlaceholder')}
           />
         </div>
 
@@ -558,10 +620,12 @@ function QuickEntryForm({
             // eslint-disable-next-line @next/next/no-img-element
             <img src={photoPreviewUrl} alt={t('expenses.receiptPreviewAlt')} className="h-10 w-10 rounded-md border border-border object-cover" />
           )}
+          {scanning && <span className="text-[12.5px] text-muted-foreground">{t('expenses.scanningReceipt')}</span>}
         </div>
 
         {error && <div className="text-[12.5px] text-destructive">{error}</div>}
         {photoWarning && <div className="text-[12.5px] text-amber-600">{photoWarning}</div>}
+        {ocrWarning && <div className="text-[12.5px] text-amber-600">{ocrWarning}</div>}
         {done && !error && <div className="text-[12.5px] text-emerald-600">{t('expenses.registered')}</div>}
 
         <button
