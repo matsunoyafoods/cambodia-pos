@@ -67,15 +67,28 @@ export function findBestMatch<T extends { name: string }>(text: string, candidat
   return best;
 }
 
+/** 金額・電話番号・取引番号など「店名ではなさそうな」行かどうかを判定する。
+ * (2026-09-28 追加。銀行アプリの送金確認画面をスキャンした際、ポップアップ通知と重なって
+ * OCRが「E」(店名の一部) と「2.95 USD」(金額) を1行に混ぜてしまい、"E-2.95 USD" という
+ * 店名候補を返してしまう事例があったための対策。) */
+function looksLikeNonVendorLine(s: string): boolean {
+  if (/(?:USD|US\$|\$|KHR|៛)/i.test(s)) return true;
+  if (/\b[0-9]{1,6}(?:,[0-9]{3})*\.[0-9]{2}\b/.test(s)) return true;
+  const digitCount = (s.match(/[0-9]/g) ?? []).length;
+  if (digitCount >= s.length * 0.4) return true;
+  return false;
+}
+
 /** 既存マスタに一致しなかった場合の「店名っぽい行」の推測 (新規仕入れ先の登録提案用)。
  * レシートは通常、先頭付近に店名が印字されるため、意味のありそうな最初の行を採用する
- * (数字・記号だけの行は除外)。あくまで簡易的な推測 — ユーザーが確認・修正できる前提
- * (仕入れ先は元々自由入力欄のため、間違っていてもその場で書き換えられる)。 */
+ * (数字・記号だけの行、金額・電話番号らしき行は除外)。あくまで簡易的な推測 — ユーザーが
+ * 確認・修正できる前提 (仕入れ先は元々自由入力欄のため、間違っていてもその場で書き換えられる)。 */
 export function guessVendorNameFromText(text: string): string | null {
   const lines = text
     .split('\n')
     .map((l) => l.trim())
-    .filter((l) => l.length >= 2 && !/^[\d\s\-#:/.]+$/.test(l));
+    .filter((l) => l.length >= 2 && !/^[\d\s\-#:/.]+$/.test(l))
+    .filter((l) => !looksLikeNonVendorLine(l));
   return lines[0] ?? null;
 }
 

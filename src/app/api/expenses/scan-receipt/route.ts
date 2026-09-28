@@ -41,6 +41,9 @@ export const POST = withPosStaff('part_time', async (_session, req) => {
   let text: string;
   try {
     text = await extractReceiptText(base64);
+    // OCR抽出結果のログ (2026-09-28 追加、一時的な調査用。金額・日付の推測精度を上げるために
+    // 実際のレシートでどんなテキストが返ってくるかを確認する目的。画像自体や個人情報は出力しない)
+    console.log('[scan-receipt] ocr text (first 500 chars):', text.slice(0, 500));
   } catch (err) {
     if (err instanceof ReceiptOcrError && err.message === 'ocr_not_configured') {
       return NextResponse.json({ error: 'ocr_not_configured' }, { status: 503 });
