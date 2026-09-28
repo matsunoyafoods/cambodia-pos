@@ -38,6 +38,7 @@ const ETHNICITY_LABEL_KEY: Record<EthnicityKey, string> = {
   chinese: 'guestDemo.ethnicityChinese',
   korean: 'guestDemo.ethnicityKorean',
   western: 'guestDemo.ethnicityWestern',
+  mix: 'guestDemo.ethnicityMix',
   other: 'guestDemo.ethnicityOther',
 };
 
@@ -49,7 +50,7 @@ function emptyAmounts(): FormAmounts {
 }
 
 function emptyEthnicity(): FormEthnicity {
-  return { khmer: '', japanese: '', chinese: '', korean: '', western: '', other: '' };
+  return { khmer: '', japanese: '', chinese: '', korean: '', western: '', mix: '', other: '' };
 }
 
 function ethnicityToForm(ethnicity: GuestEthnicity): FormEthnicity {

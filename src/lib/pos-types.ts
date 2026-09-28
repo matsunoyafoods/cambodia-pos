@@ -71,7 +71,7 @@ export type CartLine = {
 };
 
 // 客層記録 (来店時の人種構成)。ファースト注文確定時に必須入力。
-export const ETHNICITY_KEYS = ['khmer', 'japanese', 'chinese', 'korean', 'western', 'other'] as const;
+export const ETHNICITY_KEYS = ['khmer', 'japanese', 'chinese', 'korean', 'western', 'mix', 'other'] as const;
 export type EthnicityKey = (typeof ETHNICITY_KEYS)[number];
 export const ETHNICITY_LABELS: Record<EthnicityKey, string> = {
   khmer: 'クメール',
@@ -79,6 +79,7 @@ export const ETHNICITY_LABELS: Record<EthnicityKey, string> = {
   chinese: '中国人',
   korean: '韓国人',
   western: '西洋人',
+  mix: 'MIXグループ',
   other: 'その他',
 };
 export type GuestEthnicity = Partial<Record<EthnicityKey, number>>;

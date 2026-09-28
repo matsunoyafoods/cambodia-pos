@@ -12,6 +12,7 @@ const ETHNICITY_LABEL_KEY: Record<EthnicityKey, string> = {
   chinese: 'guestDemo.ethnicityChinese',
   korean: 'guestDemo.ethnicityKorean',
   western: 'guestDemo.ethnicityWestern',
+  mix: 'guestDemo.ethnicityMix',
   other: 'guestDemo.ethnicityOther',
 };
 
