@@ -473,6 +473,8 @@ function QuickEntryForm({
     setScanning(true);
     try {
       const result = await scanExpenseReceipt(file);
+      if (result.amountGuess !== null) setAmount(String(result.amountGuess));
+      if (result.dateGuess) setDate(result.dateGuess);
       if (result.matchedCategory) setCategory(result.matchedCategory.name);
       if (result.matchedVendor) {
         setVendor(result.matchedVendor.name);

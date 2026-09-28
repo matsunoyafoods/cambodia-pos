@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createPosAdminClient, getPosStoreId } from '@/lib/supabase/admin';
 import { withPosStaff } from '@/lib/pos-auth';
-import { extractReceiptText, findBestMatch, guessVendorNameFromText, ReceiptOcrError } from '@/lib/receipt-ocr';
+import { extractReceiptText, findBestMatch, guessAmountFromText, guessDateFromText, guessVendorNameFromText, ReceiptOcrError } from '@/lib/receipt-ocr';
 import type { ExpenseCategory, ExpenseVendor } from '@/lib/pos-types';
 
 const MAX_BYTES = 5 * 1024 * 1024; // 5MB (スマホカメラ写真を想定。receipt route と同じ上限)
@@ -93,9 +93,14 @@ export const POST = withPosStaff('part_time', async (_session, req) => {
     matchedCategory = findBestMatch(text, categories);
   }
 
+  const amountGuess = guessAmountFromText(text);
+  const dateGuess = guessDateFromText(text);
+
   return NextResponse.json({
     matchedVendor: matchedVendor ? { id: matchedVendor.id, name: matchedVendor.name } : null,
     vendorNameGuess,
     matchedCategory: matchedCategory ? { id: matchedCategory.id, name: matchedCategory.name } : null,
+    amountGuess,
+    dateGuess,
   });
 });

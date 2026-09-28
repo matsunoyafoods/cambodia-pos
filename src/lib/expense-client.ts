@@ -194,6 +194,8 @@ export type ScanReceiptResult = {
    * 手入力欄のヒント (placeholder) に使う。 */
   vendorNameGuess: string | null;
   matchedCategory: { id: string; name: string } | null;
+  amountGuess: number | null;
+  dateGuess: string | null;
 };
 
 export async function scanExpenseReceipt(file: File): Promise<ScanReceiptResult> {
