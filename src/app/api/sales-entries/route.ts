@@ -138,6 +138,7 @@ const postSchema = z.object({
       chinese: ethnicityCountField,
       korean: ethnicityCountField,
       western: ethnicityCountField,
+      mix: ethnicityCountField,
       other: ethnicityCountField,
     })
     .partial()
