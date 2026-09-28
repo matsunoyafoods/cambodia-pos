@@ -51,14 +51,30 @@ function normalize(s: string): string {
   return s.toLowerCase().replace(/[\s　]+/g, '').trim();
 }
 
+/** 日本語 (ひらがな・カタカナ・漢字・全角記号) を取り除いた部分だけを取り出す。マスタの
+ * 仕入れ先名に「E-BAKERY (パン屋)」のように日本語の補足メモが付いていると、レシート本文
+ * (英語・クメール語) とは完全一致しなくなり、毎回「未登録」と誤判定されてしまうため
+ * (2026-09-28 追加。Tom「登録名に日本語が入っているから新しい登録と勘違いしている。英語の
+ * 完全一致でお願いしたい」への対応)。 */
+function stripJapanese(s: string): string {
+  return s
+    .replace(/[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\u3000-\u303F\uFF00-\uFFEF]/g, '')
+    .replace(/[()[\]{}]/g, '') // 日本語部分を囲んでいた半角カッコ等の残骸を除去
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 /** OCRテキストの中に、既存マスタ (仕入れ先・費目) の名前がそのまま含まれているか探す。
- * 一番長く一致した候補を採用する (短い名前の偶然一致を避けるため)。 */
+ * 一番長く一致した候補を採用する (短い名前の偶然一致を避けるため)。マスタ名に日本語の
+ * 補足メモが付いている場合は、その部分を除いた英数字部分だけで照合する (日本語部分だけ
+ * のマスタ名など、除去すると短すぎる/空になる場合は元の名前のまま照合する)。 */
 export function findBestMatch<T extends { name: string }>(text: string, candidates: T[]): T | null {
   const normText = normalize(text);
   let best: T | null = null;
   let bestLen = 0;
   for (const c of candidates) {
-    const name = normalize(c.name);
+    const latinOnly = stripJapanese(c.name);
+    const name = normalize(latinOnly.length >= 2 ? latinOnly : c.name);
     if (name.length >= 2 && normText.includes(name) && name.length > bestLen) {
       best = c;
       bestLen = name.length;
