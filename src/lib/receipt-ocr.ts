@@ -154,7 +154,19 @@ export function guessVendorNameFromText(text: string): string | null {
   const fallback = lines
     .filter((l) => l.length >= 2 && !/^[\d\s\-#:/.]+$/.test(l))
     .filter((l) => !looksLikeNonVendorLine(l));
-  return fallback[0] ?? null;
+  if (fallback.length === 0) return null;
+
+  // 先頭候補が、後に出てくるより長い行の「先頭部分の一致」であれば、より完全な方を採用する
+  // (2026-09-28 追加。通知トーストが画面の端で店名を途中までしか表示しておらず、OCRが
+  // 「E-BA」のように店名を途中で切って読んでしまうことがある。同じ画面の下の方に完全な
+  // 店名「E-BAKERY」が別途印字されているケースが多いため)。
+  let best = fallback[0];
+  for (const candidate of fallback.slice(1)) {
+    if (candidate.length > best.length && candidate.toLowerCase().startsWith(best.toLowerCase())) {
+      best = candidate;
+    }
+  }
+  return best;
 }
 
 // ---------- 金額・日付の推測 (2026-09-28 追加) ----------

@@ -480,6 +480,12 @@ function QuickEntryForm({
         setVendor(result.matchedVendor.name);
       } else if (result.vendorNameGuess) {
         if (canManage) {
+          // window.confirm() はメインスレッドを同期的にブロックするため、直前の setAmount/
+          // setDate/setCategory による再描画が画面に反映される前にダイアログが表示されて
+          // しまうことがある (2026-09-28 追加。Tomが確認ダイアログの背後で金額欄が0.00の
+          // ままに見えると報告した件への対応)。ダイアログを出す前に1フレーム分だけ処理を
+          // 譲り、保留中の再描画を確実に反映させてから確認する。
+          await new Promise((resolve) => requestAnimationFrame(resolve));
           if (confirm(t('expenses.registerNewVendorConfirm', { name: result.vendorNameGuess }))) {
             try {
               const created = await createExpenseVendor(result.vendorNameGuess);
