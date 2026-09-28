@@ -343,6 +343,11 @@ function ComboBoxField({
 }) {
   const { t } = useLanguage();
   const [open, setOpen] = useState(false);
+  // フォーカスで開いた直後は、既に入っている値で候補を絞り込まない (2026-09-29 追加。Tom
+  // 「間違っていても消さないとプルダウンできないから詰まる」への対応。OCR自動入力等で
+  // 明らかに違う値が入っている時、まず×で消さないと他の候補が見えず不便だった)。タイプし
+  //始めたら通常通りその文字列で絞り込む。
+  const [filterQuery, setFilterQuery] = useState('');
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -356,7 +361,7 @@ function ComboBoxField({
     return () => document.removeEventListener('mousedown', handleOutside);
   }, [open]);
 
-  const query = value.trim().toLowerCase();
+  const query = filterQuery.trim().toLowerCase();
   const filtered = query ? options.filter((o) => o.name.toLowerCase().includes(query)) : options;
 
   return (
@@ -368,9 +373,14 @@ function ComboBoxField({
             value={value}
             onChange={(e) => {
               onChange(e.target.value);
+              setFilterQuery(e.target.value);
               setOpen(true);
             }}
-            onFocus={() => setOpen(true)}
+            onFocus={(e) => {
+              setFilterQuery('');
+              setOpen(true);
+              e.target.select();
+            }}
             placeholder={placeholder}
             className="h-10 w-48 rounded-lg border border-border px-2.5 pr-7 text-[13px] text-foreground"
           />
