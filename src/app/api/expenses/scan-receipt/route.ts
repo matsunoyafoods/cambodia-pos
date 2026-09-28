@@ -54,12 +54,19 @@ export const POST = withPosStaff('part_time', async (_session, req) => {
   const supabase = createPosAdminClient();
   const storeId = getPosStoreId();
 
-  const [{ data: vendorRows, error: vendorError }, { data: categoryRows, error: categoryError }] = await Promise.all([
+  const [{ data: vendorRows, error: vendorError }, { data: categoryRows, error: categoryError }, { data: storeRow }] = await Promise.all([
     supabase.from('expense_vendors').select('id, name, sort_order').eq('store_id', storeId),
     supabase.from('expense_categories').select('id, name, sort_order').eq('store_id', storeId),
+    supabase.from('stores').select('settings').eq('id', storeId).maybeSingle(),
   ]);
   if (vendorError) return NextResponse.json({ error: vendorError.message }, { status: 500 });
   if (categoryError) return NextResponse.json({ error: categoryError.message }, { status: 500 });
+
+  // リエル建てレシートのドル換算用 (2026-09-28 追加)。設定 → 一般設定 → 参考為替レート
+  // (khrRate) と同じ値を使う。他のルート (register-closings 等) と同様、ここでも直接
+  // settings JSON を読む (共有ヘルパーは無い、既存パターンを踏襲)。
+  const storeSettings = storeRow?.settings as { khrRate?: number } | null;
+  const khrRate = typeof storeSettings?.khrRate === 'number' ? storeSettings.khrRate : 4100;
 
   const vendors: ExpenseVendor[] = (vendorRows ?? []).map((r) => ({ id: r.id, name: r.name, sortOrder: r.sort_order }));
   const categories: ExpenseCategory[] = (categoryRows ?? []).map((r) => ({ id: r.id, name: r.name, sortOrder: r.sort_order }));
@@ -96,7 +103,7 @@ export const POST = withPosStaff('part_time', async (_session, req) => {
     matchedCategory = findBestMatch(text, categories);
   }
 
-  const amountGuess = guessAmountFromText(text);
+  const amountGuess = guessAmountFromText(text, khrRate);
   const dateGuess = guessDateFromText(text);
 
   return NextResponse.json({

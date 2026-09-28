@@ -116,18 +116,34 @@ function findAmountHeaderLines(lines: string[]): { amount: number; lineIndex: nu
   return matches;
 }
 
+/** 「-14,500 KHR」のように、リエル建ての金額単独行を全て探す (findAmountHeaderLinesの
+ * KHR版)。USD建てのヘッダーが無い純粋なリエル建てのレシート・送金画面でも、店名候補は
+ * 「金額行の次の行」から拾えるようにするため。 */
+function findKhrHeaderLines(lines: string[]): { amount: number; lineIndex: number }[] {
+  const re = /^-?\s*([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]{1,2})?)\s*(?:KHR|៛)\.?$/i;
+  const matches: { amount: number; lineIndex: number }[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(re);
+    if (m) {
+      const num = Number(m[1].replace(/,/g, ''));
+      if (Number.isFinite(num) && num > 0) matches.push({ amount: num, lineIndex: i });
+    }
+  }
+  return matches;
+}
+
 /** 既存マスタに一致しなかった場合の「店名っぽい行」の推測 (新規仕入れ先の登録提案用)。
  * まず「金額行の次の行」(送金確認画面の受取人名パターン) を、複数の金額行候補それぞれで
  * 順番に試し、最初に「店名として妥当」と判定できたものを採用する (例: 通知トーストの次の
  * 行が「口座から支払いました」のようなKhmerの案内文だった場合はスキップし、本体カードの
- * 次の行にある実際の店名を採用する)。どれも妥当でなければレシート先頭付近の意味のありそうな
- * 行を採用する (数字・記号だけの行、金額・電話番号らしき行は除外)。あくまで簡易的な推測 —
- * ユーザーが確認・修正できる前提 (仕入れ先は元々自由入力欄のため、間違っていてもその場で
- * 書き換えられる)。 */
+ * 次の行にある実際の店名を採用する)。USD建てのヘッダーを優先し、無ければKHR建てのヘッダー
+ * も試す。どれも妥当でなければレシート先頭付近の意味のありそうな行を採用する (数字・記号
+ * だけの行、金額・電話番号らしき行は除外)。あくまで簡易的な推測 — ユーザーが確認・修正
+ * できる前提 (仕入れ先は元々自由入力欄のため、間違っていてもその場で書き換えられる)。 */
 export function guessVendorNameFromText(text: string): string | null {
   const lines = text.split('\n').map((l) => l.trim());
 
-  const headers = findAmountHeaderLines(lines);
+  const headers = [...findAmountHeaderLines(lines), ...findKhrHeaderLines(lines)];
   for (const header of headers) {
     const candidate = lines[header.lineIndex + 1]?.trim();
     if (candidate && candidate.length >= 2 && !looksLikeNonVendorLine(candidate)) {
@@ -187,7 +203,31 @@ function extractLargestAmount(s: string): number | null {
  * 3. それでも無ければ本文中で一番大きい金額らしき数値を採用する。
  * いずれの段階でも KHR/៛ を含む行は候補から除外する (リエル建ての「Original amount」等を
  * USD建てと誤認しないため)。 */
-export function guessAmountFromText(text: string): number | null {
+/** 本文中の「14,500.00 KHR」のようなリエル建て金額を探す (一番大きい値を採用。複数の
+ * 商品単価とグランドトータルが両方リエルで印字されている場合、合計が一番大きい値になる
+ * ことが多いため)。USD建ての金額が最後まで見つからなかった場合のみ、店舗の参考為替レート
+ * (設定 → 一般設定 → 参考為替レート、khrRate) でドル換算するために使う。 */
+function extractKhrAmount(text: string): number | null {
+  const re = /([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]{1,2})?)\s*(?:KHR|៛)|(?:KHR|៛)\s*([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]{1,2})?)/gi;
+  let best: number | null = null;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const raw = m[1] ?? m[2];
+    if (!raw) continue;
+    const num = Number(raw.replace(/,/g, ''));
+    if (!Number.isFinite(num) || num <= 0) continue;
+    if (best === null || num > best) best = num;
+  }
+  return best;
+}
+
+/** レシート全文から合計金額 (USD) を推測する。金額推測の優先順位は関数コメント参照。
+ * USD建ての金額が最後まで見つからなかった場合、`khrRate` (店舗の参考為替レート、
+ * 設定 → 一般設定) が渡されていればリエル建ての金額をドルに換算して返す (2026-09-28
+ * 追加。Tom「リエルは設定した1ドル4000リエルで計算してドル変換して入力してください」
+ * への対応。銀行側の実際の換算レートではなく、店舗で決めた一定レートを使うことで経費
+ * 集計上の一貫性を優先する判断)。 */
+export function guessAmountFromText(text: string, khrRate?: number): number | null {
   const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
 
   const headers = findAmountHeaderLines(lines);
@@ -207,7 +247,17 @@ export function guessAmountFromText(text: string): number | null {
   }
   if (bestFromKeyword !== null) return bestFromKeyword;
 
-  return extractLargestAmount(usdLines.join('\n'));
+  const fallbackUsd = extractLargestAmount(usdLines.join('\n'));
+  if (fallbackUsd !== null) return fallbackUsd;
+
+  if (khrRate && khrRate > 0) {
+    const khrAmount = extractKhrAmount(text);
+    if (khrAmount !== null) {
+      return Math.round((khrAmount / khrRate) * 100) / 100;
+    }
+  }
+
+  return null;
 }
 
 const MONTH_NAMES: Record<string, number> = {
