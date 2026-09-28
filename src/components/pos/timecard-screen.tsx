@@ -3,10 +3,22 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useStaff } from './staff-context';
-import { clockIn, clockOut, endBreak, getTimecardStatus, PosTimecardApiError, startBreak, type MyTimecardStatus } from '@/lib/timecard-client';
+import {
+  clockIn,
+  clockOut,
+  deleteTimecard,
+  endBreak,
+  getTimecardStatus,
+  listTodayTimecards,
+  PosTimecardApiError,
+  startBreak,
+  type MyTimecardStatus,
+} from '@/lib/timecard-client';
 import { getStaffRoster, type PosStaffRosterEntry } from '@/lib/staff-client';
 import { LanguageProvider, useLanguage, STAFF_LANGUAGE_STORAGE_KEY } from './language-context';
 import { localeForLang, type Lang } from '@/lib/i18n/lang';
+import type { TimecardRecord } from '@/lib/pos-types';
+import { TimecardEditForm } from './attendance-report-tab';
 
 type TFunc = ReturnType<typeof useLanguage>['t'];
 
@@ -20,6 +32,14 @@ type TFunc = ReturnType<typeof useLanguage>['t'];
 // 2026-09-04 に給料タブへ移設した (Tom「退勤レポートは給料のタブに入れてください」)。
 // 実装は attendance-report-tab.tsx の AttendanceReportTab、payroll-screen.tsx の
 // 「勤怠レポート」サブタブから呼ばれる。この画面には打刻 (PunchCard) だけが残っている。
+//
+// 2026-09-28: 本日の打刻履歴表示を拡張 (Tom「みんなの履歴が残るようにしてください。タイムカード
+// は削除と編集ができるようにしてください。編集できるのはマネージャーだけです」への対応)。
+// 他人の打刻閲覧・編集・削除は元々 manager 以上限定の方針 (timecard-client.ts 冒頭コメント、
+// api/timecards/route.ts 参照。人件費 = 給与に関わる情報のため)。そのためこの拡張は role で
+// 出し分ける: owner/manager/sub_manager には全スタッフの本日履歴 (TeamHistory、編集・削除ボタン
+// 付き、api/timecards/[id]/route.ts の既存 manager-only PATCH/DELETE をそのまま使う) を表示し、
+// それ以外のロールには従来通り自分の履歴のみ (TodayHistory) を表示する。
 
 function statusLabel(status: MyTimecardStatus['status'], t: TFunc): string {
   return t(`timecardScreen.status.${status}`);
@@ -92,6 +112,7 @@ function PosNativeOnlyNotice() {
 function PunchCard() {
   const { t, lang } = useLanguage();
   const me = useStaff();
+  const canManage = me.role === 'owner' || me.role === 'manager' || me.role === 'sub_manager';
   const [roster, setRoster] = useState<PosStaffRosterEntry[]>([]);
   const [selectedStaffId, setSelectedStaffId] = useState(me.id);
   const [status, setStatus] = useState<MyTimecardStatus | null>(null);
@@ -205,7 +226,7 @@ function PunchCard() {
         </button>
       </div>
 
-      <TodayHistory punches={status?.todayPunches ?? []} lang={lang} t={t} />
+      {canManage ? <TeamHistory lang={lang} t={t} /> : <TodayHistory punches={status?.todayPunches ?? []} lang={lang} t={t} />}
     </div>
   );
 }
@@ -230,6 +251,85 @@ function TodayHistory({ punches, lang, t }: { punches: MyTimecardStatus['todayPu
               </span>
               {p.breaks.length > 0 && (
                 <span className="text-muted-foreground">{t('timecardScreen.breakCountShort', { count: p.breaks.length })}</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// 全スタッフの本日履歴 (2026-09-28 追加。owner/manager/sub_manager のみ表示 — 他人の打刻は
+// 給与に関わる情報のため manager 以上限定という既存方針に合わせた。api/timecards/today から
+// 取得し、行ごとに common.edit / common.delete ボタンを出す。編集は attendance-report-tab.tsx
+// と同じ TimecardEditForm をそのまま再利用 (フィールド構成・API呼び出しの重複を避けるため)。
+// 削除・編集の API 側権限チェック (withPosStaff('manager', ...)) は変更していない — ここは
+// あくまで UI 側の出し分けで、実際のガードは既存の api/timecards/[id]/route.ts のまま。
+function TeamHistory({ lang, t }: { lang: Lang; t: TFunc }) {
+  const [records, setRecords] = useState<TimecardRecord[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    listTodayTimecards()
+      .then(setRecords)
+      .catch((err) => setError(err instanceof PosTimecardApiError ? err.message : t('timecardScreen.reportLoadError')));
+  }, [t]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function handleDelete(id: string) {
+    if (!confirm(t('timecardScreen.deleteConfirm'))) return;
+    try {
+      await deleteTimecard(id);
+      load();
+    } catch (err) {
+      setError(err instanceof PosTimecardApiError ? err.message : t('common.deleteError'));
+    }
+  }
+
+  return (
+    <div className="mt-4 border-t border-border pt-3">
+      <div className="mb-2 text-[12.5px] font-semibold text-muted-foreground">{t('timecardScreen.teamHistoryTitle')}</div>
+      {error && <div className="mb-2 text-[12.5px] text-destructive">{error}</div>}
+      {!records ? (
+        <div className="text-[12.5px] text-muted-foreground">{t('common.loadingEllipsis')}</div>
+      ) : records.length === 0 ? (
+        <div className="text-[12.5px] text-muted-foreground">{t('timecardScreen.historyEmpty')}</div>
+      ) : (
+        <div className="flex flex-col gap-1.5">
+          {records.map((r) => (
+            <div key={r.id} className="rounded-lg bg-secondary/30 px-3 py-2 text-[12.5px]">
+              <div className="flex items-center justify-between gap-2">
+                <span>
+                  <span className="font-semibold">{r.staffName}</span>
+                  <span className="ml-2">
+                    {fmtTime(r.clockIn, lang)} 〜 {r.clockOut ? fmtTime(r.clockOut, lang) : t('timecardScreen.status.working')}
+                  </span>
+                </span>
+                <span className="flex items-center gap-2 text-muted-foreground">
+                  {r.breaks.length > 0 && <span>{t('timecardScreen.breakCountShort', { count: r.breaks.length })}</span>}
+                  {r.editedAt && <span className="text-amber-600">{t('timecardScreen.editedBadge')}</span>}
+                  <button onClick={() => setEditingId((v) => (v === r.id ? null : r.id))} className="rounded-md border border-border px-2 py-1 text-[11.5px] font-semibold">
+                    {t('common.edit')}
+                  </button>
+                  <button onClick={() => handleDelete(r.id)} className="rounded-md border border-border px-2 py-1 text-[11.5px] font-semibold text-destructive">
+                    {t('common.delete')}
+                  </button>
+                </span>
+              </div>
+              {editingId === r.id && (
+                <TimecardEditForm
+                  record={r}
+                  onDone={() => {
+                    setEditingId(null);
+                    load();
+                  }}
+                  onCancel={() => setEditingId(null)}
+                />
               )}
             </div>
           ))}

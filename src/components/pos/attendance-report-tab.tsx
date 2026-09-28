@@ -527,7 +527,9 @@ function toLocalInputValue(iso: string | null): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function TimecardEditForm({ record, onDone, onCancel }: { record: TimecardRecord; onDone: () => void; onCancel: () => void }) {
+// 2026-09-28: 打刻画面 (/pos/timecard) の「みんなの履歴」編集フォームからも再利用するため export する
+// (Tom「タイムカードは削除と編集ができるようにしてください。編集できるのはマネージャーだけです」への対応)。
+export function TimecardEditForm({ record, onDone, onCancel }: { record: TimecardRecord; onDone: () => void; onCancel: () => void }) {
   const { t } = useLanguage();
   const [clockInValue, setClockInValue] = useState(toLocalInputValue(record.clockIn));
   const [clockOutValue, setClockOutValue] = useState(toLocalInputValue(record.clockOut));
