@@ -1,8 +1,7 @@
 import { NextResponse } from 'next/server';
-import { createPosAdminClient, getPosStoreId } from '@/lib/supabase/admin';
 import { withPosStaff } from '@/lib/pos-auth';
-import { extractReceiptText, findBestMatch, findCategoryHint, guessAmountFromText, guessDateFromText, guessVendorNameFromText, ReceiptOcrError } from '@/lib/receipt-ocr';
-import type { ExpenseCategory, ExpenseVendor } from '@/lib/pos-types';
+import { runReceiptScan } from '@/lib/receipt-scan';
+import { ReceiptOcrError } from '@/lib/receipt-ocr';
 
 const MAX_BYTES = 5 * 1024 * 1024; // 5MB (スマホカメラ写真を想定。receipt route と同じ上限)
 const ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic']);
@@ -13,18 +12,9 @@ const ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/h
 // 入力補助として、マッチした仕入れ先・費目の候補を返すだけ。実際の登録は通常通り
 // POST /api/expenses (この画面のQuickEntryForm) で行う。
 //
-// 費目の推測は次の優先順で試す:
-//   1. 同じ仕入れ先の過去の経費 (直近20件) で一番よく使われている費目 (仕入れ先がマッチし、
-//      かつ過去の記録がある場合。このお店自身の最近の実際の使い方を反映するため最優先)
-//   2. Tom自身のExcel台帳から取り込んだ「支払先→費目」の対応ヒント (findCategoryHint、
-//      2026-09-29 追加。新しい仕入れ先で過去の記録がまだない場合に使う)
-// 以前はレシート本文とマスタ費目名の文字列一致 (findBestMatch(text, categories)) もフォール
-// バックで試していたが、「Mobile Joint (小口資金)」という費目名が、送金確認画面に印字される
-// 送金元口座名「Mobile Joint Savings」と偶然一致してしまい、全く無関係な費目が自動入力される
-// 事故が起きた (2026-09-29 Tom報告)。費目マスタの名前は「レシートに実際に印字される文字列」
-// として作られたものではないため文字列一致に使うのは危険と判断し、代わりにTom自身が
-// 「実際に印字される文字列」として確認済みのヒント一覧 (2.) を使うようにした。どちらにも
-// 一致しない場合は費目欄は空のまま (ユーザーに手入力してもらう) が安全。
+// OCR・マッチングの実処理は src/lib/receipt-scan.ts (runReceiptScan) に切り出してある
+// (2026-09-29。Telegram Bot連携 (bridge/telegram-expense-ocr) からも同じロジックを使うため)。
+// このファイルはHTTP側 (認証・ファイル受け取り・レスポンス整形) だけを担当する。
 //
 // 権限は経費の新規登録 (POST /api/expenses) と同じ part_time 以上 (現場のスタッフもレシート
 // スキャンで入力補助を受けられるように)。ただし新規仕入れ先の登録は既存方針通り manager 以上
@@ -46,94 +36,13 @@ export const POST = withPosStaff('part_time', async (_session, req) => {
   const buffer = Buffer.from(await file.arrayBuffer());
   const base64 = buffer.toString('base64');
 
-  let text: string;
   try {
-    text = await extractReceiptText(base64);
-    // OCR抽出結果のログ (2026-09-28 追加、一時的な調査用。金額・日付の推測精度を上げるために
-    // 実際のレシートでどんなテキストが返ってくるかを確認する目的。画像自体や個人情報は出力しない)
-    console.log('[scan-receipt] ocr text (first 500 chars):', text.slice(0, 500));
+    const { result } = await runReceiptScan(base64);
+    return NextResponse.json(result);
   } catch (err) {
     if (err instanceof ReceiptOcrError && err.message === 'ocr_not_configured') {
       return NextResponse.json({ error: 'ocr_not_configured' }, { status: 503 });
     }
     return NextResponse.json({ error: err instanceof Error ? err.message : 'ocr_failed' }, { status: 502 });
   }
-
-  const supabase = createPosAdminClient();
-  const storeId = getPosStoreId();
-
-  const [{ data: vendorRows, error: vendorError }, { data: categoryRows, error: categoryError }, { data: storeRow }] = await Promise.all([
-    supabase.from('expense_vendors').select('id, name, sort_order').eq('store_id', storeId),
-    supabase.from('expense_categories').select('id, name, sort_order').eq('store_id', storeId),
-    supabase.from('stores').select('settings').eq('id', storeId).maybeSingle(),
-  ]);
-  if (vendorError) return NextResponse.json({ error: vendorError.message }, { status: 500 });
-  if (categoryError) return NextResponse.json({ error: categoryError.message }, { status: 500 });
-
-  // リエル建てレシートのドル換算用 (2026-09-28 追加)。設定 → 一般設定 → 参考為替レート
-  // (khrRate) と同じ値を使う。他のルート (register-closings 等) と同様、ここでも直接
-  // settings JSON を読む (共有ヘルパーは無い、既存パターンを踏襲)。
-  const storeSettings = storeRow?.settings as { khrRate?: number } | null;
-  const khrRate = typeof storeSettings?.khrRate === 'number' ? storeSettings.khrRate : 4100;
-
-  const vendors: ExpenseVendor[] = (vendorRows ?? []).map((r) => ({ id: r.id, name: r.name, sortOrder: r.sort_order }));
-  const categories: ExpenseCategory[] = (categoryRows ?? []).map((r) => ({ id: r.id, name: r.name, sortOrder: r.sort_order }));
-
-  const matchedVendor = findBestMatch(text, vendors);
-  const vendorNameGuess = matchedVendor ? null : guessVendorNameFromText(text);
-
-  let matchedCategory: ExpenseCategory | null = null;
-  if (matchedVendor) {
-    const { data: pastRows, error: pastError } = await supabase
-      .from('expenses')
-      .select('category')
-      .eq('store_id', storeId)
-      .eq('vendor', matchedVendor.name)
-      .order('created_at', { ascending: false })
-      .limit(20);
-    if (!pastError && pastRows && pastRows.length > 0) {
-      const counts = new Map<string, number>();
-      for (const row of pastRows) counts.set(row.category, (counts.get(row.category) ?? 0) + 1);
-      let topCategory: string | null = null;
-      let topCount = 0;
-      for (const [cat, count] of counts) {
-        if (count > topCount) {
-          topCategory = cat;
-          topCount = count;
-        }
-      }
-      if (topCategory) {
-        matchedCategory = categories.find((c) => c.name === topCategory) ?? { id: '', name: topCategory, sortOrder: -1 };
-      }
-    }
-  }
-  if (!matchedCategory) {
-    const hintCategory = findCategoryHint(text);
-    if (hintCategory) {
-      matchedCategory = categories.find((c) => c.name === hintCategory) ?? { id: '', name: hintCategory, sortOrder: -1 };
-    }
-  }
-
-  const amountGuess = guessAmountFromText(text, khrRate);
-  const dateGuess = guessDateFromText(text);
-
-  // 推測結果のログ (2026-09-29 追加、一時的な調査用)。Tomから「金額欄が反映されない」との
-  // 報告が複数回あり、サーバー側では正しく計算できているように見えるケースがあった。実際に
-  // レスポンスとして返す値そのものをログに残すことで、クライアント側の描画問題なのか
-  // サーバー側の推測ロジックの問題なのかを切り分けられるようにする。
-  console.log('[scan-receipt] result:', JSON.stringify({
-    matchedVendor: matchedVendor?.name ?? null,
-    vendorNameGuess,
-    matchedCategory: matchedCategory?.name ?? null,
-    amountGuess,
-    dateGuess,
-  }));
-
-  return NextResponse.json({
-    matchedVendor: matchedVendor ? { id: matchedVendor.id, name: matchedVendor.name } : null,
-    vendorNameGuess,
-    matchedCategory: matchedCategory ? { id: matchedCategory.id, name: matchedCategory.name } : null,
-    amountGuess,
-    dateGuess,
-  });
 });

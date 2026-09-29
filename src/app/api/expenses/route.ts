@@ -77,8 +77,12 @@ export const GET = withPosStaff('manager', async (_session, req) => {
 const postSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, '日付は YYYY-MM-DD 形式で入力してください'),
   amountUsd: z.number().positive(),
-  category: z.string().trim().min(1).max(60),
-  vendor: z.string().trim().max(60).optional(),
+  // 60→160文字に引き上げ (2026-09-29)。マスタ側の登録API (expense-categories/expense-vendors)
+  // は0023で既に160文字まで引き上げ済みだったが、経費登録時のバリデーションだけ60文字のまま
+  // 残っていたため、長い仕入れ先名 (例: 「MATSUZAKI TSUYOSHI AND ... 014790368 (小口資金)」)
+  // を選んで登録しようとすると弾かれてしまうバグがあった (発見)。
+  category: z.string().trim().min(1).max(160),
+  vendor: z.string().trim().max(160).optional(),
   note: z.string().trim().max(500).optional(),
   paymentStatus: z.enum(['paid', 'unpaid']).default('paid'),
   // 支払い元 (2026-09-02 追加)。'unpaid' の場合は無視される (まだ現金が動いていないため)。
