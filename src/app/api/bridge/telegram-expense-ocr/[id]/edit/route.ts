@@ -20,11 +20,18 @@ export const POST = async (req: Request, context: RouteContext) => {
   if (authError) return authError;
 
   const { id } = await context.params;
-  const body = (await req.json().catch(() => null)) as { field?: string; value?: string } | null;
+  const body = (await req.json().catch(() => null)) as
+    | { field?: string; value?: string; categoryIndex?: number }
+    | null;
   const field = body?.field;
   const rawValue = typeof body?.value === 'string' ? body.value.trim() : '';
+  // 2026-09-29: 費目編集はPOSの登録済み費目一覧 (/categories と同じ並び順) からボタンで
+  // 選ぶ方式に変更したため、自由入力の value ではなく一覧内のインデックスで来る
+  // (ABA送金画面には費目に相当する情報が無く、自由入力では表記が割れやすいため)。
+  const categoryIndex = typeof body?.categoryIndex === 'number' ? body.categoryIndex : null;
 
-  if (!field || !EDITABLE_FIELDS.includes(field as EditableField) || rawValue.length === 0) {
+  const isCategoryByIndex = field === 'category' && categoryIndex !== null;
+  if (!field || !EDITABLE_FIELDS.includes(field as EditableField) || (!isCategoryByIndex && rawValue.length === 0)) {
     return NextResponse.json({ error: 'invalid_request' }, { status: 400 });
   }
 
@@ -51,6 +58,17 @@ export const POST = async (req: Request, context: RouteContext) => {
   } else if (field === 'vendor') {
     if (rawValue.length > 160) return NextResponse.json({ error: 'value_too_long' }, { status: 400 });
     update.vendor_guess = rawValue;
+  } else if (isCategoryByIndex) {
+    // /categories と全く同じ並び順で再取得し、インデックスから費目名を復元する。
+    const { data: categoryRows, error: categoryError } = await supabase
+      .from('expense_categories')
+      .select('name')
+      .eq('store_id', storeId)
+      .order('sort_order', { ascending: true });
+    if (categoryError) return NextResponse.json({ error: categoryError.message }, { status: 500 });
+    const categoryRow = categoryRows?.[categoryIndex!];
+    if (!categoryRow) return NextResponse.json({ error: 'invalid_category' }, { status: 400 });
+    update.category_guess = categoryRow.name;
   } else {
     if (rawValue.length > 160) return NextResponse.json({ error: 'value_too_long' }, { status: 400 });
     update.category_guess = rawValue;
