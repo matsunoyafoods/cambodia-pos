@@ -5,6 +5,7 @@ import {
   findCategoryHint,
   guessAmountFromText,
   guessDateFromText,
+  guessSellerFromAmountHeader,
   guessVendorNameFromText,
   ReceiptOcrError,
 } from '@/lib/receipt-ocr';
@@ -57,8 +58,15 @@ export async function runReceiptScan(imageBase64: string): Promise<{ text: strin
   const vendors: ExpenseVendor[] = (vendorRows ?? []).map((r) => ({ id: r.id, name: r.name, sortOrder: r.sort_order }));
   const categories: ExpenseCategory[] = (categoryRows ?? []).map((r) => ({ id: r.id, name: r.name, sortOrder: r.sort_order }));
 
-  const matchedVendor = findBestMatch(text, vendors);
-  const vendorNameGuess = matchedVendor ? null : guessVendorNameFromText(text);
+  // 「受取人名」(ABA送金確認画面などで金額行の直後に来る名前) が取れる場合は、それだけを
+  // マスタ照合の対象にする。OCR全文 (findBestMatch(text, ...)) には送金元の口座名義
+  // (From account / Sender) も含まれており、それがたまたま無関係なマスタ名と部分一致して
+  // しまう事故が実際に起きたため (2026-09-29、Tomの実機テストで発覚。詳細は
+  // guessSellerFromAmountHeader のコメント参照)。受取人名候補が無い場合のみ、従来通り
+  // OCR全文でのマッチングにフォールバックする。
+  const sellerCandidate = guessSellerFromAmountHeader(text);
+  const matchedVendor = sellerCandidate ? findBestMatch(sellerCandidate, vendors) : findBestMatch(text, vendors);
+  const vendorNameGuess = matchedVendor ? null : (sellerCandidate ?? guessVendorNameFromText(text));
 
   let matchedCategory: ExpenseCategory | null = null;
   if (matchedVendor) {

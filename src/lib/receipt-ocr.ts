@@ -221,17 +221,22 @@ function findKhrHeaderLines(lines: string[]): { amount: number; lineIndex: numbe
   return matches;
 }
 
-/** 既存マスタに一致しなかった場合の「店名っぽい行」の推測 (新規仕入れ先の登録提案用)。
- * まず「金額行の次の行」(送金確認画面の受取人名パターン) を、複数の金額行候補それぞれで
- * 順番に試し、最初に「店名として妥当」と判定できたものを採用する (例: 通知トーストの次の
- * 行が「口座から支払いました」のようなKhmerの案内文だった場合はスキップし、本体カードの
- * 次の行にある実際の店名を採用する)。USD建てのヘッダーを優先し、無ければKHR建てのヘッダー
- * も試す。どれも妥当でなければレシート先頭付近の意味のありそうな行を採用する (数字・記号
- * だけの行、金額・電話番号らしき行は除外)。あくまで簡易的な推測 — ユーザーが確認・修正
- * できる前提 (仕入れ先は元々自由入力欄のため、間違っていてもその場で書き換えられる)。 */
-export function guessVendorNameFromText(text: string): string | null {
+/** 「金額行の次の行」(ABA送金確認画面などの受取人名パターン) だけから店名候補を取り出す。
+ * 複数の金額行候補それぞれで順番に試し、最初に「店名として妥当」と判定できたものを採用する
+ * (例: 通知トーストの次の行が「口座から支払いました」のようなKhmerの案内文だった場合は
+ * スキップし、本体カードの次の行にある実際の店名を採用する)。USD建てのヘッダーを優先し、
+ * 無ければKHR建てのヘッダーも試す。
+ *
+ * この関数が候補を返せた場合、それは「受取人名」という位置的に確実な情報なので、呼び出し側
+ * (receipt-scan.ts) ではこちらをOCR全文からの単純部分一致 (findBestMatch/findCategoryHint)
+ * より優先して使う (2026-09-29 発見・修正。Tomの実例: 送金元の口座名義
+ * 「MATSUZAKI TSUYOSHI AND MATSUZAKI YUKA AND...」(送金元の家族共同口座) が、たまたま
+ * マスタ登録済みの仕入れ先「MATSUZAKI TSUYOSHI」(小口現金入金用に登録していたもの) と
+ * 部分一致してしまい、実際の受取人「LOU MUYNGOR」ではなくそちらが選ばれてしまうバグが
+ * 発生したため。送金元の口座名義は本文中のどこか別の場所に出てくることがあっても、
+ * 店名の候補としては絶対に採用してはいけない)。 */
+export function guessSellerFromAmountHeader(text: string): string | null {
   const lines = text.split('\n').map((l) => l.trim());
-
   const headers = [...findAmountHeaderLines(lines), ...findKhrHeaderLines(lines)];
   for (const header of headers) {
     const candidate = lines[header.lineIndex + 1]?.trim();
@@ -239,7 +244,19 @@ export function guessVendorNameFromText(text: string): string | null {
       return candidate;
     }
   }
+  return null;
+}
 
+/** 既存マスタに一致しなかった場合の「店名っぽい行」の推測 (新規仕入れ先の登録提案用)。
+ * まず guessSellerFromAmountHeader (送金確認画面の受取人名パターン) を試す。それでも
+ * 見つからなければレシート先頭付近の意味のありそうな行を採用する (数字・記号だけの行、
+ * 金額・電話番号らしき行は除外)。あくまで簡易的な推測 — ユーザーが確認・修正できる前提
+ * (仕入れ先は元々自由入力欄のため、間違っていてもその場で書き換えられる)。 */
+export function guessVendorNameFromText(text: string): string | null {
+  const headerCandidate = guessSellerFromAmountHeader(text);
+  if (headerCandidate) return headerCandidate;
+
+  const lines = text.split('\n').map((l) => l.trim());
   const fallback = lines
     .filter((l) => l.length >= 2 && !/^[\d\s\-#:/.]+$/.test(l))
     .filter((l) => !looksLikeNonVendorLine(l));
