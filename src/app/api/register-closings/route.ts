@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createPosAdminClient, getPosStoreId } from '@/lib/supabase/admin';
 import { withPosStaff } from '@/lib/pos-auth';
+import { notifyRegisterClosing } from '@/lib/sales-report-notify';
 
 // レジ締め (2026-09-02 実データ連携)。
 // これまで register-closing-screen.tsx はシステム合計をすべて固定のデモ値で表示するだけで、
@@ -200,5 +201,16 @@ export const POST = withPosStaff('part_time', async (session, req) => {
     .select(closingSelectCols)
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  notifyRegisterClosing({
+    date: d.date,
+    salesTotal: totals.salesTotal,
+    systemTotalsByMethod: totals.systemTotalsByMethod,
+    countedTotalUsd,
+    differenceUsd,
+    registerFloatUsd,
+    confirmedByName: session.displayName,
+  }).catch((err) => console.error('[register-closings] notify failed:', err));
+
   return NextResponse.json({ closing: toApi(data as ClosingRow) }, { status: 201 });
 });
