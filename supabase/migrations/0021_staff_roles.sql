@@ -22,8 +22,9 @@ begin
   end if;
 end $$;
 
+-- 既存の 'staff' 行を 'employee' (社員) 扱いに寄せてから制約を付け直す。
+-- (旧順序では ADD CONSTRAINT が先で、既存の role='staff' 行に阻まれて失敗していた)
+update pos.staff set role = 'employee' where role = 'staff';
+
 alter table pos.staff
   add constraint staff_role_check check (role in ('owner', 'manager', 'sub_manager', 'employee', 'part_time'));
-
--- 既存の 'staff' 行は 'employee' (社員) 扱いに寄せる。
-update pos.staff set role = 'employee' where role = 'staff';
