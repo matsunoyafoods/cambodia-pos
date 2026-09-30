@@ -2,12 +2,14 @@ import 'server-only';
 
 // レジ締め確定時にその日の売上内容をTelegramへ通知する (2026-09-30 追加)。
 // Tom「売上レポートがテレグラムグループに届きません」→ 調査した結果、そもそも
-// 「レジ締め確定→Telegram通知」という機能自体がまだ無かったため、新規に作った
-// (Tom確認済み: レジ締め確定時に送る / 経費OCRと同じOrderingグループへ送る)。
+// 「レジ締め確定→Telegram通知」という機能自体がまだ無かったため、新規に作った。
+// 送信先は経費OCRと同じOrderingグループにする予定だったが、Tomから訂正があり
+// 専用の別グループ (chat_id: -4890320771、matsunoya-dine側の env var
+// TELEGRAM_SALES_REPORT_CHAT_ID) に送る。
 //
 // 送信先は matsunoya-dine 側の /api/bridge/notify (新設)。cambodia-pos は自前のTelegram Bot
-// 送信をここでは行わない — 経費OCR確認カードを送っているのと同じBot・同じグループに出す
-// ため、既存の telegram-expense-ocr ブリッジと対になる仕組み (共有シークレット
+// 送信をここでは行わない — 経費OCR確認カードを送っているのと同じBotを使う (グループは別) ため、
+// 既存の telegram-expense-ocr ブリッジと対になる仕組み (共有シークレット
 // TELEGRAM_BRIDGE_SECRET は両プロジェクトに既に設定済み) をそのまま使う。
 //
 // 通知の成否でレジ締め自体を失敗させないよう、呼び出し側では await せず
@@ -56,7 +58,9 @@ export async function notifyRegisterClosing(input: RegisterClosingNotifyInput): 
     await fetch(`${baseUrl}/api/bridge/notify`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-bridge-secret': secret },
-      body: JSON.stringify({ text: lines.join('\n') }),
+      // target: 'sales_report' 専用のTelegramグループ (経費OCRのOrderingグループとは別。
+      // Tom「ここの選択をミスしました。売上レポートは chat_id: -4890320771 に送りたい」)
+      body: JSON.stringify({ text: lines.join('\n'), target: 'sales_report' }),
     });
   } catch {
     // 通知失敗はレジ締め自体の成功を妨げない (Vercelのランタイムログには残る想定は
