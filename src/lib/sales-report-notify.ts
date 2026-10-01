@@ -1,4 +1,5 @@
 import 'server-only';
+import type { EthnicityTotal, TimePeriodSalesResult } from '@/lib/sales-aggregation';
 
 // レジ締め確定時にその日の売上内容をTelegramへ通知する (2026-09-30 追加)。
 // Tom「売上レポートがテレグラムグループに届きません」→ 調査した結果、そもそも
@@ -23,6 +24,12 @@ export type RegisterClosingNotifyInput = {
   differenceUsd: number;
   registerFloatUsd: number;
   confirmedByName: string | null;
+  // 客数・組数・人種内訳・時間帯別売上 (2026-10-01 追加)。Tom「客数、組数、人種人数、
+  // ランチタイム売上、ディナータイム売上をレポートに追記してほしい」への対応。
+  guestCount: number;
+  partyCount: number;
+  ethnicityTotals: EthnicityTotal[];
+  timePeriodSales: TimePeriodSalesResult[];
 };
 
 function formatDifferenceLine(differenceUsd: number): string {
@@ -41,11 +48,21 @@ export async function notifyRegisterClosing(input: RegisterClosingNotifyInput): 
     ([method, amount]) => `・${method}: $${amount.toFixed(2)}`,
   );
 
+  const ethnicityLine =
+    input.ethnicityTotals.length > 0 ? input.ethnicityTotals.map((e) => `${e.label}${e.count}`).join(' / ') : '未記録';
+
+  const timePeriodLines = input.timePeriodSales.map((p) => `・${p.label} (${p.start}-${p.end}): $${p.total.toFixed(2)}`);
+
   const lines = [
     `📊 レジ締め完了 (${input.date})`,
     '',
     `売上合計: $${input.salesTotal.toFixed(2)}`,
     ...methodLines,
+    '',
+    `客数: ${input.guestCount}名 (組数: ${input.partyCount}組)`,
+    `人種内訳: ${ethnicityLine}`,
+    timePeriodLines.length > 0 ? '' : null,
+    ...timePeriodLines,
     '',
     `現金カウント: $${input.countedTotalUsd.toFixed(2)}`,
     input.registerFloatUsd ? `レジ金: $${input.registerFloatUsd.toFixed(2)}` : null,

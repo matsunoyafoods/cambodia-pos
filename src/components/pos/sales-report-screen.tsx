@@ -111,12 +111,36 @@ function SalesReportPanel() {
 
   useEffect(() => reload(), [reload]);
 
+  function formatEthnicityBreakdown(totals: { label: string; count: number }[]): string {
+    return totals.length > 0 ? totals.map((e) => `${e.label}${e.count}`).join(' / ') : t('salesReport.notRecorded');
+  }
+
   function handleDailyCsvExport() {
     if (!daily || daily.days.length === 0) return;
+    const periods = daily.timePeriods;
     downloadCsv(
       `${t('salesReport.dailyCsvFilename')}_${month}`,
-      [t('salesReport.csvDate'), t('salesReport.csvSalesUsd'), t('salesReport.csvOrderCount')],
-      daily.days.map((d) => [d.date, d.total.toFixed(2), d.orderCount]),
+      [
+        t('salesReport.csvDate'),
+        t('salesReport.csvSalesUsd'),
+        t('salesReport.csvOrderCount'),
+        t('salesReport.csvGuestCount'),
+        t('salesReport.csvPartyCount'),
+        t('salesReport.csvEthnicityBreakdown'),
+        ...periods.map((p) => p.label),
+      ],
+      daily.days.map((d) => [
+        d.date,
+        d.total.toFixed(2),
+        d.orderCount,
+        d.guestCount,
+        d.partyCount,
+        formatEthnicityBreakdown(d.ethnicityTotals),
+        ...periods.map((p) => {
+          const match = d.timePeriodSales.find((x) => x.id === p.id);
+          return match ? match.total.toFixed(2) : '0.00';
+        }),
+      ]),
     );
   }
 
@@ -160,10 +184,31 @@ function SalesReportPanel() {
               {t('salesReport.csvExportButton')}
             </button>
           </div>
-          <div className="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-2">
+          <div className="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
             <Stat label={t('salesReport.monthTotalLabel')} value={`$${daily.monthTotal.toFixed(2)}`} />
             <Stat label={t('salesReport.orderCountLabel')} value={t('salesReport.orderCountValue', { count: daily.orderCount })} />
+            <Stat label={t('salesReport.guestCountLabel')} value={t('salesReport.guestCountValue', { count: daily.guestCount })} />
+            <Stat label={t('salesReport.partyCountLabel')} value={t('salesReport.partyCountValue', { count: daily.partyCount })} />
           </div>
+
+          <div className="mb-3 rounded-lg border border-border bg-secondary/20 p-3">
+            <div className="mb-1 text-[11px] text-muted-foreground">{t('salesReport.csvEthnicityBreakdown')}</div>
+            <div className="text-[13px]">{formatEthnicityBreakdown(daily.ethnicityTotals)}</div>
+          </div>
+
+          <div className="mb-3">
+            <div className="mb-1.5 text-[11px] text-muted-foreground">{t('salesReport.timePeriodSalesHeading')}</div>
+            {daily.timePeriods.length === 0 ? (
+              <div className="text-[12.5px] text-muted-foreground">{t('salesReport.noTimePeriods')}</div>
+            ) : (
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                {daily.timePeriodSales.map((p) => (
+                  <Stat key={p.id} label={`${p.label} (${p.start}-${p.end})`} value={`$${p.total.toFixed(2)}`} />
+                ))}
+              </div>
+            )}
+          </div>
+
           {daily.days.length === 0 ? (
             <div className="text-[13px] text-muted-foreground">{t('salesReport.noDailyData')}</div>
           ) : (
@@ -174,6 +219,12 @@ function SalesReportPanel() {
                     <th className="px-3 py-2 text-left font-semibold">{t('salesReport.csvDate')}</th>
                     <th className="px-3 py-2 text-right font-semibold">{t('salesReport.salesColumn')}</th>
                     <th className="px-3 py-2 text-right font-semibold">{t('salesReport.csvOrderCount')}</th>
+                    <th className="px-3 py-2 text-right font-semibold">{t('salesReport.csvGuestCount')}</th>
+                    <th className="px-3 py-2 text-right font-semibold">{t('salesReport.csvPartyCount')}</th>
+                    <th className="px-3 py-2 text-left font-semibold">{t('salesReport.csvEthnicityBreakdown')}</th>
+                    {daily.timePeriods.map((p) => (
+                      <th key={p.id} className="px-3 py-2 text-right font-semibold">{p.label}</th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
@@ -182,6 +233,17 @@ function SalesReportPanel() {
                       <td className="px-3 py-2">{d.date}</td>
                       <td className="px-3 py-2 text-right">${d.total.toFixed(2)}</td>
                       <td className="px-3 py-2 text-right">{d.orderCount}</td>
+                      <td className="px-3 py-2 text-right">{d.guestCount}</td>
+                      <td className="px-3 py-2 text-right">{d.partyCount}</td>
+                      <td className="px-3 py-2">{formatEthnicityBreakdown(d.ethnicityTotals)}</td>
+                      {daily.timePeriods.map((p) => {
+                        const match = d.timePeriodSales.find((x) => x.id === p.id);
+                        return (
+                          <td key={p.id} className="px-3 py-2 text-right">
+                            ${(match?.total ?? 0).toFixed(2)}
+                          </td>
+                        );
+                      })}
                     </tr>
                   ))}
                 </tbody>

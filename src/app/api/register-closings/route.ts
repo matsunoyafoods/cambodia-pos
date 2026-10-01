@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { createPosAdminClient, getPosStoreId } from '@/lib/supabase/admin';
 import { withPosStaff } from '@/lib/pos-auth';
 import { notifyRegisterClosing } from '@/lib/sales-report-notify';
+import { DEFAULT_TIME_PERIODS, type EthnicityKey, type TimePeriod } from '@/lib/pos-types';
+import { computeGuestStats, computeTimePeriodSales, type EthnicityTotal, type TimePeriodSalesResult } from '@/lib/sales-aggregation';
 
 // レジ締め (2026-09-02 実データ連携)。
 // これまで register-closing-screen.tsx はシステム合計をすべて固定のデモ値で表示するだけで、
@@ -22,23 +24,62 @@ function dayRangeUtc(date: string): { startIso: string; endIso: string } {
   return { startIso, endIso };
 }
 
-type SystemTotals = { systemCashTotal: number; systemTotalsByMethod: Record<string, number>; salesTotal: number };
+type SystemTotals = {
+  systemCashTotal: number;
+  systemTotalsByMethod: Record<string, number>;
+  salesTotal: number;
+  guestCount: number;
+  partyCount: number;
+  ethnicityTotals: EthnicityTotal[];
+  timePeriodSales: TimePeriodSalesResult[];
+};
 
 // 指定日の実売上をその場で集計する (pos.orders が status='paid' かつ paid_at がその日のもの)。
 // payments.cash_received_usd が非nullなら現金払い (checkout-screen.tsx の addLine 参照)。
+type OrderGuestRow = {
+  id: string;
+  total: number;
+  paid_at: string;
+  guest_ethnicity: Partial<Record<EthnicityKey, number>> | null;
+  guest_kids_count: number | null;
+};
+
+async function getTimePeriods(supabase: ReturnType<typeof createPosAdminClient>, storeId: string): Promise<TimePeriod[]> {
+  const { data } = await supabase.from('stores').select('settings').eq('id', storeId).maybeSingle();
+  const stored = data?.settings as { timePeriods?: TimePeriod[] } | null;
+  return Array.isArray(stored?.timePeriods) && stored.timePeriods.length > 0 ? stored.timePeriods : DEFAULT_TIME_PERIODS;
+}
+
 async function computeSystemTotals(supabase: ReturnType<typeof createPosAdminClient>, storeId: string, date: string): Promise<SystemTotals> {
   const { startIso, endIso } = dayRangeUtc(date);
-  const { data: orders, error: ordersError } = await supabase
-    .from('orders')
-    .select('id')
-    .eq('store_id', storeId)
-    .eq('status', 'paid')
-    .gte('paid_at', startIso)
-    .lt('paid_at', endIso);
+  const [{ data: orders, error: ordersError }, timePeriods] = await Promise.all([
+    supabase
+      .from('orders')
+      .select('id, total, paid_at, guest_ethnicity, guest_kids_count')
+      .eq('store_id', storeId)
+      .eq('status', 'paid')
+      .gte('paid_at', startIso)
+      .lt('paid_at', endIso),
+    getTimePeriods(supabase, storeId),
+  ]);
   if (ordersError) throw new Error(ordersError.message);
 
-  const orderIds = (orders ?? []).map((o) => o.id as string);
-  if (orderIds.length === 0) return { systemCashTotal: 0, systemTotalsByMethod: {}, salesTotal: 0 };
+  const orderRows = (orders ?? []) as OrderGuestRow[];
+  const guestStats = computeGuestStats(orderRows);
+  const timePeriodSales = computeTimePeriodSales(orderRows, timePeriods);
+
+  const orderIds = orderRows.map((o) => o.id);
+  if (orderIds.length === 0) {
+    return {
+      systemCashTotal: 0,
+      systemTotalsByMethod: {},
+      salesTotal: 0,
+      guestCount: guestStats.guestCount,
+      partyCount: guestStats.partyCount,
+      ethnicityTotals: guestStats.ethnicityTotals,
+      timePeriodSales,
+    };
+  }
 
   const { data: payments, error: paymentsError } = await supabase
     .from('payments')
@@ -55,7 +96,15 @@ async function computeSystemTotals(supabase: ReturnType<typeof createPosAdminCli
     byMethod[p.method as string] = (byMethod[p.method as string] ?? 0) + amount;
     if (p.cash_received_usd !== null) systemCashTotal += amount;
   }
-  return { systemCashTotal, systemTotalsByMethod: byMethod, salesTotal };
+  return {
+    systemCashTotal,
+    systemTotalsByMethod: byMethod,
+    salesTotal,
+    guestCount: guestStats.guestCount,
+    partyCount: guestStats.partyCount,
+    ethnicityTotals: guestStats.ethnicityTotals,
+    timePeriodSales,
+  };
 }
 
 async function getKhrRate(supabase: ReturnType<typeof createPosAdminClient>, storeId: string): Promise<number> {
@@ -210,6 +259,10 @@ export const POST = withPosStaff('part_time', async (session, req) => {
     differenceUsd,
     registerFloatUsd,
     confirmedByName: session.displayName,
+    guestCount: totals.guestCount,
+    partyCount: totals.partyCount,
+    ethnicityTotals: totals.ethnicityTotals,
+    timePeriodSales: totals.timePeriodSales,
   }).catch((err) => console.error('[register-closings] notify failed:', err));
 
   return NextResponse.json({ closing: toApi(data as ClosingRow) }, { status: 201 });

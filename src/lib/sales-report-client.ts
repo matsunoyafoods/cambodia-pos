@@ -2,6 +2,8 @@
  * 売上レポート (/pos/sales-report) の同一オリジン API クライアント (2026-09-02 追加)。
  */
 
+import type { EthnicityKey, TimePeriod } from '@/lib/pos-types';
+
 export class PosSalesReportApiError extends Error {
   constructor(
     message: string,
@@ -30,11 +32,30 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+export type EthnicityTotal = { key: EthnicityKey; label: string; count: number };
+
+export type TimePeriodSales = { id: string; label: string; start: string; end: string; total: number; orderCount: number };
+
+export type DailySalesDay = {
+  date: string;
+  total: number;
+  orderCount: number;
+  guestCount: number;
+  partyCount: number;
+  ethnicityTotals: EthnicityTotal[];
+  timePeriodSales: TimePeriodSales[];
+};
+
 export type DailySales = {
   month: string;
-  days: { date: string; total: number; orderCount: number }[];
+  days: DailySalesDay[];
   monthTotal: number;
   orderCount: number;
+  guestCount: number;
+  partyCount: number;
+  ethnicityTotals: EthnicityTotal[];
+  timePeriodSales: TimePeriodSales[];
+  timePeriods: TimePeriod[];
 };
 
 export function getDailySales(month: string): Promise<DailySales> {
@@ -42,7 +63,15 @@ export function getDailySales(month: string): Promise<DailySales> {
 }
 
 // 本日の売上 (2026-09-04 追加。レジ画面ヘッダーの常時表示用)。
-export type TodaySales = { date: string; total: number; orderCount: number };
+export type TodaySales = {
+  date: string;
+  total: number;
+  orderCount: number;
+  guestCount: number;
+  partyCount: number;
+  ethnicityTotals: EthnicityTotal[];
+  timePeriodSales: TimePeriodSales[];
+};
 
 export function getTodaySales(): Promise<TodaySales> {
   return request('/api/sales-report/today');

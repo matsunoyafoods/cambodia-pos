@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createPosAdminClient, getPosStoreId } from '@/lib/supabase/admin';
 import { withPosStaff } from '@/lib/pos-auth';
-import { DEFAULT_SETTINGS, type PosSettings } from '@/lib/pos-types';
+import { DEFAULT_SETTINGS, DEFAULT_TIME_PERIODS, type PosSettings, type TimePeriod } from '@/lib/pos-types';
 
 // POS ネイティブ運用店舗向けの一般設定・決済設定の永続化。
 // pos.stores.settings (jsonb) を再利用する (新規マイグレーション不要)。
@@ -38,7 +38,23 @@ function toPosSettings(storeId: string, raw: unknown): PosSettings {
       typeof stored.timecardHistoryResetTime === 'string'
         ? stored.timecardHistoryResetTime
         : DEFAULT_SETTINGS.timecardHistoryResetTime,
+    timePeriods: isValidTimePeriods(stored.timePeriods) ? stored.timePeriods : DEFAULT_TIME_PERIODS,
   };
+}
+
+function isValidTimePeriods(value: unknown): value is TimePeriod[] {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (v) =>
+        v &&
+        typeof v === 'object' &&
+        typeof (v as TimePeriod).id === 'string' &&
+        typeof (v as TimePeriod).label === 'string' &&
+        typeof (v as TimePeriod).start === 'string' &&
+        typeof (v as TimePeriod).end === 'string',
+    )
+  );
 }
 
 // 取得。staff 以上 (register 画面からは使わないが設定画面の表示用に閲覧は許可)。
@@ -80,6 +96,17 @@ const patchSchema = z.object({
   quickMenuKeys: z.array(z.string()).max(6).optional(),
   registerFloatUsd: z.number().min(0).optional(),
   timecardHistoryResetTime: z.string().regex(HHMM_RE, 'HH:MM 形式で入力してください').optional(),
+  timePeriods: z
+    .array(
+      z.object({
+        id: z.string().min(1).max(40),
+        label: z.string().trim().min(1, '名前を入力してください').max(20),
+        start: z.string().regex(HHMM_RE, 'HH:MM 形式で入力してください'),
+        end: z.string().regex(HHMM_RE, 'HH:MM 形式で入力してください'),
+      }),
+    )
+    .max(8, '時間帯は最大8件までです')
+    .optional(),
 });
 
 // 更新。manager 以上のみ。

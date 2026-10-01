@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { DEFAULT_SETTINGS, type PosSettings } from '@/lib/pos-types';
+import { DEFAULT_SETTINGS, type PosSettings, type TimePeriod } from '@/lib/pos-types';
 import { getPosSettings, updatePosSettings, PosApiError } from '@/lib/api-client';
 import {
   generateHandyTableGroupTranslations,
@@ -1285,6 +1285,27 @@ function SettingsScreenInner() {
     setSaveError(null);
   }
 
+  // 時間帯別売上設定の行追加・編集・削除 (2026-10-01 追加)。
+  function addTimePeriod() {
+    const id = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `tp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const next: TimePeriod = { id, label: '', start: '11:00', end: '15:00' };
+    update('timePeriods', [...settings.timePeriods, next]);
+  }
+
+  function updateTimePeriod(index: number, patch: Partial<TimePeriod>) {
+    update(
+      'timePeriods',
+      settings.timePeriods.map((p, i) => (i === index ? { ...p, ...patch } : p)),
+    );
+  }
+
+  function removeTimePeriod(index: number) {
+    update(
+      'timePeriods',
+      settings.timePeriods.filter((_, i) => i !== index),
+    );
+  }
+
   async function handleSave() {
     setSaving(true);
     setSaveError(null);
@@ -1307,6 +1328,7 @@ function SettingsScreenInner() {
           quickMenuKeys,
           registerFloatUsd,
           timecardHistoryResetTime,
+          timePeriods,
         } = settings;
         const s = await updateGeneralSettings({
           vatRate,
@@ -1325,6 +1347,7 @@ function SettingsScreenInner() {
           quickMenuKeys,
           registerFloatUsd,
           timecardHistoryResetTime,
+          timePeriods,
         });
         setSettings((prev) => ({ ...prev, ...s }));
       } else {
@@ -1639,6 +1662,58 @@ function SettingsScreenInner() {
                       className="h-10 w-36 rounded-lg border border-border px-3 text-[13.5px] disabled:opacity-60"
                     />
                   </Field>
+
+                  <div className="mt-2 border-t border-border pt-4 text-[13.5px] font-bold">
+                    {t('settings.general.timePeriodsHeading')}
+                  </div>
+                  <div className="text-[11.5px] text-muted-foreground">{t('settings.general.timePeriodsDesc')}</div>
+                  <div className="flex flex-col gap-2">
+                    {settings.timePeriods.map((p, i) => (
+                      <div key={p.id} className="flex items-center gap-2">
+                        <input
+                          value={p.label}
+                          disabled={!canManageSettings}
+                          onChange={(e) => updateTimePeriod(i, { label: e.target.value })}
+                          placeholder={t('settings.general.timePeriodLabelPlaceholder')}
+                          className="h-10 w-32 rounded-lg border border-border px-3 text-[13.5px] disabled:opacity-60"
+                        />
+                        <input
+                          type="time"
+                          value={p.start}
+                          disabled={!canManageSettings}
+                          onChange={(e) => updateTimePeriod(i, { start: e.target.value })}
+                          className="h-10 w-32 rounded-lg border border-border px-3 text-[13.5px] disabled:opacity-60"
+                        />
+                        <span className="text-[12.5px] text-muted-foreground">〜</span>
+                        <input
+                          type="time"
+                          value={p.end}
+                          disabled={!canManageSettings}
+                          onChange={(e) => updateTimePeriod(i, { end: e.target.value })}
+                          className="h-10 w-32 rounded-lg border border-border px-3 text-[13.5px] disabled:opacity-60"
+                        />
+                        <button
+                          type="button"
+                          disabled={!canManageSettings}
+                          onClick={() => removeTimePeriod(i)}
+                          className="h-9 rounded-md border border-destructive/40 px-2.5 text-[12px] font-semibold text-destructive disabled:opacity-60"
+                        >
+                          {t('common.delete')}
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      disabled={!canManageSettings || settings.timePeriods.length >= 8}
+                      onClick={addTimePeriod}
+                      className="h-9 w-fit rounded-md border border-border px-3 text-[12px] font-semibold disabled:opacity-60"
+                    >
+                      + {t('settings.general.timePeriodAddButton')}
+                    </button>
+                    {settings.timePeriods.length >= 8 && (
+                      <div className="text-[11px] text-muted-foreground">{t('settings.general.timePeriodsMaxReached')}</div>
+                    )}
+                  </div>
                 </>
               )}
             </div>

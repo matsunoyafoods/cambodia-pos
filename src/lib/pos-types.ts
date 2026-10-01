@@ -84,6 +84,19 @@ export const ETHNICITY_LABELS: Record<EthnicityKey, string> = {
 };
 export type GuestEthnicity = Partial<Record<EthnicityKey, number>>;
 
+// 時間帯別売上集計の区間設定 (2026-10-01 追加)。Tom「客数、組数、人種人数、ランチタイム売上、
+// ディナータイム売上をレポートに追記してほしい。ランチ/ディナーは設定から時間別売上として
+// 追加できるようにしてほしい」への対応。固定の「ランチ/ディナー」2区分ではなく、店舗が
+// 設定画面 (settings-screen.tsx 一般設定) で自由に名前・開始時刻・終了時刻を追加できる
+// 時間帯のリストとして持つ。end < start の場合は日またぎ (深夜営業等) として扱う
+// (sales-aggregation.ts の computeTimePeriodSales 参照)。
+export type TimePeriod = {
+  id: string;
+  label: string;
+  start: string; // 'HH:MM' (店舗タイムゾーン基準)
+  end: string; // 'HH:MM'
+};
+
 export type TableStatus = 'available' | 'occupied' | 'billing';
 
 // レジ画面のメニュー写真の見せ方。'compact' = 従来通り小さめ・トリミングあり (一覧性重視、
@@ -186,6 +199,10 @@ export type PosSettings = {
    * への対応)。打刻の実データ (pos.timecards) は一切削除されず、あくまで画面表示のフィルタ条件
    * (「本日」の起点) を変えるだけ。'HH:MM' 形式。デフォルト '00:00' (深夜0時、通常の日付境界)。 */
   timecardHistoryResetTime: string;
+  /** 時間帯別売上集計の区間設定 (2026-10-01 追加)。売上レポート (/pos/sales-report) と
+   * レジ締め確定時のTelegram通知の両方で、ここに設定した区間ごとの売上を集計して表示する。
+   * 未設定 = DEFAULT_TIME_PERIODS (ランチ/ディナー)。最大8件。 */
+  timePeriods: TimePeriod[];
 };
 
 // プリンター実装 (2026-08-31 追加)。レジ画面 (Vercel/クラウド) から店舗LAN内のプリンターへ
@@ -272,6 +289,11 @@ export type InvoiceInput = {
   description: string;
 };
 
+export const DEFAULT_TIME_PERIODS: TimePeriod[] = [
+  { id: 'lunch', label: 'ランチ', start: '11:00', end: '15:00' },
+  { id: 'dinner', label: 'ディナー', start: '17:00', end: '22:00' },
+];
+
 export const DEFAULT_SETTINGS: PosSettings = {
   storeId: 'default',
   vatRate: 10,
@@ -292,6 +314,7 @@ export const DEFAULT_SETTINGS: PosSettings = {
   quickMenuKeys: ['kitchen', 'drinks', 'handy', 'reservations', 'timecard', 'tableLayout'],
   registerFloatUsd: 0,
   timecardHistoryResetTime: '00:00',
+  timePeriods: DEFAULT_TIME_PERIODS,
 };
 
 // ---------- 経費管理 (2026-08-31 追加。データ収集・AI分析機能 第一弾) ----------

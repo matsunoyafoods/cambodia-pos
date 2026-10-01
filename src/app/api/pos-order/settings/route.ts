@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createPosAdminClient, getPosStoreId } from '@/lib/supabase/admin';
-import { DEFAULT_SETTINGS, type PosSettings } from '@/lib/pos-types';
+import { DEFAULT_SETTINGS, type PosSettings, type TimePeriod } from '@/lib/pos-types';
 
 // レジ画面向け、POSネイティブ設定 (VAT率・サービス料率・KHRレート・決済手段) の
 // 公開読み取りエンドポイント (認証なし・理由は menu/route.ts と同じ)。
@@ -43,6 +43,9 @@ export async function GET() {
       typeof stored.timecardHistoryResetTime === 'string'
         ? stored.timecardHistoryResetTime
         : DEFAULT_SETTINGS.timecardHistoryResetTime,
+    timePeriods: Array.isArray(stored.timePeriods) && (stored.timePeriods as TimePeriod[]).length > 0
+      ? (stored.timePeriods as TimePeriod[])
+      : DEFAULT_SETTINGS.timePeriods,
   };
   return NextResponse.json(settings);
 }
