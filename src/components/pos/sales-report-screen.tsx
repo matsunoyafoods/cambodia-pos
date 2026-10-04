@@ -76,7 +76,7 @@ function PosNativeOnlyNotice() {
 }
 
 function SalesReportPanel() {
-  const { t } = useLanguage();
+  const { t, lang } = useLanguage();
   const [month, setMonth] = useState(currentMonth());
   const [daily, setDaily] = useState<DailySales | null>(null);
   const [tables, setTables] = useState<TableSalesReport | null>(null);
@@ -115,6 +115,14 @@ function SalesReportPanel() {
     return totals.length > 0 ? totals.map((e) => `${e.label}${e.count}`).join(' / ') : t('salesReport.notRecorded');
   }
 
+  // 時間帯名の表示 (2026-10-04 追加)。設定画面でTomが入力したlabelEn/labelKmがあれば
+  // 現在のUI表示言語に応じて使う (無ければ日本語のlabelをそのまま表示)。
+  function periodLabel(p: { label: string; labelEn?: string; labelKm?: string }): string {
+    if (lang === 'en') return p.labelEn?.trim() || p.label;
+    if (lang === 'km') return p.labelKm?.trim() || p.label;
+    return p.label;
+  }
+
   function handleDailyCsvExport() {
     if (!daily || daily.days.length === 0) return;
     const periods = daily.timePeriods;
@@ -127,7 +135,7 @@ function SalesReportPanel() {
         t('salesReport.csvGuestCount'),
         t('salesReport.csvPartyCount'),
         t('salesReport.csvEthnicityBreakdown'),
-        ...periods.map((p) => p.label),
+        ...periods.map((p) => periodLabel(p)),
       ],
       daily.days.map((d) => [
         d.date,
@@ -203,7 +211,7 @@ function SalesReportPanel() {
             ) : (
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                 {daily.timePeriodSales.map((p) => (
-                  <Stat key={p.id} label={`${p.label} (${p.start}-${p.end})`} value={`$${p.total.toFixed(2)}`} />
+                  <Stat key={p.id} label={`${periodLabel(p)} (${p.start}-${p.end})`} value={`$${p.total.toFixed(2)}`} />
                 ))}
               </div>
             )}
@@ -223,7 +231,7 @@ function SalesReportPanel() {
                     <th className="px-3 py-2 text-right font-semibold">{t('salesReport.csvPartyCount')}</th>
                     <th className="px-3 py-2 text-left font-semibold">{t('salesReport.csvEthnicityBreakdown')}</th>
                     {daily.timePeriods.map((p) => (
-                      <th key={p.id} className="px-3 py-2 text-right font-semibold">{p.label}</th>
+                      <th key={p.id} className="px-3 py-2 text-right font-semibold">{periodLabel(p)}</th>
                     ))}
                   </tr>
                 </thead>

@@ -34,7 +34,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export type EthnicityTotal = { key: EthnicityKey; label: string; count: number };
 
-export type TimePeriodSales = { id: string; label: string; start: string; end: string; total: number; orderCount: number };
+export type TimePeriodSales = { id: string; label: string; labelEn?: string; labelKm?: string; start: string; end: string; total: number; orderCount: number };
 
 export type DailySalesDay = {
   date: string;

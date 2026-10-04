@@ -1669,37 +1669,56 @@ function SettingsScreenInner() {
                   <div className="text-[11.5px] text-muted-foreground">{t('settings.general.timePeriodsDesc')}</div>
                   <div className="flex flex-col gap-2">
                     {settings.timePeriods.map((p, i) => (
-                      <div key={p.id} className="flex items-center gap-2">
-                        <input
-                          value={p.label}
-                          disabled={!canManageSettings}
-                          onChange={(e) => updateTimePeriod(i, { label: e.target.value })}
-                          placeholder={t('settings.general.timePeriodLabelPlaceholder')}
-                          className="h-10 w-32 rounded-lg border border-border px-3 text-[13.5px] disabled:opacity-60"
-                        />
-                        <input
-                          type="time"
-                          value={p.start}
-                          disabled={!canManageSettings}
-                          onChange={(e) => updateTimePeriod(i, { start: e.target.value })}
-                          className="h-10 w-32 rounded-lg border border-border px-3 text-[13.5px] disabled:opacity-60"
-                        />
-                        <span className="text-[12.5px] text-muted-foreground">〜</span>
-                        <input
-                          type="time"
-                          value={p.end}
-                          disabled={!canManageSettings}
-                          onChange={(e) => updateTimePeriod(i, { end: e.target.value })}
-                          className="h-10 w-32 rounded-lg border border-border px-3 text-[13.5px] disabled:opacity-60"
-                        />
-                        <button
-                          type="button"
-                          disabled={!canManageSettings}
-                          onClick={() => removeTimePeriod(i)}
-                          className="h-9 rounded-md border border-destructive/40 px-2.5 text-[12px] font-semibold text-destructive disabled:opacity-60"
-                        >
-                          {t('common.delete')}
-                        </button>
+                      <div key={p.id} className="flex flex-col gap-1.5 rounded-lg border border-border p-2.5">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <input
+                            value={p.label}
+                            disabled={!canManageSettings}
+                            onChange={(e) => updateTimePeriod(i, { label: e.target.value })}
+                            placeholder={t('settings.general.timePeriodLabelPlaceholder')}
+                            className="h-10 w-32 rounded-lg border border-border px-3 text-[13.5px] disabled:opacity-60"
+                          />
+                          <input
+                            type="time"
+                            value={p.start}
+                            disabled={!canManageSettings}
+                            onChange={(e) => updateTimePeriod(i, { start: e.target.value })}
+                            className="h-10 w-32 rounded-lg border border-border px-3 text-[13.5px] disabled:opacity-60"
+                          />
+                          <span className="text-[12.5px] text-muted-foreground">〜</span>
+                          <input
+                            type="time"
+                            value={p.end}
+                            disabled={!canManageSettings}
+                            onChange={(e) => updateTimePeriod(i, { end: e.target.value })}
+                            className="h-10 w-32 rounded-lg border border-border px-3 text-[13.5px] disabled:opacity-60"
+                          />
+                          <button
+                            type="button"
+                            disabled={!canManageSettings}
+                            onClick={() => removeTimePeriod(i)}
+                            className="h-9 rounded-md border border-destructive/40 px-2.5 text-[12px] font-semibold text-destructive disabled:opacity-60"
+                          >
+                            {t('common.delete')}
+                          </button>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2 pl-0.5">
+                          <span className="text-[11px] text-muted-foreground">{t('settings.general.timePeriodTranslationNote')}</span>
+                          <input
+                            value={p.labelEn ?? ''}
+                            disabled={!canManageSettings}
+                            onChange={(e) => updateTimePeriod(i, { labelEn: e.target.value })}
+                            placeholder={t('settings.general.timePeriodLabelEnPlaceholder')}
+                            className="h-9 w-32 rounded-lg border border-border px-2.5 text-[12.5px] disabled:opacity-60"
+                          />
+                          <input
+                            value={p.labelKm ?? ''}
+                            disabled={!canManageSettings}
+                            onChange={(e) => updateTimePeriod(i, { labelKm: e.target.value })}
+                            placeholder={t('settings.general.timePeriodLabelKmPlaceholder')}
+                            className="h-9 w-32 rounded-lg border border-border px-2.5 text-[12.5px] disabled:opacity-60"
+                          />
+                        </div>
                       </div>
                     ))}
                     <button

@@ -52,7 +52,9 @@ function isValidTimePeriods(value: unknown): value is TimePeriod[] {
         typeof (v as TimePeriod).id === 'string' &&
         typeof (v as TimePeriod).label === 'string' &&
         typeof (v as TimePeriod).start === 'string' &&
-        typeof (v as TimePeriod).end === 'string',
+        typeof (v as TimePeriod).end === 'string' &&
+        ((v as TimePeriod).labelEn === undefined || typeof (v as TimePeriod).labelEn === 'string') &&
+        ((v as TimePeriod).labelKm === undefined || typeof (v as TimePeriod).labelKm === 'string'),
     )
   );
 }
@@ -103,6 +105,8 @@ const patchSchema = z.object({
         label: z.string().trim().min(1, '名前を入力してください').max(20),
         start: z.string().regex(HHMM_RE, 'HH:MM 形式で入力してください'),
         end: z.string().regex(HHMM_RE, 'HH:MM 形式で入力してください'),
+        labelEn: z.string().trim().max(20).optional(),
+        labelKm: z.string().trim().max(20).optional(),
       }),
     )
     .max(8, '時間帯は最大8件までです')

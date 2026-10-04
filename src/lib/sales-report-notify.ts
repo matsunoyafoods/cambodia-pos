@@ -143,10 +143,19 @@ function joinBlocks(blocks: string[]): string {
   return blocks.join('\n\n┄┄┄┄┄\n\n');
 }
 
+// 時間帯名 (ランチ・ディナー等) の表示名を言語ごとに選ぶ。設定画面でTomがlabelEn/labelKmを
+// 入力していればそれを使い、未入力ならlabel (日本語) をそのまま使う (2026-10-04 追加。
+// Tom「レポートの英語のところのランチとディナーが日本語のままになっている」への対応)。
+function timePeriodLabel(lang: SalesReportLang, p: TimePeriodSalesResult): string {
+  if (lang === 'en') return p.labelEn?.trim() || p.label;
+  if (lang === 'km') return p.labelKm?.trim() || p.label;
+  return p.label;
+}
+
 function buildBlock(lang: SalesReportLang, input: RegisterClosingNotifyInput): string {
   const m = MESSAGES[lang];
   const methodLines = Object.entries(input.systemTotalsByMethod).map(([method, amount]) => `・${method}: $${amount.toFixed(2)}`);
-  const timePeriodLines = input.timePeriodSales.map((p) => `・${p.label} (${p.start}-${p.end}): $${p.total.toFixed(2)}`);
+  const timePeriodLines = input.timePeriodSales.map((p) => `・${timePeriodLabel(lang, p)} (${p.start}-${p.end}): $${p.total.toFixed(2)}`);
 
   const lines = [
     m.title(input.date),

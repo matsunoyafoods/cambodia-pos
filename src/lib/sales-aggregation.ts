@@ -50,6 +50,8 @@ export type TimePeriodSalesOrderInput = { total: number; paid_at: string };
 export type TimePeriodSalesResult = {
   id: string;
   label: string;
+  labelEn?: string;
+  labelKm?: string;
   start: string;
   end: string;
   total: number;
@@ -83,6 +85,15 @@ export function computeTimePeriodSales(orders: TimePeriodSalesOrderInput[], peri
       total += Number(order.total);
       orderCount += 1;
     }
-    return { id: period.id, label: period.label, start: period.start, end: period.end, total, orderCount };
+    return {
+      id: period.id,
+      label: period.label,
+      labelEn: period.labelEn,
+      labelKm: period.labelKm,
+      start: period.start,
+      end: period.end,
+      total,
+      orderCount,
+    };
   });
 }

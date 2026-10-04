@@ -95,6 +95,12 @@ export type TimePeriod = {
   label: string;
   start: string; // 'HH:MM' (店舗タイムゾーン基準)
   end: string; // 'HH:MM'
+  /** レジ締めTelegram通知の英語ブロックで使う名前 (2026-10-04 追加。Tom「レポートの英語の
+   * ところのランチとディナーが日本語のままになっている」への対応)。未入力なら label (日本語)
+   * をそのまま使う。設定画面 (settings-screen.tsx) で任意入力。 */
+  labelEn?: string;
+  /** 同上、クメール語ブロック用。未入力なら label をそのまま使う。 */
+  labelKm?: string;
 };
 
 export type TableStatus = 'available' | 'occupied' | 'billing';
@@ -290,8 +296,8 @@ export type InvoiceInput = {
 };
 
 export const DEFAULT_TIME_PERIODS: TimePeriod[] = [
-  { id: 'lunch', label: 'ランチ', start: '11:00', end: '15:00' },
-  { id: 'dinner', label: 'ディナー', start: '17:00', end: '22:00' },
+  { id: 'lunch', label: 'ランチ', labelEn: 'Lunch', labelKm: 'អាហារថ្ងៃត្រង់', start: '11:00', end: '15:00' },
+  { id: 'dinner', label: 'ディナー', labelEn: 'Dinner', labelKm: 'អាហារល្ងាច', start: '17:00', end: '22:00' },
 ];
 
 export const DEFAULT_SETTINGS: PosSettings = {
