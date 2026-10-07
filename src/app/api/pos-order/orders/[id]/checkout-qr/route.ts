@@ -79,23 +79,28 @@ export async function POST(req: Request, ctx: RouteContext) {
   }
 
   // 推測困難なトークン (32バイト = 256bitのランダム値)。注文IDとは無関係なので、
-  // トークンから他の注文を推測・列挙することはできない。
-  const token = randomBytes(32).toString('base64url');
+  // トークンから他の注文を推測・列挙することはできない。すでに begin-checkout
+  // (「会計へ進む」時点) でトークン発行済みなら、新しいトークンへの差し替えは行わず
+  // 同じトークンを使い続ける (お客様が既に開いているQR/明細ページのURLを壊さないため)。
+  const isNewToken = !order.receipt_token;
+  const token = order.receipt_token ?? randomBytes(32).toString('base64url');
   const nowIso = new Date().toISOString();
+
+  const updatePayload: Record<string, unknown> = {
+    status: 'awaiting_payment',
+    subtotal: d.subtotal,
+    vat: d.vat,
+    service: d.service,
+    coupon_discount: d.couponDiscount,
+    order_discount: d.orderDiscount,
+    total: d.total,
+    receipt_token: token,
+  };
+  if (isNewToken) updatePayload.receipt_token_created_at = nowIso;
 
   const { error: updateError } = await supabase
     .from('orders')
-    .update({
-      status: 'awaiting_payment',
-      subtotal: d.subtotal,
-      vat: d.vat,
-      service: d.service,
-      coupon_discount: d.couponDiscount,
-      order_discount: d.orderDiscount,
-      total: d.total,
-      receipt_token: token,
-      receipt_token_created_at: nowIso,
-    })
+    .update(updatePayload)
     .eq('id', id);
   if (updateError) return NextResponse.json({ error: updateError.message }, { status: 500 });
 

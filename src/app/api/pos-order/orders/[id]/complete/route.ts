@@ -57,7 +57,7 @@ export async function POST(req: Request, ctx: RouteContext) {
 
   const { data: order, error: orderError } = await supabase
     .from('orders')
-    .select('id, status')
+    .select('id, status, receipt_token')
     .eq('id', id)
     .eq('store_id', storeId)
     .maybeSingle();
@@ -87,24 +87,25 @@ export async function POST(req: Request, ctx: RouteContext) {
   // お客様向けデジタルレシート (/receipt/{token}) 用のトークン (2026-10-07 追加。Tom「会計時に
   // QRコードをお客様に見せて読み込むとデジタルレシートを表示させることは可能か」への対応)。
   // checkout-qr/route.ts と同じ仕組みを、現金・カード等の通常会計にも適用する — 支払いは
-  // 既にこの場で完了しているので、ここでは最初から status='paid' として発行するだけでよい。
-  const token = randomBytes(32).toString('base64url');
+  // 既にこの場で完了しているので、ここでは status='paid' として発行する。すでに
+  // begin-checkout (「会計へ進む」時点) でトークン発行済みなら、同じトークンを使い続ける
+  // (お客様が既に開いているQR/明細ページのURLを壊さないため)。
+  const isNewToken = !order.receipt_token;
+  const token = order.receipt_token ?? randomBytes(32).toString('base64url');
   const nowIso = new Date().toISOString();
-  const { error: updateError } = await supabase
-    .from('orders')
-    .update({
-      status: 'paid',
-      subtotal: d.subtotal,
-      vat: d.vat,
-      service: d.service,
-      coupon_discount: d.couponDiscount,
-      order_discount: d.orderDiscount,
-      total: d.total,
-      paid_at: nowIso,
-      receipt_token: token,
-      receipt_token_created_at: nowIso,
-    })
-    .eq('id', id);
+  const updatePayload: Record<string, unknown> = {
+    status: 'paid',
+    subtotal: d.subtotal,
+    vat: d.vat,
+    service: d.service,
+    coupon_discount: d.couponDiscount,
+    order_discount: d.orderDiscount,
+    total: d.total,
+    paid_at: nowIso,
+    receipt_token: token,
+  };
+  if (isNewToken) updatePayload.receipt_token_created_at = nowIso;
+  const { error: updateError } = await supabase.from('orders').update(updatePayload).eq('id', id);
   if (updateError) return NextResponse.json({ error: updateError.message }, { status: 500 });
 
   const { error: paymentError } = await supabase.from('payments').insert(

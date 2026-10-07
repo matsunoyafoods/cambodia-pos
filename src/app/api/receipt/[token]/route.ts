@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createPosAdminClient, getPosStoreId } from '@/lib/supabase/admin';
+import { DEFAULT_SETTINGS } from '@/lib/pos-types';
 
 // GET /api/receipt/[token] : お客様向け明細・レシートの公開 (認証なし) 読み取り専用
 // エンドポイント (2026-10-06 追加。QR+ABA決済フロー フェーズ1)。
@@ -48,17 +49,48 @@ export async function GET(_req: Request, ctx: RouteContext) {
     .order('confirmed_at', { ascending: false })
     .limit(1);
 
-  const { data: storeRow } = await supabase.from('stores').select('name').eq('id', storeId).maybeSingle();
+  const { data: storeRow } = await supabase.from('stores').select('name, settings').eq('id', storeId).maybeSingle();
+
+  // status='open' (「会計へ進む」直後、支払い方法・割引はまだ未確定) の注文は、保存済みの
+  // subtotal/vat/service/total 列 (まだロックされていない古い値) を使わず、その場で
+  // order_items から金額を計算して返す (2026-10-07 追加。begin-checkout/route.ts 参照)。
+  // 割引はこの時点ではまだ選べないため常に0。checkout-qr/complete で status が変わった
+  // 後は、通常どおりロック済みの列をそのまま返す。
+  let subtotal = order.subtotal;
+  let vat = order.vat;
+  let service = order.service;
+  let couponDiscount = order.coupon_discount;
+  let orderDiscount = order.order_discount;
+  let total = order.total;
+  if (order.status === 'open') {
+    const itemsSubtotal = (items ?? []).reduce((s, it) => s + it.line_total, 0);
+    const stored = (storeRow?.settings && typeof storeRow.settings === 'object' ? storeRow.settings : {}) as Record<
+      string,
+      unknown
+    >;
+    const vatRate = typeof stored.vatRate === 'number' ? stored.vatRate : DEFAULT_SETTINGS.vatRate;
+    const vatInclusive = typeof stored.vatInclusive === 'boolean' ? stored.vatInclusive : DEFAULT_SETTINGS.vatInclusive;
+    const serviceRate = typeof stored.serviceRate === 'number' ? stored.serviceRate : DEFAULT_SETTINGS.serviceRate;
+    const liveVat = vatInclusive ? itemsSubtotal - itemsSubtotal / (1 + vatRate / 100) : itemsSubtotal * (vatRate / 100);
+    const liveService = itemsSubtotal * (serviceRate / 100);
+    const base = vatInclusive ? itemsSubtotal - liveVat : itemsSubtotal;
+    subtotal = itemsSubtotal;
+    vat = liveVat;
+    service = liveService;
+    couponDiscount = 0;
+    orderDiscount = 0;
+    total = Math.max(0, base + liveService + liveVat);
+  }
 
   return NextResponse.json({
     order: {
       status: order.status,
-      subtotal: order.subtotal,
-      vat: order.vat,
-      service: order.service,
-      couponDiscount: order.coupon_discount,
-      orderDiscount: order.order_discount,
-      total: order.total,
+      subtotal,
+      vat,
+      service,
+      couponDiscount,
+      orderDiscount,
+      total,
       createdAt: order.created_at,
       paidAt: order.paid_at,
     },

@@ -75,8 +75,20 @@ export function getOpenOrder(tableCode: string): Promise<{ order: OpenOrderRecor
 
 // テーブルマップの「会計待ち」ステータス判定用 (2026-09-04 追加)。厨房送信済みの品目が
 // 全て提供完了になっている open 注文を持つ卓のコード一覧を返す。
-export function getTableBillingStatus(): Promise<{ readyTableCodes: string[] }> {
+// receiptTables (2026-10-07 追加): デジタルレシートQRが表示できる卓一覧 (begin-checkout/
+// checkout-qr で発行済みのトークンを持つ open/awaiting_payment の卓)。ハンディ画面がこれを
+// 使って卓の色を変え、タップでQRを表示する (handy-app.tsx 参照)。
+export function getTableBillingStatus(): Promise<{
+  readyTableCodes: string[];
+  receiptTables: { code: string; token: string }[];
+}> {
   return request('/api/pos-order/table-billing-status');
+}
+
+// 「会計へ進む」ボタンを押した時点でお客様向けデジタルレシートのトークンを先行発行する
+// (2026-10-07 追加。begin-checkout/route.ts 参照)。
+export function beginCheckout(orderId: string): Promise<{ token: string }> {
+  return request(`/api/pos-order/orders/${orderId}/begin-checkout`, { method: 'POST' });
 }
 
 export function createOpenOrder(input: { tableCode: string; staffId?: string }): Promise<{ order: OpenOrderRecord }> {

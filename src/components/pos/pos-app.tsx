@@ -23,6 +23,7 @@ import {
   PosOrderApiError,
 } from '@/lib/pos-order-client';
 import {
+  beginCheckout,
   checkoutWithQr,
   completeOrderPayment,
   confirmOrderItems,
@@ -752,7 +753,7 @@ function PosAppInner() {
       });
       setCurrentOrder(order);
       setGuestModalOpen(false);
-      setScreen('checkout');
+      enterCheckoutScreen(order.id);
     } catch (err) {
       setGuestError(err instanceof PosOrderOrdersApiError ? err.message : t('posApp.guestSaveFailed'));
     } finally {
@@ -811,7 +812,17 @@ function PosAppInner() {
       setGuestModalOpen(true);
       return;
     }
+    if (currentOrder) enterCheckoutScreen(currentOrder.id);
+  }
+
+  // お客様向けデジタルレシート (/receipt/{token}) 用のトークンを「会計へ進む」の時点で
+  // 先行発行する (2026-10-07 追加。Tom「POSレジ本体で会計へ進むボタンを押すとハンディ側の
+  // テーブルの色が変わりテーブルを押すとQRが表示できるようにしたい」への対応)。会計画面への
+  // 画面遷移自体はこの発行の成否を待たない (失敗してもレジ側の会計操作は止めない — ハンディ
+  // 表示はあくまで補助機能のため)。
+  function enterCheckoutScreen(orderId: string) {
     setScreen('checkout');
+    beginCheckout(orderId).catch(() => {});
   }
 
   function confirmOptionModal() {

@@ -57,12 +57,11 @@ export function ReceiptApp({ token }: { token: string }) {
 function ReceiptAppInner({ token }: { token: string }) {
   const { t, setLang } = useLanguage();
   const [languageChosen, setLanguageChosen] = useState<boolean | null>(null);
+  // 毎回必ず言語選択を挟む (2026-10-07 変更。以前は GUEST_LANGUAGE_STORAGE_KEY に保存済みの
+  // 言語があれば2回目以降スキップしていたが、ハンディでスタッフが複数のお客様に同じ端末で
+  // このページを見せる運用が始まったため、お客様ごとに毎回選んでもらう必要がある)。
   useEffect(() => {
-    try {
-      setLanguageChosen(!!window.localStorage.getItem(GUEST_LANGUAGE_STORAGE_KEY));
-    } catch {
-      setLanguageChosen(false);
-    }
+    setLanguageChosen(false);
   }, []);
 
   const [data, setData] = useState<ReceiptData | null>(null);
@@ -138,13 +137,17 @@ function ReceiptAppInner({ token }: { token: string }) {
   const isAwaiting = order.status === 'awaiting_payment';
   const createdAtLabel = new Date(order.createdAt).toLocaleString();
 
-  if (!isPaid && !isAwaiting) {
+  if (order.status === 'void') {
     return (
       <div className="flex h-dvh w-full flex-col items-center justify-center gap-3 bg-background px-8 text-center">
         <div className="text-[15px] font-bold text-muted-foreground">{t('receipt.unavailable')}</div>
       </div>
     );
   }
+  // 'open' = 「会計へ進む」直後、支払い方法はまだ未確定 (begin-checkout/route.ts 参照)。
+  // 明細・合計のプレビューを表示する (金額は order_items からのライブ計算で、確定後に
+  // 変わる場合がある旨を receipt.previewNote で伝える)。
+  const isPreview = order.status === 'open';
 
   return (
     <div className="flex min-h-dvh w-full flex-col bg-background px-5 py-6">
@@ -199,6 +202,10 @@ function ReceiptAppInner({ token }: { token: string }) {
             </div>
           )}
         </div>
+
+        {isPreview && (
+          <div className="text-center text-[12px] text-muted-foreground">{t('receipt.previewNote')}</div>
+        )}
 
         <div className="flex flex-col items-center gap-1 rounded-2xl bg-primary px-4 py-5 text-center text-primary-foreground">
           <div className="text-[13px] font-bold uppercase tracking-wide opacity-80">{t('receipt.total')}</div>

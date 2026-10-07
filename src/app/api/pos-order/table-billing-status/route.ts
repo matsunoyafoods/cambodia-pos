@@ -51,5 +51,21 @@ export async function GET() {
     })
     .map((o) => o.table_code);
 
-  return NextResponse.json({ readyTableCodes });
+  // デジタルレシートQRが表示できる卓一覧 (2026-10-07 追加。Tom「POSレジ本体で会計へ進む
+  // ボタンを押すとハンディ側のテーブルの色が変わりテーブルを押すとQRが表示できるように
+  // したい」への対応)。begin-checkout (会計へ進む) で先行発行したトークンも、
+  // checkout-qr (ABA決済QR) で発行したトークンも、ここでは区別せず同じ仕組みで返す —
+  // ハンディ側はこのトークンを使って /receipt/{token} のQRを描画するだけでよい。
+  // status='paid'/'void' の卓は (会計完了・取消済みのため) 含めない。
+  const { data: receiptOrders, error: receiptError } = await supabase
+    .from('orders')
+    .select('table_code, receipt_token')
+    .eq('store_id', storeId)
+    .in('status', ['open', 'awaiting_payment'])
+    .not('receipt_token', 'is', null);
+  if (receiptError) return NextResponse.json({ error: receiptError.message }, { status: 500 });
+
+  const receiptTables = (receiptOrders ?? []).map((o) => ({ code: o.table_code, token: o.receipt_token as string }));
+
+  return NextResponse.json({ readyTableCodes, receiptTables });
 }

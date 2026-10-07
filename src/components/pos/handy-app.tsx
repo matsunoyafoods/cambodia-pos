@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import QRCode from 'qrcode';
 import type { CartLine, HandyTableGroup, MenuItem, TableStatus } from '@/lib/pos-types';
 import { DEFAULT_SETTINGS } from '@/lib/pos-types';
 import { getPosMenus, getPosSettings, PosApiError } from '@/lib/api-client';
@@ -19,6 +20,7 @@ import {
   deleteConfirmedItem,
   enqueueKitchenPrintJob,
   getOpenOrder,
+  getTableBillingStatus,
   resetTable,
   triggerPassPrntJobs,
   updateConfirmedItemQty,
@@ -71,6 +73,12 @@ function HandyAppInner() {
   // 卓グループ・並び順 (設定画面「ハンディ表示」タブ、2026-08-31 追加)。未設定の店舗では
   // 空配列のまま (handy-table-list.tsx 側で卓番号順にフォールバックする)。
   const [handyGroups, setHandyGroups] = useState<HandyTableGroup[]>([]);
+  // デジタルレシートQRが表示できる卓 (2026-10-07 追加。レジ画面で「会計へ進む」が押され
+  // begin-checkout でトークンが先行発行された卓、または既にQR決済フローでトークン発行済み
+  // の卓)。卓コード → /receipt/{token} のトークンのマップ。
+  const [receiptTokenByTable, setReceiptTokenByTable] = useState<Record<string, string>>({});
+  const [qrModalToken, setQrModalToken] = useState<string | null>(null);
+  const [qrModalDataUrl, setQrModalDataUrl] = useState<string | null>(null);
   const [dataLoading, setDataLoading] = useState(true);
   const [dataError, setDataError] = useState<string | null>(null);
   const [loadToken, setLoadToken] = useState(0);
@@ -113,13 +121,20 @@ function HandyAppInner() {
         // 卓グループはレイアウト連携モードに関係なく卓番号ベースで動く。未設定・取得失敗時は
         // 空配列 (=グループ分けなし、卓番号順) のまま会計・注文自体は止めない。
         const handyGroupsPromise = getPosOrderHandyTableGroups().catch(() => ({ groups: [] as HandyTableGroup[] }));
+        // デジタルレシートQR表示可否 (2026-10-07 追加)。取得失敗時は空のまま (QR表示機能だけ
+        // 止まり、卓選択・注文入力は通常どおり動く)。
+        const billingStatusPromise = getTableBillingStatus().catch(() => ({
+          readyTableCodes: [] as string[],
+          receiptTables: [] as { code: string; token: string }[],
+        }));
         if (menuSource === 'pos_native') {
-          const [menuData, settingsData, layoutData, sessionsData, handyGroupsData] = await Promise.all([
+          const [menuData, settingsData, layoutData, sessionsData, handyGroupsData, billingStatusData] = await Promise.all([
             getPosOrderMenu(),
             getPosOrderSettings(),
             layoutPromise,
             sessionsPromise,
             handyGroupsPromise,
+            billingStatusPromise,
           ]);
           if (cancelled) return;
           setMenu(menuData.items);
@@ -128,13 +143,15 @@ function HandyAppInner() {
           setLayoutItems(layoutData.items);
           setTableSessions(sessionsData.items);
           setHandyGroups(handyGroupsData.groups);
+          setReceiptTokenByTable(Object.fromEntries(billingStatusData.receiptTables.map((r) => [r.code, r.token])));
         } else {
-          const [menuData, settingsData, layoutData, sessionsData, handyGroupsData] = await Promise.all([
+          const [menuData, settingsData, layoutData, sessionsData, handyGroupsData, billingStatusData] = await Promise.all([
             getPosMenus(),
             getPosSettings(),
             layoutPromise,
             sessionsPromise,
             handyGroupsPromise,
+            billingStatusPromise,
           ]);
           if (cancelled) return;
           setMenu(
@@ -148,6 +165,7 @@ function HandyAppInner() {
           setLayoutItems(layoutData.items);
           setTableSessions(sessionsData.items);
           setHandyGroups(handyGroupsData.groups);
+          setReceiptTokenByTable(Object.fromEntries(billingStatusData.receiptTables.map((r) => [r.code, r.token])));
         }
       } catch (err) {
         if (cancelled) return;
@@ -170,12 +188,17 @@ function HandyAppInner() {
   }, [categories, activeCategory]);
 
   // 卓一覧を見ている間・注文入力中とも、他端末 (レジ・他のハンディ) の操作で卓の状況が
-  // 変わりうるため定期的に再取得する。
+  // 変わりうるため定期的に再取得する。デジタルレシートQR表示可否 (receiptTokenByTable) も
+  // 同じタイミングで更新し、レジ側で「会計へ進む」が押されたら最大15秒以内にこの端末の
+  // 卓の色が変わるようにする (2026-10-07 追加)。
   useEffect(() => {
     if (dataLoading) return;
     const id = setInterval(() => {
       getTableSessions()
         .then(({ items }) => setTableSessions(items))
+        .catch(() => {});
+      getTableBillingStatus()
+        .then(({ receiptTables }) => setReceiptTokenByTable(Object.fromEntries(receiptTables.map((r) => [r.code, r.token]))))
         .catch(() => {});
     }, 15000);
     return () => clearInterval(id);
@@ -184,8 +207,39 @@ function HandyAppInner() {
   const tableStatus: Record<string, TableStatus> = useMemo(() => {
     const status: Record<string, TableStatus> = {};
     for (const s of tableSessions) status[s.table_code] = 'occupied';
+    // 会計へ進む (begin-checkout) 済み・QR決済待ちの卓は amber 表示にする。レジ画面の
+    // テーブルマップと同じ視覚言語 (billing = 会計待ち/会計中)。
+    for (const code of Object.keys(receiptTokenByTable)) status[code] = 'billing';
     return status;
-  }, [tableSessions]);
+  }, [tableSessions, receiptTokenByTable]);
+
+  // ハンディの卓タップ: デジタルレシートQRが表示できる卓 (会計へ進む済み) はQRモーダルを
+  // 開き、それ以外はいつもどおり注文画面へ (2026-10-07 追加)。
+  function handleSelectTable(code: string) {
+    const token = receiptTokenByTable[code];
+    if (token) {
+      setQrModalToken(token);
+      return;
+    }
+    selectTable(code);
+  }
+
+  useEffect(() => {
+    if (!qrModalToken) {
+      setQrModalDataUrl(null);
+      return;
+    }
+    let cancelled = false;
+    const url = `${window.location.origin}/receipt/${encodeURIComponent(qrModalToken)}`;
+    QRCode.toDataURL(url, { width: 280, margin: 1 })
+      .then((dataUrl: string) => {
+        if (!cancelled) setQrModalDataUrl(dataUrl);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [qrModalToken]);
 
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
@@ -510,7 +564,7 @@ function HandyAppInner() {
           tableStatus={tableStatus}
           statusFilter={statusFilter}
           onStatusFilter={setStatusFilter}
-          onSelectTable={selectTable}
+          onSelectTable={handleSelectTable}
           layoutItems={layoutItems}
           tableSessions={tableSessions}
           handyGroups={handyGroups}
@@ -561,6 +615,31 @@ function HandyAppInner() {
           }}
           onConfirm={confirmOptionModal}
         />
+      )}
+
+      {qrModalToken && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setQrModalToken(null)}
+        >
+          <div
+            className="flex w-full max-w-[340px] flex-col items-center gap-4 rounded-2xl bg-card p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="text-[15px] font-bold">{t('handyApp.receiptQrHeading')}</div>
+            <div className="text-center text-[12.5px] text-muted-foreground">{t('handyApp.receiptQrInstruction')}</div>
+            {qrModalDataUrl && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={qrModalDataUrl} alt="Digital receipt QR" className="h-auto w-full max-w-[220px]" />
+            )}
+            <button
+              onClick={() => setQrModalToken(null)}
+              className="h-11 w-full rounded-xl bg-primary text-[14px] font-bold text-primary-foreground"
+            >
+              {t('handyApp.receiptQrClose')}
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
