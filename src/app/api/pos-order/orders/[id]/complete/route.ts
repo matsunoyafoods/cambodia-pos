@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { randomBytes } from 'crypto';
 import { z } from 'zod';
 import { createPosAdminClient, getPosStoreId } from '@/lib/supabase/admin';
 
@@ -83,6 +84,11 @@ export async function POST(req: Request, ctx: RouteContext) {
     );
   }
 
+  // お客様向けデジタルレシート (/receipt/{token}) 用のトークン (2026-10-07 追加。Tom「会計時に
+  // QRコードをお客様に見せて読み込むとデジタルレシートを表示させることは可能か」への対応)。
+  // checkout-qr/route.ts と同じ仕組みを、現金・カード等の通常会計にも適用する — 支払いは
+  // 既にこの場で完了しているので、ここでは最初から status='paid' として発行するだけでよい。
+  const token = randomBytes(32).toString('base64url');
   const nowIso = new Date().toISOString();
   const { error: updateError } = await supabase
     .from('orders')
@@ -95,6 +101,8 @@ export async function POST(req: Request, ctx: RouteContext) {
       order_discount: d.orderDiscount,
       total: d.total,
       paid_at: nowIso,
+      receipt_token: token,
+      receipt_token_created_at: nowIso,
     })
     .eq('id', id);
   if (updateError) return NextResponse.json({ error: updateError.message }, { status: 500 });
@@ -113,5 +121,5 @@ export async function POST(req: Request, ctx: RouteContext) {
   );
   if (paymentError) return NextResponse.json({ error: paymentError.message }, { status: 500 });
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, token });
 }

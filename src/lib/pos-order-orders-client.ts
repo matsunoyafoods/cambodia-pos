@@ -155,7 +155,7 @@ export function completeOrderPayment(
       changeKhr?: number;
     }[];
   },
-): Promise<{ ok: true }> {
+): Promise<{ ok: true; token: string }> {
   return request(`/api/pos-order/orders/${orderId}/complete`, { method: 'POST', body: JSON.stringify(input) });
 }
 

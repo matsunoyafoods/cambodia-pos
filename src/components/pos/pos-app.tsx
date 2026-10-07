@@ -205,6 +205,9 @@ function PosAppInner() {
   const [qrPaymentPending, setQrPaymentPending] = useState(false);
   const [qrPaymentError, setQrPaymentError] = useState<string | null>(null);
   const [qrPaymentToken, setQrPaymentToken] = useState<string | null>(null);
+  // 通常会計(現金・カード等)完了後のデジタルレシートQR (2026-10-07 追加。Tom「会計時にQRを
+  // お客様に見せて読み込むとデジタルレシートを表示させることは可能か」への対応)。
+  const [completedReceiptToken, setCompletedReceiptToken] = useState<string | null>(null);
 
   // pos_native モード: レジ画面タブの並び順はサーバーが返す大カテゴリーの sort_order 順
   // (setPosNativeCategoryOrder、設定画面から自由に並び替え可能 2026-08-31) をそのまま使う。
@@ -871,7 +874,7 @@ function PosAppInner() {
     setCompleting(true);
     setCompleteError(null);
     try {
-      await completeOrderPayment(currentOrder.id, {
+      const { token: completedToken } = await completeOrderPayment(currentOrder.id, {
         subtotal: totals.subtotal,
         vat: totals.vat,
         service: totals.service,
@@ -887,6 +890,7 @@ function PosAppInner() {
           changeKhr: l.changeKhr,
         })),
       });
+      setCompletedReceiptToken(completedToken);
       // レシートの印刷キューへ (プリンター未設定の店舗では静かに何もしない)。会計完了自体は
       // 既に成功しているので失敗しても無視する (2026-08-31 プリンター実装で追加。同日、
       // 用紙幅・ヘッダー/フッター文言・ロゴはサーバー側でプリンターごとに当てはめるよう
@@ -1061,6 +1065,7 @@ function PosAppInner() {
     setCart([]);
     setConfirmedItems([]);
     setCurrentOrder(null);
+    setCompletedReceiptToken(null);
     resetOrderState();
   }
 
@@ -1357,6 +1362,7 @@ function PosAppInner() {
           invoiceBusy={invoiceBusy}
           invoiceError={invoiceError}
           invoiceIssued={invoiceIssued}
+          receiptToken={completedReceiptToken}
         />
       )}
 

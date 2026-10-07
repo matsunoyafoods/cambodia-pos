@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import QRCode from 'qrcode';
 import { money } from '@/lib/money';
 import { useLanguage } from './language-context';
 
@@ -15,6 +16,7 @@ export function ReceiptScreen({
   invoiceBusy,
   invoiceError,
   invoiceIssued,
+  receiptToken,
 }: {
   selectedTable: string | null;
   total: number;
@@ -28,11 +30,33 @@ export function ReceiptScreen({
   invoiceBusy: boolean;
   invoiceError: string | null;
   invoiceIssued: boolean;
+  /** デジタルレシートQR (2026-10-07 追加)。complete/route.ts が発行したトークン。
+   * /receipt/{token} を指すQRをここで生成し、お客様にお見せする。 */
+  receiptToken: string | null;
 }) {
   const { t } = useLanguage();
   const [invoiceFormOpen, setInvoiceFormOpen] = useState(false);
   const [recipientName, setRecipientName] = useState('');
   const [description, setDescription] = useState('');
+  const [digitalReceiptQrUrl, setDigitalReceiptQrUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!receiptToken) {
+      setDigitalReceiptQrUrl(null);
+      return;
+    }
+    let cancelled = false;
+    QRCode.toDataURL(`${window.location.origin}/receipt/${encodeURIComponent(receiptToken)}`, { width: 280, margin: 1 })
+      .then((url: string) => {
+        if (!cancelled) setDigitalReceiptQrUrl(url);
+      })
+      .catch(() => {
+        /* QR生成に失敗しても会計完了画面自体は継続する */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [receiptToken]);
 
   async function handleIssueInvoice() {
     await onIssueInvoice(recipientName, description);
@@ -50,6 +74,16 @@ export function ReceiptScreen({
           <br />
           {t('receipt.printingNote')}
         </div>
+
+        {digitalReceiptQrUrl && (
+          <div className="flex w-full flex-col items-center gap-1.5 rounded-xl border border-border bg-card p-3.5">
+            <div className="text-[12.5px] font-bold">{t('receipt.digitalReceiptHeading')}</div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={digitalReceiptQrUrl} alt="digital receipt QR" className="h-auto w-full max-w-[180px]" />
+            <div className="text-[11px] text-muted-foreground">{t('receipt.digitalReceiptInstruction')}</div>
+          </div>
+        )}
+
         <button
           onClick={onNewOrder}
           className="mt-2 h-12 w-full rounded-lg bg-primary text-sm font-semibold text-primary-foreground"
