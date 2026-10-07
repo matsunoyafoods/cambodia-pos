@@ -1077,7 +1077,15 @@ function PosAppInner() {
         total: snapshot.order.total,
         payments: snapshot.paymentMethod ? [{ method: snapshot.paymentMethod, amount: snapshot.order.total }] : [],
       });
-      triggerPassPrntJobs(result);
+      // 2026-10-08 修正: triggerPassPrntJobs (window.location.href = 'starpassprnt://...')
+      // より後ろに mark-printed・テーブルセッション解除を置いていたため、Bluetooth
+      // ペアリングが不安定な環境でこの URL スキーム遷移がページ遷移・再読み込みを
+      // 引き起こすと、その後ろの await が一切実行されず、紙レシート発行待ちフラグも
+      // 卓の在席状態も永久に残ってしまっていた (Tom「T4の会計をしようとすると会計済みです
+      // となっているが、テーブルは赤色のままで会計処理できない」)。会計自体は既に
+      // request-paper-receipt (ハンディ側) で確定済みなので、印刷命令を送る前に
+      // 先にサーバー側のフラグ解除・テーブルの在席解除を終わらせてから、最後に
+      // (ページ遷移が起きても構わない) 印刷命令を送る。
       await markOrderPrinted(req.orderId).catch(() => {
         /* フラグが残っても次にまたタップできるだけなので致命的ではない */
       });
@@ -1085,9 +1093,10 @@ function PosAppInner() {
       // 会計はハンディ側で既に完了しているので、この卓の滞在セッションもここで畳む
       // (次のポーリングを待たない)。
       setTableSessions((prev) => prev.filter((s) => s.table_code !== req.code));
-      clearTableSession(req.code).catch(() => {
+      await clearTableSession(req.code).catch(() => {
         /* 反映失敗時は次回ポーリングで補正される */
       });
+      triggerPassPrntJobs(result);
     } catch {
       /* 失敗時はバナーを残し、次回タップでリトライできるようにする */
     } finally {
