@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import QRCode from 'qrcode';
 import { LanguageProvider, useLanguage, GUEST_LANGUAGE_STORAGE_KEY } from './language-context';
 import { LanguagePickerScreen } from './language-picker-screen';
 import { money } from '@/lib/money';
@@ -12,8 +13,14 @@ import { money } from '@/lib/money';
 //
 // このページは表示専用: 金額はサーバー (pos.orders) にロック済みの値をそのまま出すだけで、
 // ブラウザ側からの改変経路を持たない (Tom「金額をブラウザ側から変更できないように」)。
-// 「ABAで支払う」ボタンは現時点ではまだ繋がっていない (フェーズ2でPayWay Sandboxに接続する
-// 予定) ので、押しても案内文を出すだけのプレースホルダーになっている。
+//
+// 「ABAで支払う」(2026-10-07 更新): PayWayのマーチャント登録 (会社登録が必要) がまだ無いため、
+// 金額を自動で埋め込んだ動的QR・ABAアプリへの正式なディープリンクはどちらも作れない
+// (PayWay公式ドキュメント上、どちらもマーチャント登録必須と確認済み)。暫定対応として、
+// 店頭に貼ってある既存の静的ABA KHQR (金額なし、ABA_STATIC_KHQR_PAYLOAD) をそのまま
+// このページにも表示し、お客様がABAアプリでスキャン→画面のTOTALを見ながら金額を手入力して
+// 支払う形にする。「ABAアプリを開く」ボタンの abamobilebank:// は公式に未確認のベストエフォート
+// (Tom実機確認済みの前提で有効化。動かなくてもQR表示は常に出ているのでフォールバックになる)。
 type ReceiptOrder = {
   status: 'open' | 'awaiting_payment' | 'paid' | 'void';
   subtotal: number;
@@ -26,7 +33,13 @@ type ReceiptOrder = {
   paidAt: string | null;
 };
 type ReceiptItem = { name: string; qty: number; unitPrice: number; lineTotal: number };
-type ReceiptData = { order: ReceiptOrder; items: ReceiptItem[]; paymentMethod: string | null; storeName: string };
+type ReceiptData = {
+  order: ReceiptOrder;
+  items: ReceiptItem[];
+  paymentMethod: string | null;
+  storeName: string;
+  abaStaticKhqr: string | null;
+};
 
 export function ReceiptApp({ token }: { token: string }) {
   return (
@@ -49,7 +62,7 @@ function ReceiptAppInner({ token }: { token: string }) {
 
   const [data, setData] = useState<ReceiptData | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [payNotice, setPayNotice] = useState(false);
+  const [abaQrDataUrl, setAbaQrDataUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (languageChosen === null || !languageChosen) return;
@@ -71,6 +84,21 @@ function ReceiptAppInner({ token }: { token: string }) {
       cancelled = true;
     };
   }, [token, languageChosen]);
+
+  useEffect(() => {
+    if (!data?.abaStaticKhqr) return;
+    let cancelled = false;
+    QRCode.toDataURL(data.abaStaticKhqr, { width: 320, margin: 1 })
+      .then((url: string) => {
+        if (!cancelled) setAbaQrDataUrl(url);
+      })
+      .catch(() => {
+        /* QR生成に失敗しても明細表示自体は継続する */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [data?.abaStaticKhqr]);
 
   if (languageChosen === null) return null;
   if (!languageChosen) {
@@ -177,14 +205,27 @@ function ReceiptAppInner({ token }: { token: string }) {
         )}
 
         {isAwaiting && (
-          <div className="flex flex-col gap-2">
-            <button
-              onClick={() => setPayNotice(true)}
-              className="h-14 rounded-xl bg-primary text-[16px] font-bold text-primary-foreground active:opacity-90"
-            >
-              {t('receipt.payWithAba')}
-            </button>
-            {payNotice && <div className="text-center text-[12.5px] text-muted-foreground">{t('receipt.payComingSoon')}</div>}
+          <div className="flex flex-col items-center gap-3 rounded-xl border border-border bg-card p-4">
+            <div className="text-[14px] font-bold">{t('receipt.payWithAba')}</div>
+            {data.abaStaticKhqr ? (
+              <>
+                <div className="text-center text-[12.5px] text-muted-foreground">
+                  {t('receipt.scanWithAba', { total: `$${money(order.total)}` })}
+                </div>
+                {abaQrDataUrl && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={abaQrDataUrl} alt="ABA KHQR" className="h-auto w-full max-w-[220px]" />
+                )}
+                <a
+                  href="abamobilebank://"
+                  className="flex h-12 w-full items-center justify-center rounded-xl bg-primary text-[14.5px] font-bold text-primary-foreground active:opacity-90"
+                >
+                  {t('receipt.openAbaApp')}
+                </a>
+              </>
+            ) : (
+              <div className="text-center text-[12.5px] text-muted-foreground">{t('receipt.payComingSoon')}</div>
+            )}
           </div>
         )}
       </div>

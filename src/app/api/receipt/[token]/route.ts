@@ -70,5 +70,10 @@ export async function GET(_req: Request, ctx: RouteContext) {
     })),
     paymentMethod: payments?.[0]?.method ?? null,
     storeName: storeRow?.name ?? '',
+    // 店頭のABA静的KHQR決済QRの生データ (2026-10-07 追加。PayWayのマーチャント登録 (会社登録)
+    // が済むまでの暫定対応。既存の店頭QRスタンドと全く同じ中身を複製しているだけで、金額は
+    // 埋め込まれていない — お客様がABAアプリでスキャンし、画面のTOTALを見ながら金額を手入力
+    // して支払う。未設定の店舗では null (フロント側でQR表示自体を出さない)。
+    abaStaticKhqr: process.env.ABA_STATIC_KHQR_PAYLOAD ?? null,
   });
 }
