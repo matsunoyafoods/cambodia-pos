@@ -143,7 +143,7 @@ function HandyAppInner() {
           setLayoutItems(layoutData.items);
           setTableSessions(sessionsData.items);
           setHandyGroups(handyGroupsData.groups);
-          setReceiptTokenByTable(Object.fromEntries(billingStatusData.receiptTables.map((r) => [r.code, r.token])));
+          setReceiptTokenByTable(Object.fromEntries((billingStatusData.receiptTables ?? []).map((r) => [r.code, r.token])));
         } else {
           const [menuData, settingsData, layoutData, sessionsData, handyGroupsData, billingStatusData] = await Promise.all([
             getPosMenus(),
@@ -165,7 +165,7 @@ function HandyAppInner() {
           setLayoutItems(layoutData.items);
           setTableSessions(sessionsData.items);
           setHandyGroups(handyGroupsData.groups);
-          setReceiptTokenByTable(Object.fromEntries(billingStatusData.receiptTables.map((r) => [r.code, r.token])));
+          setReceiptTokenByTable(Object.fromEntries((billingStatusData.receiptTables ?? []).map((r) => [r.code, r.token])));
         }
       } catch (err) {
         if (cancelled) return;
@@ -198,7 +198,7 @@ function HandyAppInner() {
         .then(({ items }) => setTableSessions(items))
         .catch(() => {});
       getTableBillingStatus()
-        .then(({ receiptTables }) => setReceiptTokenByTable(Object.fromEntries(receiptTables.map((r) => [r.code, r.token]))))
+        .then(({ receiptTables }) => setReceiptTokenByTable(Object.fromEntries((receiptTables ?? []).map((r) => [r.code, r.token]))))
         .catch(() => {});
     }, 15000);
     return () => clearInterval(id);
