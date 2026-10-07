@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { orderStatusBlockedMessage } from '@/lib/pos-order-status-message';
 import { randomBytes } from 'crypto';
 import { createPosAdminClient, getPosStoreId } from '@/lib/supabase/admin';
 
@@ -39,7 +40,7 @@ export async function POST(_req: Request, ctx: RouteContext) {
     return NextResponse.json({ token: order.receipt_token });
   }
   if (order.status !== 'open') {
-    return NextResponse.json({ error: 'この注文は既に会計済み・取消済みです' }, { status: 409 });
+    return NextResponse.json({ error: orderStatusBlockedMessage(order.status) }, { status: 409 });
   }
 
   const token = randomBytes(32).toString('base64url');

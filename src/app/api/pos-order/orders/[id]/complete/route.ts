@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { orderStatusBlockedMessage } from '@/lib/pos-order-status-message';
 import { randomBytes } from 'crypto';
 import { z } from 'zod';
 import { createPosAdminClient, getPosStoreId } from '@/lib/supabase/admin';
@@ -64,7 +65,7 @@ export async function POST(req: Request, ctx: RouteContext) {
   if (orderError) return NextResponse.json({ error: orderError.message }, { status: 500 });
   if (!order) return NextResponse.json({ error: 'not_found' }, { status: 404 });
   if (order.status !== 'open') {
-    return NextResponse.json({ error: 'この注文は既に会計済み・取消済みです' }, { status: 409 });
+    return NextResponse.json({ error: orderStatusBlockedMessage(order.status) }, { status: 409 });
   }
 
   // 提供済みになっていないと会計できないようにする (2026-09-04 追加。Tom「会計についてですが

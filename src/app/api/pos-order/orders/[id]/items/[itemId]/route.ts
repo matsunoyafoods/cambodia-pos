@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { orderStatusBlockedMessage } from '@/lib/pos-order-status-message';
 import { z } from 'zod';
 import { createPosAdminClient, getPosStoreId } from '@/lib/supabase/admin';
 import { discountAmount, discountLabel, parseOrderItemDiscount, stripDiscountLabel } from '@/lib/cart';
@@ -23,7 +24,7 @@ async function loadOpenOrder(supabase: ReturnType<typeof createPosAdminClient>, 
   if (orderError) return { error: NextResponse.json({ error: orderError.message }, { status: 500 }) };
   if (!order) return { error: NextResponse.json({ error: 'not_found' }, { status: 404 }) };
   if (order.status !== 'open') {
-    return { error: NextResponse.json({ error: 'この注文は既に会計済み・取消済みです' }, { status: 409 }) };
+    return { error: NextResponse.json({ error: orderStatusBlockedMessage(order.status) }, { status: 409 }) };
   }
   return { order };
 }

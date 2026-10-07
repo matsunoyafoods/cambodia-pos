@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { orderStatusBlockedMessage } from '@/lib/pos-order-status-message';
 import { randomBytes } from 'crypto';
 import { createPosAdminClient, getPosStoreId } from '@/lib/supabase/admin';
 import { DEFAULT_SETTINGS } from '@/lib/pos-types';
@@ -31,7 +32,7 @@ export async function POST(_req: Request, ctx: RouteContext) {
   // どちらからでも、お客様の「やっぱり紙で」で現金会計に切り替えられるようにする
   // (complete/route.ts は 'open' のみ許可。ここはそれより広い)。
   if (order.status !== 'open' && order.status !== 'awaiting_payment') {
-    return NextResponse.json({ error: 'この注文は既に会計済み・取消済みです' }, { status: 409 });
+    return NextResponse.json({ error: orderStatusBlockedMessage(order.status) }, { status: 409 });
   }
 
   const { data: items, error: itemsError } = await supabase
