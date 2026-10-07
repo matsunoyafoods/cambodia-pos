@@ -12,7 +12,7 @@ import {
   type RegisterClosingStatus,
 } from '@/lib/register-closing-client';
 import { getPosOrderSettings } from '@/lib/pos-order-client';
-import { DEFAULT_SETTINGS } from '@/lib/pos-types';
+import { DEFAULT_SETTINGS, WEATHER_CODES, WEATHER_EMOJI, type TimePeriod, type WeatherCode } from '@/lib/pos-types';
 import { LanguageProvider, useLanguage, STAFF_LANGUAGE_STORAGE_KEY } from './language-context';
 import { localeForLang } from '@/lib/i18n/lang';
 
@@ -25,6 +25,14 @@ import { localeForLang } from '@/lib/i18n/lang';
 
 const USD_DENOMS = [100, 50, 20, 10, 5, 1];
 const KHR_DENOMS = [100000, 50000, 20000, 10000, 5000, 2000, 1000, 500, 100];
+
+// 天候コード -> 辞書キー (2026-10-07 追加)。
+const WEATHER_LABEL_KEYS: Record<WeatherCode, string> = {
+  sunny: 'registerClosing.weatherSunny',
+  cloudy: 'registerClosing.weatherCloudy',
+  rainy: 'registerClosing.weatherRainy',
+  stormy: 'registerClosing.weatherStormy',
+};
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
@@ -59,12 +67,16 @@ function RegisterClosingScreenInner() {
   const canManage = me.role === 'owner' || me.role === 'manager' || me.role === 'sub_manager';
 
   const [khrRate, setKhrRate] = useState(DEFAULT_SETTINGS.khrRate);
+  const [timePeriods, setTimePeriods] = useState<TimePeriod[]>(DEFAULT_SETTINGS.timePeriods);
   useEffect(() => {
     if (!isPosNative) return;
     getPosOrderSettings()
-      .then((s) => setKhrRate(s.khrRate))
+      .then((s) => {
+        setKhrRate(s.khrRate);
+        setTimePeriods(s.timePeriods);
+      })
       .catch(() => {
-        /* 取得失敗時はデフォルトレートのまま (概算表示にはなるが締め作業自体はできる) */
+        /* 取得失敗時はデフォルトレート・デフォルト時間帯のまま (概算表示にはなるが締め作業自体はできる) */
       });
   }, [isPosNative]);
 
@@ -113,7 +125,7 @@ function RegisterClosingScreenInner() {
           ) : loadError ? (
             <div className="text-[13px] text-destructive">{loadError}</div>
           ) : status?.confirmed ? (
-            <ConfirmedClosingView closing={status.closing} canManage={canManage} onReopen={load} />
+            <ConfirmedClosingView closing={status.closing} canManage={canManage} timePeriods={timePeriods} onReopen={load} />
           ) : status ? (
             <ClosingForm
               date={date}
@@ -121,6 +133,7 @@ function RegisterClosingScreenInner() {
               systemTotalsByMethod={status.systemTotalsByMethod}
               registerFloatUsd={status.registerFloatUsd}
               khrRate={khrRate}
+              timePeriods={timePeriods}
               onConfirmed={load}
             />
           ) : null}
@@ -130,7 +143,33 @@ function RegisterClosingScreenInner() {
   );
 }
 
-function ConfirmedClosingView({ closing, canManage, onReopen }: { closing: RegisterClosingRecord; canManage: boolean; onReopen: () => void }) {
+function weatherSummary(
+  t: (key: string, params?: Record<string, string | number>) => string,
+  weather: Record<string, string>,
+  timePeriods: TimePeriod[],
+): string {
+  const entries = timePeriods
+    .filter((p) => weather[p.id])
+    .map((p) => {
+      const code = weather[p.id] as WeatherCode;
+      const emoji = WEATHER_EMOJI[code] ?? '';
+      const label = WEATHER_LABEL_KEYS[code] ? t(WEATHER_LABEL_KEYS[code]) : code;
+      return `${p.label} ${emoji}${label}`;
+    });
+  return entries.join(' ・ ');
+}
+
+function ConfirmedClosingView({
+  closing,
+  canManage,
+  timePeriods,
+  onReopen,
+}: {
+  closing: RegisterClosingRecord;
+  canManage: boolean;
+  timePeriods: TimePeriod[];
+  onReopen: () => void;
+}) {
   const { t, lang } = useLanguage();
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -181,6 +220,16 @@ function ConfirmedClosingView({ closing, canManage, onReopen }: { closing: Regis
           {t('registerClosing.byMethodLabel')}: {Object.entries(closing.systemTotalsByMethod).map(([m, v]) => `${m} $${v.toFixed(2)}`).join(' ・ ')}
         </div>
       )}
+      {Object.keys(closing.weather ?? {}).length > 0 && (
+        <div className="mt-2 text-[12px] text-muted-foreground">
+          {t('registerClosing.weatherLabel')}: {weatherSummary(t, closing.weather, timePeriods)}
+        </div>
+      )}
+      {closing.comment && (
+        <div className="mt-2 text-[12px] text-muted-foreground">
+          {t('registerClosing.commentLabel')}: {closing.comment}
+        </div>
+      )}
       <div className="mt-3 text-[11.5px] text-muted-foreground">
         {t('registerClosing.confirmedAtLabel')}: {new Date(closing.confirmedAt).toLocaleString(localeForLang(lang))}
       </div>
@@ -204,6 +253,7 @@ function ClosingForm({
   systemTotalsByMethod,
   registerFloatUsd,
   khrRate,
+  timePeriods,
   onConfirmed,
 }: {
   date: string;
@@ -211,18 +261,23 @@ function ClosingForm({
   systemTotalsByMethod: Record<string, number>;
   registerFloatUsd: number;
   khrRate: number;
+  timePeriods: TimePeriod[];
   onConfirmed: () => void;
 }) {
   const { t } = useLanguage();
   const [usd, setUsd] = useState<Record<number, number>>(Object.fromEntries(USD_DENOMS.map((d) => [d, 0])));
   const [khr, setKhr] = useState<Record<number, number>>(Object.fromEntries(KHR_DENOMS.map((d) => [d, 0])));
+  const [weather, setWeather] = useState<Record<string, WeatherCode | undefined>>({});
+  const [comment, setComment] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // 日付が変わったら (前の日の入力が残らないよう) カウントをリセットする。
+  // 日付が変わったら (前の日の入力が残らないよう) カウント・天候・コメントをリセットする。
   useEffect(() => {
     setUsd(Object.fromEntries(USD_DENOMS.map((d) => [d, 0])));
     setKhr(Object.fromEntries(KHR_DENOMS.map((d) => [d, 0])));
+    setWeather({});
+    setComment('');
     setError(null);
   }, [date]);
 
@@ -249,7 +304,16 @@ function ClosingForm({
     setSubmitting(true);
     setError(null);
     try {
-      await confirmRegisterClosing({ date, countedUsdBills: usd, countedKhrBills: khr });
+      const weatherPayload = Object.fromEntries(
+        Object.entries(weather).filter((entry): entry is [string, WeatherCode] => Boolean(entry[1])),
+      );
+      await confirmRegisterClosing({
+        date,
+        countedUsdBills: usd,
+        countedKhrBills: khr,
+        weather: weatherPayload,
+        comment: comment.trim() || undefined,
+      });
       onConfirmed();
     } catch (err) {
       setError(err instanceof PosRegisterClosingApiError ? err.message : t('registerClosing.confirmError'));
@@ -301,6 +365,44 @@ function ClosingForm({
         <div className="text-[11px] leading-relaxed text-muted-foreground">
           {t('registerClosing.billsNote', { rate: khrRate.toLocaleString() })} {t('registerClosing.confirmEffectNote', { total: systemCashTotal.toFixed(2) })}
         </div>
+
+        <div className="flex flex-col gap-2.5 rounded-xl border border-border bg-card p-3.5">
+          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('registerClosing.weatherLabel')}</div>
+          <div className="flex flex-col gap-2">
+            {timePeriods.map((p) => (
+              <div key={p.id} className="flex items-center justify-between gap-2">
+                <span className="text-[12.5px]">{p.label}</span>
+                <div className="flex gap-1.5">
+                  {WEATHER_CODES.map((code) => (
+                    <button
+                      key={code}
+                      type="button"
+                      onClick={() => setWeather((prev) => ({ ...prev, [p.id]: prev[p.id] === code ? undefined : code }))}
+                      title={t(WEATHER_LABEL_KEYS[code])}
+                      className={
+                        'flex h-8 w-8 items-center justify-center rounded-full border text-[15px] ' +
+                        (weather[p.id] === code ? 'border-primary bg-primary/10' : 'border-border')
+                      }
+                    >
+                      {WEATHER_EMOJI[code]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+          <label className="flex flex-col gap-1">
+            <span className="text-[12px] text-muted-foreground">{t('registerClosing.commentLabel')}</span>
+            <textarea
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              placeholder={t('registerClosing.commentPlaceholder')}
+              rows={2}
+              className="rounded-lg border border-border px-2.5 py-1.5 text-[13px]"
+            />
+          </label>
+        </div>
+
         {error && <div className="text-[12.5px] text-destructive">{error}</div>}
         <button
           onClick={confirm_}

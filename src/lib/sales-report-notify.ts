@@ -1,5 +1,5 @@
 import 'server-only';
-import type { EthnicityKey } from '@/lib/pos-types';
+import { WEATHER_EMOJI, type EthnicityKey, type WeatherCode } from '@/lib/pos-types';
 import type { EthnicityTotal, TimePeriodSalesResult } from '@/lib/sales-aggregation';
 
 // レジ締め確定時にその日の売上内容をTelegramへ通知する (2026-09-30 追加)。
@@ -42,6 +42,14 @@ function getSalesReportLangs(): SalesReportLang[] {
 
 // 人種内訳の表示名。pos-types.ts の ETHNICITY_LABELS は日本語固定のため、ここでは
 // EthnicityTotal.key (安定したenum値) から言語ごとのラベルを引き直す。
+// 天候の表示名 (2026-10-07 追加。Tom「レジ締めする時にコメント欄とランチとディナーで
+// 天気を選択できるようにしてください。それがテレグラムのレポートに反映して」への対応)。
+const WEATHER_LABELS: Record<SalesReportLang, Record<WeatherCode, string>> = {
+  ja: { sunny: '晴れ', cloudy: '曇り', rainy: '雨', stormy: '大雨・嵐' },
+  en: { sunny: 'Sunny', cloudy: 'Cloudy', rainy: 'Rainy', stormy: 'Stormy' },
+  km: { sunny: 'ថ្ងៃបំភ្លឺ', cloudy: 'មានពពក', rainy: 'ភ្លៀង', stormy: 'ព្យុះ' },
+};
+
 const ETHNICITY_LABELS: Record<SalesReportLang, Record<EthnicityKey, string>> = {
   ja: { khmer: 'クメール', japanese: '日本人', chinese: '中国人', korean: '韓国人', western: '西洋人', mix: 'MIXグループ', other: 'その他' },
   en: { khmer: 'Khmer', japanese: 'Japanese', chinese: 'Chinese', korean: 'Korean', western: 'Western', mix: 'Mixed group', other: 'Other' },
@@ -61,6 +69,8 @@ type SalesReportMessages = {
   differenceOverWord: string;
   differenceShortWord: string;
   confirmedBy: string;
+  weather: string;
+  comment: string;
 };
 
 const MESSAGES: Record<SalesReportLang, SalesReportMessages> = {
@@ -77,6 +87,8 @@ const MESSAGES: Record<SalesReportLang, SalesReportMessages> = {
     differenceOverWord: '過剰',
     differenceShortWord: '不足',
     confirmedBy: '確認',
+    weather: '天候',
+    comment: 'コメント',
   },
   en: {
     title: (date) => `📊 Register closed (${date})`,
@@ -91,6 +103,8 @@ const MESSAGES: Record<SalesReportLang, SalesReportMessages> = {
     differenceOverWord: 'over',
     differenceShortWord: 'short',
     confirmedBy: 'Confirmed by',
+    weather: 'Weather',
+    comment: 'Comment',
   },
   km: {
     title: (date) => `📊 បិទគណនីរួចរាល់ (${date})`,
@@ -105,6 +119,8 @@ const MESSAGES: Record<SalesReportLang, SalesReportMessages> = {
     differenceOverWord: 'លើស',
     differenceShortWord: 'ខ្វះ',
     confirmedBy: 'បានបញ្ជាក់ដោយ',
+    weather: 'អាកាសធាតុ',
+    comment: 'មតិយោបល់',
   },
 };
 
@@ -122,6 +138,9 @@ export type RegisterClosingNotifyInput = {
   partyCount: number;
   ethnicityTotals: EthnicityTotal[];
   timePeriodSales: TimePeriodSalesResult[];
+  // 時間帯 (timePeriodSales の id) ごとの天候 + 当日コメント (2026-10-07 追加)。
+  weather: Record<string, string>;
+  comment: string | null;
 };
 
 function formatDifferenceLine(lang: SalesReportLang, differenceUsd: number): string {
@@ -152,10 +171,21 @@ function timePeriodLabel(lang: SalesReportLang, p: TimePeriodSalesResult): strin
   return p.label;
 }
 
+// 時間帯 (lunch/dinner等) ごとの天候表示 (2026-10-07 追加)。未選択の時間帯は除外する。
+function formatWeatherLine(lang: SalesReportLang, label: string, code: string): string {
+  const weatherCode = code as WeatherCode;
+  const emoji = WEATHER_EMOJI[weatherCode] ?? '';
+  const text = WEATHER_LABELS[lang][weatherCode] ?? code;
+  return `・${label}: ${emoji} ${text}`.trim();
+}
+
 function buildBlock(lang: SalesReportLang, input: RegisterClosingNotifyInput): string {
   const m = MESSAGES[lang];
   const methodLines = Object.entries(input.systemTotalsByMethod).map(([method, amount]) => `・${method}: $${amount.toFixed(2)}`);
   const timePeriodLines = input.timePeriodSales.map((p) => `・${timePeriodLabel(lang, p)} (${p.start}-${p.end}): $${p.total.toFixed(2)}`);
+  const weatherLines = input.timePeriodSales
+    .filter((p) => input.weather[p.id])
+    .map((p) => formatWeatherLine(lang, timePeriodLabel(lang, p), input.weather[p.id]));
 
   const lines = [
     m.title(input.date),
@@ -167,10 +197,15 @@ function buildBlock(lang: SalesReportLang, input: RegisterClosingNotifyInput): s
     `${m.ethnicityBreakdown}: ${formatEthnicityLine(lang, input.ethnicityTotals)}`,
     timePeriodLines.length > 0 ? '' : null,
     ...timePeriodLines,
+    weatherLines.length > 0 ? '' : null,
+    weatherLines.length > 0 ? `${m.weather}:` : null,
+    ...weatherLines,
     '',
     `${m.cashCounted}: $${input.countedTotalUsd.toFixed(2)}`,
     input.registerFloatUsd ? `${m.registerFloat}: $${input.registerFloatUsd.toFixed(2)}` : null,
     formatDifferenceLine(lang, input.differenceUsd),
+    input.comment ? '' : null,
+    input.comment ? `${m.comment}: ${input.comment}` : null,
     input.confirmedByName ? '' : null,
     input.confirmedByName ? `${m.confirmedBy}: ${input.confirmedByName}` : null,
   ].filter((line): line is string => line !== null);

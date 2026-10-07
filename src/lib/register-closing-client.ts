@@ -47,6 +47,10 @@ export type RegisterClosingRecord = {
   differenceUsd: number;
   /** レジ金 (開店時にレジへ入れておく釣銭用の基準額。2026-09-19 追加)。確定時点の設定値のスナップショット */
   registerFloatUsd: number;
+  /** 時間帯 (lunch/dinner等) ごとの天候。キーは TimePeriod.id (2026-10-07 追加) */
+  weather: Record<string, string>;
+  /** 当日のレジ締めコメント (2026-10-07 追加) */
+  comment: string | null;
   confirmedByName: string | null;
   confirmedAt: string;
 };
@@ -70,6 +74,10 @@ export function confirmRegisterClosing(input: {
   shift?: string;
   countedUsdBills: Record<number, number>;
   countedKhrBills: Record<number, number>;
+  /** 時間帯 (lunch/dinner等) ごとの天候。キーは TimePeriod.id (2026-10-07 追加) */
+  weather?: Record<string, string>;
+  /** 当日のレジ締めコメント (2026-10-07 追加) */
+  comment?: string;
 }): Promise<{ closing: RegisterClosingRecord }> {
   return request('/api/register-closings', {
     method: 'POST',
@@ -78,6 +86,8 @@ export function confirmRegisterClosing(input: {
       shift: input.shift,
       countedUsdBills: Object.fromEntries(Object.entries(input.countedUsdBills).map(([k, v]) => [String(k), v])),
       countedKhrBills: Object.fromEntries(Object.entries(input.countedKhrBills).map(([k, v]) => [String(k), v])),
+      weather: input.weather ?? {},
+      comment: input.comment,
     }),
   });
 }

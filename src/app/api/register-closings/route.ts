@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { createPosAdminClient, getPosStoreId } from '@/lib/supabase/admin';
 import { withPosStaff } from '@/lib/pos-auth';
 import { notifyRegisterClosing } from '@/lib/sales-report-notify';
-import { DEFAULT_TIME_PERIODS, type EthnicityKey, type TimePeriod } from '@/lib/pos-types';
+import { DEFAULT_TIME_PERIODS, WEATHER_CODES, type EthnicityKey, type TimePeriod } from '@/lib/pos-types';
 import { computeGuestStats, computeTimePeriodSales, type EthnicityTotal, type TimePeriodSalesResult } from '@/lib/sales-aggregation';
 
 // レジ締め (2026-09-02 実データ連携)。
@@ -132,6 +132,8 @@ type ClosingRow = {
   counted_total_usd: number;
   difference_usd: number;
   register_float_usd: number;
+  weather: Record<string, string>;
+  comment: string | null;
   confirmed_by_name: string | null;
   confirmed_at: string;
 };
@@ -148,13 +150,15 @@ function toApi(row: ClosingRow) {
     countedTotalUsd: Number(row.counted_total_usd),
     differenceUsd: Number(row.difference_usd),
     registerFloatUsd: Number(row.register_float_usd ?? 0),
+    weather: row.weather ?? {},
+    comment: row.comment,
     confirmedByName: row.confirmed_by_name,
     confirmedAt: row.confirmed_at,
   };
 }
 
 const closingSelectCols =
-  'id, date, shift, system_cash_total, system_totals_by_method, counted_usd_bills, counted_khr_bills, counted_total_usd, difference_usd, register_float_usd, confirmed_by_name, confirmed_at';
+  'id, date, shift, system_cash_total, system_totals_by_method, counted_usd_bills, counted_khr_bills, counted_total_usd, difference_usd, register_float_usd, weather, comment, confirmed_by_name, confirmed_at';
 
 // 指定日のレジ締め状況を取得。既に確定済みならその記録を、未確定ならその場で集計したシステム
 // 合計 (未確定・実査待ち) を返す。staff 以上 (締め作業はシフトの担当者が誰でも行えるように)。
@@ -191,11 +195,16 @@ export const GET = withPosStaff('part_time', async (_session, req) => {
 
 const billsSchema = z.record(z.string(), z.number().int().min(0));
 
+const weatherSchema = z.record(z.string(), z.enum(WEATHER_CODES));
+
 const postSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, '日付は YYYY-MM-DD 形式で入力してください'),
   shift: z.string().trim().max(60).optional(),
   countedUsdBills: billsSchema,
   countedKhrBills: billsSchema,
+  // 時間帯 (lunch/dinner等) ごとの天候 + 当日コメント (2026-10-07 追加)。
+  weather: weatherSchema.optional().default({}),
+  comment: z.string().trim().max(500).optional(),
 });
 
 // レジ締めを確定。staff 以上。確定した system_cash_total が現金残高に積み上がる。
@@ -244,6 +253,8 @@ export const POST = withPosStaff('part_time', async (session, req) => {
       counted_total_usd: countedTotalUsd,
       difference_usd: differenceUsd,
       register_float_usd: registerFloatUsd,
+      weather: d.weather,
+      comment: d.comment || null,
       confirmed_by: session.staffId,
       confirmed_by_name: session.displayName,
     })
@@ -263,6 +274,8 @@ export const POST = withPosStaff('part_time', async (session, req) => {
     partyCount: totals.partyCount,
     ethnicityTotals: totals.ethnicityTotals,
     timePeriodSales: totals.timePeriodSales,
+    weather: d.weather,
+    comment: d.comment || null,
   }).catch((err) => console.error('[register-closings] notify failed:', err));
 
   return NextResponse.json({ closing: toApi(data as ClosingRow) }, { status: 201 });

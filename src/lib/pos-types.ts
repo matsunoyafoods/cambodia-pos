@@ -295,6 +295,19 @@ export type InvoiceInput = {
   description: string;
 };
 
+// レジ締めの天候記録 (2026-10-07 追加)。Tom「レジ締めする時にコメント欄とランチとディナーで
+// 天気を選択できるようにしてください。それがテレグラムのレポートに反映して」への対応。
+// pos.stores.settings.timePeriods の各区分 (id) ごとに天候を1つ選べる。未選択の区分は
+// register_closings.weather (jsonb) のキーごと省略する。
+export const WEATHER_CODES = ['sunny', 'cloudy', 'rainy', 'stormy'] as const;
+export type WeatherCode = (typeof WEATHER_CODES)[number];
+export const WEATHER_EMOJI: Record<WeatherCode, string> = {
+  sunny: '☀️',
+  cloudy: '☁️',
+  rainy: '🌧️',
+  stormy: '⛈️',
+};
+
 export const DEFAULT_TIME_PERIODS: TimePeriod[] = [
   { id: 'lunch', label: 'ランチ', labelEn: 'Lunch', labelKm: 'អាហារថ្ងៃត្រង់', start: '11:00', end: '15:00' },
   { id: 'dinner', label: 'ディナー', labelEn: 'Dinner', labelKm: 'អាហារល្ងាច', start: '17:00', end: '22:00' },
