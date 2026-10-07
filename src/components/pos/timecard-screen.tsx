@@ -28,7 +28,7 @@ type TFunc = ReturnType<typeof useLanguage>['t'];
 // (Tom「打刻についてプルダウンでスタッフを選べるようにしてください」)。ログインしたまま
 // 端末を共有し、出勤する本人がプルダウンで自分の名前を選んで打刻する運用を想定している。
 //
-// 勤怠レポート (期間・時給から人件費を概算する manager 以上向けの集計表、CSV/PDF出力等) は
+// 勤怠レポート (期間ごとの実働時間集計表、CSV/PDF出力等) は
 // 2026-09-04 に給料タブへ移設した (Tom「退勤レポートは給料のタブに入れてください」)。
 // 実装は attendance-report-tab.tsx の AttendanceReportTab、payroll-screen.tsx の
 // 「勤怠レポート」サブタブから呼ばれる。この画面には打刻 (PunchCard) だけが残っている。

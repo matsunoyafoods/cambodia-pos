@@ -21,7 +21,6 @@ import {
   createStaff,
   listStaff,
   resetStaffPin,
-  updateStaffWage,
   updateStaffRole,
   PosStaffApiError,
   type PosStaffMember,
@@ -1922,15 +1921,11 @@ function StaffTab() {
   const me = useStaff();
   const isPosNative = me.authMode === 'pos_native';
   const canManage = isPosNative && (me.role === 'owner' || me.role === 'manager' || me.role === 'sub_manager');
-  // 給料 (時給) の閲覧・編集は sub_manager には許可しない (Tom「サブマネージャーはスタッフの
-  // 給料...は見ることができません」)。API 側 (staff/[id]/route.ts PATCH) でも同様に弾いている。
-  const canManageWage = isPosNative && (me.role === 'owner' || me.role === 'manager');
 
   const [staffList, setStaffList] = useState<PosStaffMember[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [resetTargetId, setResetTargetId] = useState<string | null>(null);
-  const [wageTargetId, setWageTargetId] = useState<string | null>(null);
   const [roleTargetId, setRoleTargetId] = useState<string | null>(null);
 
   const load = useCallback(() => {
@@ -2007,7 +2002,6 @@ function StaffTab() {
                 <div className="text-[11.5px] text-muted-foreground">
                   {roleLabel(t, s.role)}
                   {s.active === false && ` ・ ${t('settings.staff.inactive')}`}
-                  {canManageWage && s.hourly_wage_usd != null && ` ・ ${t('settings.staff.hourlyWage', { amount: s.hourly_wage_usd.toFixed(2) })}`}
                 </div>
               </div>
             </div>
@@ -2018,14 +2012,6 @@ function StaffTab() {
               >
                 {t('settings.staff.setRole')}
               </button>
-              {canManageWage && (
-                <button
-                  onClick={() => setWageTargetId((v) => (v === s.id ? null : s.id))}
-                  className="h-8 rounded-lg border border-border px-3 text-xs font-semibold"
-                >
-                  {t('settings.staff.setWage')}
-                </button>
-              )}
               <button
                 onClick={() => setResetTargetId((v) => (v === s.id ? null : s.id))}
                 className="h-8 rounded-lg border border-border px-3 text-xs font-semibold"
@@ -2045,17 +2031,6 @@ function StaffTab() {
               onCancel={() => setRoleTargetId(null)}
             />
           )}
-          {wageTargetId === s.id && canManageWage && (
-            <WageEditForm
-              staffId={s.id}
-              currentWage={s.hourly_wage_usd ?? null}
-              onDone={(updated) => {
-                setWageTargetId(null);
-                setStaffList((prev) => (prev ? prev.map((x) => (x.id === updated.id ? updated : x)) : prev));
-              }}
-              onCancel={() => setWageTargetId(null)}
-            />
-          )}
           {resetTargetId === s.id && (
             <ResetPinForm
               staffId={s.id}
@@ -2068,69 +2043,8 @@ function StaffTab() {
   );
 }
 
-// 時給の設定フォーム (2026-08-31 追加。人件費レポートで時給×勤務時間から人件費を概算するため)。
-function WageEditForm({
-  staffId,
-  currentWage,
-  onDone,
-  onCancel,
-}: {
-  staffId: string;
-  currentWage: number | null;
-  onDone: (updated: PosStaffMember) => void;
-  onCancel: () => void;
-}) {
-  const { t } = useLanguage();
-  const [wage, setWage] = useState(currentWage != null ? String(currentWage) : '');
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    const trimmed = wage.trim();
-    const value = trimmed === '' ? null : Number(trimmed);
-    if (value !== null && (!(value >= 0) || Number.isNaN(value))) return;
-    setSubmitting(true);
-    setError(null);
-    try {
-      const { staff } = await updateStaffWage(staffId, value);
-      onDone(staff);
-    } catch (err) {
-      setError(err instanceof PosStaffApiError ? err.message : t('settings.staff.wageUpdateError'));
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  return (
-    <form onSubmit={submit} className="mt-3 flex items-center gap-2 border-t border-border pt-3">
-      <span className="text-xs text-muted-foreground">$</span>
-      <input
-        type="number"
-        min="0"
-        step="0.01"
-        value={wage}
-        onChange={(e) => setWage(e.target.value)}
-        placeholder={t('settings.staff.wagePlaceholder')}
-        className="h-9 w-52 rounded-lg border border-border px-3 text-[13px]"
-      />
-      <button
-        type="submit"
-        disabled={submitting}
-        className="h-9 rounded-lg bg-primary px-3 text-xs font-semibold text-primary-foreground disabled:opacity-60"
-      >
-        {submitting ? t('settings.staff.updatingEllipsis') : t('settings.staff.updateButton')}
-      </button>
-      <button type="button" onClick={onCancel} className="h-9 rounded-lg border border-border px-3 text-xs font-semibold">
-        {t('common.cancel')}
-      </button>
-      {error && <div className="text-xs text-destructive">{error}</div>}
-    </form>
-  );
-}
-
 // 権限 (role) の変更フォーム (2026-09-04 追加。既存スタッフの権限を後から編集できるように)。
-// owner への変更はここからはできない (WageEditForm 同様、Supabase 側で直接設定する運用)。
+// owner への変更はここからはできない (Supabase 側で直接設定する運用)。
 function RoleEditForm({
   staffId,
   currentRole,

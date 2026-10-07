@@ -10,7 +10,6 @@ import {
   updateTimecard,
   updateTimecardRoundingSettings,
 } from '@/lib/timecard-client';
-import { listStaff, type PosStaffMember } from '@/lib/staff-client';
 import { applyTimecardRounding } from '@/lib/timecard-rounding';
 import { downloadCsv } from '@/lib/csv-export';
 import { DEFAULT_TIMECARD_ROUNDING, type TimecardRecord, type TimecardRoundingSettings } from '@/lib/pos-types';
@@ -22,7 +21,10 @@ type TFunc = ReturnType<typeof useLanguage>['t'];
 // 勤怠レポート (2026-09-04 移動)。元々は勤怠 (timecard-screen.tsx) タブの中にあったが、
 // Tomからの要望「退勤レポートは給料のタブに入れてください」により、給料 (payroll-screen.tsx)
 // タブの1サブタブとして表示する形に移設した。中身 (期間・スタッフごとの実働時間集計、
-// 概算人件費、丸め設定、CSV/PDF出力、スタッフ別画像出力、打刻の手動編集・削除) は変更なし。
+// 丸め設定、CSV/PDF出力、スタッフ別画像出力、打刻の手動編集・削除) は変更なし。
+// 時給ベースの概算人件費表示は 2026-10-07 に廃止した (Tom「人件費計算がおかしいです。今の
+// 時給入力は削除してください」への対応。人件費計算は /pos/payroll の給与計算エンジン
+// (基準給÷標準勤務日数の日額を欠勤日数分控除する方式) に一本化した)。
 // 打刻そのもの (出勤/休憩/退勤ボタン) は timecard-screen.tsx の PunchCard に残っている。
 
 async function loadHtml2Canvas() {
@@ -71,18 +73,14 @@ export function AttendanceReportTab() {
   const [from, setFrom] = useState(() => todayIso().slice(0, 8) + '01'); // 今月1日
   const [to, setTo] = useState(todayIso());
   const [rows, setRows] = useState<TimecardRecord[] | null>(null);
-  const [staffList, setStaffList] = useState<PosStaffMember[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [rounding, setRounding] = useState<TimecardRoundingSettings>(DEFAULT_TIMECARD_ROUNDING);
 
   const load = useCallback(() => {
     setError(null);
-    Promise.all([listTimecards({ from, to }), listStaff()])
-      .then(([timecards, { staff }]) => {
-        setRows(timecards);
-        setStaffList(staff);
-      })
+    listTimecards({ from, to })
+      .then(setRows)
       .catch((err) => setError(err instanceof PosTimecardApiError ? err.message : t('timecardScreen.reportLoadError')));
   }, [from, to, t]);
 
@@ -99,38 +97,17 @@ export function AttendanceReportTab() {
       });
   }, []);
 
-  const wageById = useMemo(() => new Map(staffList.map((s) => [s.id, s.hourly_wage_usd ?? null])), [staffList]);
-
   // 実働分数 (丸め設定適用後)。打刻の生記録自体は変更しない — 集計・表示にのみ使う。
   const roundedMinutes = useCallback((r: TimecardRecord) => applyTimecardRounding(workedMinutes(r), rounding), [rounding]);
 
   const totals = useMemo(() => {
-    if (!rows) return { minutes: 0, cost: 0 };
+    if (!rows) return { minutes: 0 };
     let minutes = 0;
-    let cost = 0;
     for (const r of rows) {
-      const m = roundedMinutes(r);
-      minutes += m;
-      const wage = wageById.get(r.staffId);
-      if (wage) cost += (m / 60) * wage;
+      minutes += roundedMinutes(r);
     }
-    return { minutes, cost };
-  }, [rows, wageById, roundedMinutes]);
-
-  // 日別の概算人件費 (可視化グラフ用)。
-  const dailyCost = useMemo(() => {
-    if (!rows) return [] as { date: string; cost: number }[];
-    const map = new Map<string, number>();
-    for (const r of rows) {
-      const date = r.clockIn.slice(0, 10);
-      const wage = wageById.get(r.staffId);
-      const cost = wage ? (roundedMinutes(r) / 60) * wage : 0;
-      map.set(date, (map.get(date) ?? 0) + cost);
-    }
-    return Array.from(map.entries())
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([date, cost]) => ({ date, cost }));
-  }, [rows, wageById, roundedMinutes]);
+    return { minutes };
+  }, [rows, roundedMinutes]);
 
   // スタッフ別グループ (スタッフ別画像出力用)。
   const byStaff = useMemo(() => {
@@ -163,11 +140,9 @@ export function AttendanceReportTab() {
         t('timecardScreen.action.clockOut'),
         t('timecardScreen.csvBreakCount'),
         `${t('timecardScreen.csvWorkedHours')}${rounding.enabled ? t('timecardScreen.csvRoundedSuffix') : ''}`,
-        t('timecardScreen.csvEstimatedLaborCost'),
         t('timecardScreen.csvEdited'),
       ],
       rows.map((r) => {
-        const wage = wageById.get(r.staffId);
         const m = roundedMinutes(r);
         return [
           r.staffName,
@@ -175,7 +150,6 @@ export function AttendanceReportTab() {
           r.clockOut ? fmtTime(r.clockOut, lang) : '',
           r.breaks.length,
           (m / 60).toFixed(2),
-          wage ? ((m / 60) * wage).toFixed(2) : '',
           r.editedAt ? t('timecardScreen.editedBadge') : '',
         ];
       }),
@@ -229,16 +203,10 @@ export function AttendanceReportTab() {
             {t('timecardScreen.totalWorkedLabel')} <span className="font-semibold">{t('timecardScreen.hoursValue', { hours: fmtHours(totals.minutes) })}</span>
             {rounding.enabled && <span className="ml-1 text-[11px] text-muted-foreground">{t('timecardScreen.roundedSuffix')}</span>}
           </div>
-          <div>
-            {t('timecardScreen.estimatedLaborCostLabel')} <span className="font-semibold">${totals.cost.toFixed(2)}</span>
-            <span className="ml-1 text-[11px] text-muted-foreground">{t('timecardScreen.noWageExcludedNote')}</span>
-          </div>
         </div>
       )}
 
-      <LaborCostChart data={dailyCost} />
-
-      <StaffImageExportSection groups={byStaff} wageById={wageById} rounding={rounding} storeName={me.store_name} from={from} to={to} />
+      <StaffImageExportSection groups={byStaff} rounding={rounding} storeName={me.store_name} from={from} to={to} />
 
       {!rows && <div className="text-[12.5px] text-muted-foreground">{t('common.loadingEllipsis')}</div>}
       {rows?.length === 0 && <div className="text-[12.5px] text-muted-foreground">{t('timecardScreen.noRecordsForPeriod')}</div>}
@@ -375,56 +343,17 @@ function RoundingSettingsPanel({ rounding, onSaved }: { rounding: TimecardRoundi
   );
 }
 
-// 日別の概算人件費の簡易棒グラフ (新規ライブラリは使わずSVGを手描き)。
-function LaborCostChart({ data }: { data: { date: string; cost: number }[] }) {
-  const { t } = useLanguage();
-  if (data.length === 0 || data.every((d) => d.cost === 0)) return null;
-  const max = Math.max(...data.map((d) => d.cost));
-  const width = 640;
-  const height = 140;
-  const barGap = 4;
-  const barWidth = Math.max(4, width / data.length - barGap);
-
-  return (
-    <div className="mb-3 rounded-lg border border-border p-3.5 print:hidden">
-      <div className="mb-2 text-[12px] font-semibold text-muted-foreground">{t('timecardScreen.laborCostChartTitle')}</div>
-      <svg viewBox={`0 0 ${width} ${height + 20}`} className="h-[120px] w-full" role="img" aria-label={t('timecardScreen.laborCostChartAriaLabel')}>
-        {data.map((d, i) => {
-          const barHeight = max > 0 ? (d.cost / max) * height : 0;
-          const x = i * (barWidth + barGap);
-          return (
-            <g key={d.date}>
-              <rect x={x} y={height - barHeight} width={barWidth} height={barHeight} fill="var(--primary, #2563eb)" rx={2}>
-                <title>
-                  {d.date}: ${d.cost.toFixed(2)}
-                </title>
-              </rect>
-              {(data.length <= 15 || i % Math.ceil(data.length / 15) === 0) && (
-                <text x={x + barWidth / 2} y={height + 14} textAnchor="middle" fontSize="9" fill="currentColor" className="text-muted-foreground">
-                  {d.date.slice(5)}
-                </text>
-              )}
-            </g>
-          );
-        })}
-      </svg>
-    </div>
-  );
-}
-
 // スタッフ別タイムカード画像出力。スタッフごとの明細を1枚のPNG画像として書き出す。
 // html2canvasでDOMをそのまま画像化するため、画面には出さないオフスクリーンのカードを
 // 用意しておき、ボタン押下時にそのDOM要素を撮影する。
 function StaffImageExportSection({
   groups,
-  wageById,
   rounding,
   storeName,
   from,
   to,
 }: {
   groups: { staffId: string; staffName: string; records: TimecardRecord[] }[];
-  wageById: Map<string, number | null>;
   rounding: TimecardRoundingSettings;
   storeName?: string;
   from: string;
@@ -482,10 +411,8 @@ function StaffImageExportSection({
       {/* オフスクリーンの撮影用カード (画面には表示しない。display:none だと html2canvas が撮影できないため left: -9999px で退避する) */}
       <div style={{ position: 'absolute', left: -9999, top: 0 }} aria-hidden="true">
         {groups.map((g) => {
-          const wage = wageById.get(g.staffId);
           let totalMinutes = 0;
           for (const r of g.records) totalMinutes += applyTimecardRounding(workedMinutes(r), rounding);
-          const cost = wage ? (totalMinutes / 60) * wage : null;
           return (
             <div
               key={g.staffId}
@@ -509,7 +436,6 @@ function StaffImageExportSection({
               </div>
               <div style={{ marginTop: 16, fontSize: 14, fontWeight: 700 }}>
                 {t('timecardScreen.imageTotalWorked', { hours: fmtHours(totalMinutes) })}
-                {cost !== null && ` ・ ${t('timecardScreen.imageEstimatedCost', { cost: cost.toFixed(2) })}`}
               </div>
               <div style={{ marginTop: 10, fontSize: 10, color: '#9ca3af' }}>{t('timecardScreen.imageGeneratedAt', { datetime: new Date().toLocaleString(localeForLang(lang)) })}</div>
             </div>

@@ -4,25 +4,23 @@ import { createPosAdminClient, getPosStoreId } from '@/lib/supabase/admin';
 import { withPosStaff, hashPin } from '@/lib/pos-auth';
 
 // スタッフ一覧 (role/active も含む、フル情報)。manager 以上のみ。
-// sub_manager はスタッフ管理自体はできるが「スタッフの給料は見られない」(Tom の要望) ため、
-// hourly_wage_usd はレスポンスから除去する (フロントだけで隠すのではなく API 側で除去)。
-export const GET = withPosStaff('manager', async (session) => {
+// 時給 (hourly_wage_usd) は 2026-10-07 に廃止した (Tom「人件費計算がおかしいです。今の
+// 時給入力は削除してください」への対応。人件費計算は /pos/payroll の給与計算エンジンに
+// 一本化した)。
+export const GET = withPosStaff('manager', async () => {
   const supabase = createPosAdminClient();
   const storeId = getPosStoreId();
 
   const { data, error } = await supabase
     .from('staff')
-    .select('id, display_name, role, active, hourly_wage_usd, created_at')
+    .select('id, display_name, role, active, created_at')
     .eq('store_id', storeId)
     .order('created_at');
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
-  const staff = (data ?? []).map((row) =>
-    session.role === 'sub_manager' ? { ...row, hourly_wage_usd: undefined } : row,
-  );
-  return NextResponse.json({ staff });
+  return NextResponse.json({ staff: data ?? [] });
 });
 
 const createSchema = z.object({
@@ -46,7 +44,7 @@ export const POST = withPosStaff('manager', async (_session, req) => {
   const { data, error } = await supabase
     .from('staff')
     .insert({ store_id: storeId, display_name: displayName, role, pin_hash: pinHash })
-    .select('id, display_name, role, active, hourly_wage_usd, created_at')
+    .select('id, display_name, role, active, created_at')
     .single();
 
   if (error) {

@@ -149,7 +149,6 @@ function InsightsPanel() {
               {t('insights.sourceDataCurrent', {
                 expense: result.current.expenseTotal.toFixed(2),
                 unpaid: result.current.unpaidTotal.toFixed(2),
-                labor: result.current.laborCostTotal.toFixed(2),
                 hours: result.current.laborHoursTotal.toFixed(1),
               })}
             </div>
@@ -158,7 +157,7 @@ function InsightsPanel() {
                 from: result.previous.from,
                 to: result.previous.to,
                 expense: result.previous.expenseTotal.toFixed(2),
-                labor: result.previous.laborCostTotal.toFixed(2),
+                hours: result.previous.laborHoursTotal.toFixed(1),
               })}
             </div>
           </div>

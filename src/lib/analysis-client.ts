@@ -24,9 +24,8 @@ export type PeriodSummary = {
   expenseTotal: number;
   expenseByCategory: { category: string; total: number }[];
   unpaidTotal: number;
-  laborCostTotal: number;
   laborHoursTotal: number;
-  laborByStaff: { staffName: string; hours: number; cost: number }[];
+  laborByStaff: { staffName: string; hours: number }[];
 };
 
 export type InsightsResult = {

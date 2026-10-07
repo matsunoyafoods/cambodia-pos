@@ -65,19 +65,18 @@ type PeriodSummary = {
   expenseTotal: number;
   expenseByCategory: { category: string; total: number }[];
   unpaidTotal: number;
-  laborCostTotal: number;
   laborHoursTotal: number;
-  laborByStaff: { staffName: string; hours: number; cost: number }[];
+  laborByStaff: { staffName: string; hours: number }[];
 };
 
 async function summarizePeriod(supabase: ReturnType<typeof createPosAdminClient>, storeId: string, from: string, to: string, rounding: TimecardRoundingSettings): Promise<PeriodSummary> {
   const [{ data: expenses }, { data: timecards }, { data: staff }] = await Promise.all([
     supabase.from('expenses').select('amount_usd, category, payment_status').eq('store_id', storeId).gte('date', from).lte('date', to),
     supabase.from('timecards').select('staff_id, clock_in, clock_out, breaks').gte('clock_in', `${from}T00:00:00Z`).lte('clock_in', `${to}T23:59:59Z`),
-    supabase.from('staff').select('id, display_name, hourly_wage_usd').eq('store_id', storeId),
+    supabase.from('staff').select('id, display_name').eq('store_id', storeId),
   ]);
 
-  const staffById = new Map((staff ?? []).map((s) => [s.id as string, s as { id: string; display_name: string; hourly_wage_usd: number | null }]));
+  const staffById = new Map((staff ?? []).map((s) => [s.id as string, s as { id: string; display_name: string }]));
   // timecards には store_id が無いため、自店舗の staff.id 集合でフィルタする (テナント分離。他のtimecards APIと同じ方針)。
   const ownTimecards = (timecards ?? []).filter((t) => staffById.has(t.staff_id as string));
 
@@ -90,6 +89,9 @@ async function summarizePeriod(supabase: ReturnType<typeof createPosAdminClient>
     .sort((a, b) => b.total - a.total)
     .slice(0, 10);
 
+  // 人件費の概算 (時給×実働時間) は 2026-10-07 に廃止した (Tom「人件費計算がおかしいです。
+  // 今の時給入力は削除してください」への対応)。ここでは実働時間のみ集計する。正確な人件費は
+  // /pos/payroll の給与計算 (基準給÷標準勤務日数の日額を欠勤日数分控除する方式) を参照する。
   const laborByStaffMap = new Map<string, { staffName: string; minutes: number }>();
   for (const t of ownTimecards) {
     const s = staffById.get(t.staff_id as string);
@@ -99,22 +101,18 @@ async function summarizePeriod(supabase: ReturnType<typeof createPosAdminClient>
     prev.minutes += minutes;
     laborByStaffMap.set(s.id, prev);
   }
-  let laborCostTotal = 0;
   let laborHoursTotal = 0;
-  const laborByStaff = Array.from(laborByStaffMap.entries()).map(([staffId, v]) => {
-    const wage = staffById.get(staffId)?.hourly_wage_usd ?? null;
+  const laborByStaff = Array.from(laborByStaffMap.entries()).map(([, v]) => {
     const hours = v.minutes / 60;
-    const cost = wage ? hours * wage : 0;
     laborHoursTotal += hours;
-    laborCostTotal += cost;
-    return { staffName: v.staffName, hours, cost };
+    return { staffName: v.staffName, hours };
   });
 
-  return { from, to, expenseTotal, expenseByCategory, unpaidTotal, laborCostTotal, laborHoursTotal, laborByStaff: laborByStaff.sort((a, b) => b.cost - a.cost) };
+  return { from, to, expenseTotal, expenseByCategory, unpaidTotal, laborHoursTotal, laborByStaff: laborByStaff.sort((a, b) => b.hours - a.hours) };
 }
 
 function buildPrompt(storeName: string, current: PeriodSummary, previous: PeriodSummary): string {
-  return `あなたはカンボジアの飲食店「${storeName}」の経営分析アシスタントです。以下は同店のPOSシステムから集計した経費・人件費データです。日本語で、経営者が読んですぐ役立つ分析と提案を書いてください。数字は与えられたデータの範囲でのみ言及し、憶測で新しい数字を作らないでください。断定しすぎず、「〜の可能性があります」等の表現も使ってください。
+  return `あなたはカンボジアの飲食店「${storeName}」の経営分析アシスタントです。以下は同店のPOSシステムから集計した経費・勤怠データです。日本語で、経営者が読んですぐ役立つ分析と提案を書いてください。数字は与えられたデータの範囲でのみ言及し、憶測で新しい数字を作らないでください。断定しすぎず、「〜の可能性があります」等の表現も使ってください。
 
 【対象期間】${current.from} 〜 ${current.to}
 【比較期間 (直前の同じ日数)】${previous.from} 〜 ${previous.to}
@@ -125,11 +123,11 @@ function buildPrompt(storeName: string, current: PeriodSummary, previous: Period
 費目別内訳 (対象期間、上位10件):
 ${current.expenseByCategory.map((c) => `- ${c.category}: $${c.total.toFixed(2)}`).join('\n') || '(記録なし)'}
 
-■人件費
-対象期間 概算人件費合計: $${current.laborCostTotal.toFixed(2)} (実働 ${current.laborHoursTotal.toFixed(1)}時間)
-比較期間 概算人件費合計: $${previous.laborCostTotal.toFixed(2)} (実働 ${previous.laborHoursTotal.toFixed(1)}時間)
-スタッフ別 (対象期間、時給未設定のスタッフは人件費 $0 として表示されます):
-${current.laborByStaff.map((s) => `- ${s.staffName}: ${s.hours.toFixed(1)}時間 / $${s.cost.toFixed(2)}`).join('\n') || '(記録なし)'}
+■勤怠 (実働時間。人件費そのものは給与計算 (/pos/payroll) を参照してください。ここには含まれません)
+対象期間 実働時間合計: ${current.laborHoursTotal.toFixed(1)}時間
+比較期間 実働時間合計: ${previous.laborHoursTotal.toFixed(1)}時間
+スタッフ別 (対象期間):
+${current.laborByStaff.map((s) => `- ${s.staffName}: ${s.hours.toFixed(1)}時間`).join('\n') || '(記録なし)'}
 
 上記を踏まえて、次の3つを出力してください:
 1. summary: 全体の状況を2〜3文で要約

@@ -50,8 +50,6 @@ export type PosStaffMember = {
   display_name: string;
   role: PosStaffRole;
   active?: boolean;
-  /** 時給 (USD)。未設定 = null (2026-08-31 追加。人件費レポート用) */
-  hourly_wage_usd?: number | null;
   created_at?: string;
 };
 
@@ -107,13 +105,6 @@ export function resetStaffPin(staffId: string, pin: string): Promise<{ staff: Po
   });
 }
 
-// 時給の設定 (2026-08-31 追加。人件費レポート用)。
-export function updateStaffWage(staffId: string, hourlyWageUsd: number | null): Promise<{ staff: PosStaffMember }> {
-  return request(`/api/staff/${staffId}`, {
-    method: 'PATCH',
-    body: JSON.stringify({ hourlyWageUsd }),
-  });
-}
 
 // 権限 (role) の変更 (2026-09-04 追加。既存スタッフの権限を後から編集できるように)。
 export function updateStaffRole(staffId: string, role: PosStaffRole): Promise<{ staff: PosStaffMember }> {

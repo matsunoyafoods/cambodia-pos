@@ -1,0 +1,12 @@
+-- 時給フィールドの廃止 (2026-10-07 追加)。Tom「人件費計算がおかしいです。今の時給入力は
+-- 削除してください。休んだ時の人件費計算式は休んだ分を日割り控除。」への対応。
+--
+-- pos.staff.hourly_wage_usd は「時給×実働時間」の概算人件費専用の列だった(勤怠レポート
+-- タブ・設定画面・AI分析インサイトで使用)。欠勤時の控除という概念が無く、固定給スタッフの
+-- 人件費としては不正確だったため、この列と関連機能を廃止する。
+--
+-- 正しい人件費計算は給与計算 (/pos/payroll, src/lib/payroll/calc.ts) に一本化されており、
+-- 既にTomの要件通り「日額 (基準給÷標準勤務日数) を欠勤日数分だけ控除」する方式
+-- (calculatePayroll() の employee ブロック、absenceDeduction = dailyRate × unpaidAbsenceDays)
+-- で実装済みなので、そちらを引き続き使う。
+alter table pos.staff drop column if exists hourly_wage_usd;
