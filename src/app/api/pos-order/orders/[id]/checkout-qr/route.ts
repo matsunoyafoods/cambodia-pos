@@ -43,12 +43,22 @@ export async function POST(req: Request, ctx: RouteContext) {
 
   const { data: order, error: orderError } = await supabase
     .from('orders')
-    .select('id, status')
+    .select('id, status, receipt_token')
     .eq('id', id)
     .eq('store_id', storeId)
     .maybeSingle();
   if (orderError) return NextResponse.json({ error: orderError.message }, { status: 500 });
   if (!order) return NextResponse.json({ error: 'not_found' }, { status: 404 });
+
+  // 既にこの注文でQR決済を開始済み (status='awaiting_payment') なら、金額の再ロックは
+  // せずに同じトークンをそのまま返す。スタッフがQRモーダルを閉じてしまった後、もう一度
+  // 「デジタルレシートを表示」を押しても毎回エラーにならず、何度でも開き直せるようにする
+  // (Tom「何回でも開けるようにしてください」への対応、2026-10-07)。この状態では
+  // items 側のガードにより商品も編集できないので、金額が変わる心配はない。
+  if (order.status === 'awaiting_payment' && order.receipt_token) {
+    return NextResponse.json({ token: order.receipt_token });
+  }
+
   if (order.status !== 'open') {
     return NextResponse.json({ error: 'この注文は既に会計済み・取消済み・QR決済待ちです' }, { status: 409 });
   }
