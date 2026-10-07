@@ -10,10 +10,13 @@ import type {
   PaymentLineInput,
   PaymentMethod,
   PaymentMethodConfig,
+  PrinterConfig,
   TableStatus,
 } from '@/lib/pos-types';
 import { DEFAULT_SETTINGS } from '@/lib/pos-types';
 import { getPosMenus, getPosSettings, PosApiError } from '@/lib/api-client';
+import { listPrinters } from '@/lib/printer-client';
+import { printerConnectionLabel } from './settings-screen';
 import {
   getPosOrderMenu,
   getPosOrderMode,
@@ -133,6 +136,11 @@ function PosAppInner() {
   // になった注文。レジ画面はバナーを出し、スタッフの1タップで印刷命令を送る)。
   const [printRequests, setPrintRequests] = useState<{ orderId: string; code: string; token: string }[]>([]);
   const [printingOrderId, setPrintingOrderId] = useState<string | null>(null);
+  // レシート用プリンターの設定状況表示 (2026-10-07 追加。Tom「プリンターの表示設定は
+  // できますか」)。PassPRNT/Bluetoothは物理的な接続有無をブラウザから問い合わせる手段が
+  // ないため、ここでは「設定済みかどうか・接続方式」だけを表示する (実際に接続されているか
+  // どうかまでは分からない)。
+  const [receiptPrinters, setReceiptPrinters] = useState<PrinterConfig[]>([]);
   const [dataLoading, setDataLoading] = useState(true);
   const [dataError, setDataError] = useState<string | null>(null);
   const [loadToken, setLoadToken] = useState(0);
@@ -327,6 +335,16 @@ function PosAppInner() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadToken]);
+
+  // レシート用プリンターの設定状況 (2026-10-07 追加)。設定が頻繁に変わるものではないので
+  // 初回読み込み時のみ取得する (取得失敗時は「未設定」表示になるだけでレジ操作は止めない)。
+  useEffect(() => {
+    listPrinters()
+      .then((printers) => setReceiptPrinters(printers.filter((p) => p.role === 'receipt' && p.enabled)))
+      .catch(() => {
+        /* 取得失敗時は未設定表示のままにする */
+      });
   }, [loadToken]);
 
   // メニュー取得後、最初のカテゴリを選択状態にする
@@ -1213,6 +1231,22 @@ function PosAppInner() {
           )}
         </div>
         <div className="flex items-center gap-3.5">
+          {/* レシート用プリンターの設定状況バッジ (2026-10-07 追加)。実際に接続されている
+              かどうかまでは分からない (PassPRNT/Bluetoothはブラウザから問い合わせられない)
+              ので、「設定済みか・接続方式」だけを表示する。 */}
+          <div
+            className="flex items-center gap-1.5 text-xs text-muted-foreground"
+            title={receiptPrinters.length > 0 ? undefined : t('posApp.printerNotConfiguredHint')}
+          >
+            <span
+              className={
+                'inline-block h-2 w-2 rounded-full ' + (receiptPrinters.length > 0 ? 'bg-emerald-500' : 'bg-amber-500')
+              }
+            />
+            {receiptPrinters.length > 0
+              ? t('posApp.printerConfiguredLabel', { method: printerConnectionLabel(t, receiptPrinters[0].connectionType) })
+              : t('posApp.printerNotConfiguredLabel')}
+          </div>
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
             {t('posApp.online')}

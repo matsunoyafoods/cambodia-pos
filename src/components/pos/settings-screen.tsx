@@ -138,7 +138,7 @@ function roleLabel(t: TFunc, role: PosStaffRole): string {
 function printerRoleLabel(t: TFunc, role: PrinterConfig['role']): string {
   return role === 'receipt' ? t('settings.printer.role.receipt') : t('settings.printer.role.kitchen');
 }
-function printerConnectionLabel(t: TFunc, type: PrinterConfig['connectionType']): string {
+export function printerConnectionLabel(t: TFunc, type: PrinterConfig['connectionType']): string {
   if (type === 'usb_agent') return t('settings.printer.connection.usbAgent');
   if (type === 'lan') return t('settings.printer.connection.lan');
   if (type === 'bluetooth') return t('settings.printer.connection.bluetooth');
