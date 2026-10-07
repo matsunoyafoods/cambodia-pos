@@ -15,12 +15,17 @@ import { money } from '@/lib/money';
 // ブラウザ側からの改変経路を持たない (Tom「金額をブラウザ側から変更できないように」)。
 //
 // 「ABAで支払う」(2026-10-07 更新): PayWayのマーチャント登録 (会社登録が必要) がまだ無いため、
-// 金額を自動で埋め込んだ動的QR・ABAアプリへの正式なディープリンクはどちらも作れない
-// (PayWay公式ドキュメント上、どちらもマーチャント登録必須と確認済み)。暫定対応として、
-// 店頭に貼ってある既存の静的ABA KHQR (金額なし、ABA_STATIC_KHQR_PAYLOAD) をそのまま
-// このページにも表示し、お客様がABAアプリでスキャン→画面のTOTALを見ながら金額を手入力して
-// 支払う形にする。「ABAアプリを開く」ボタンの abamobilebank:// は公式に未確認のベストエフォート
-// (Tom実機確認済みの前提で有効化。動かなくてもQR表示は常に出ているのでフォールバックになる)。
+// 金額を自動で埋め込んだ動的QR・PayWay発行のディープリンクはどちらも作れない (PayWay公式
+// ドキュメント上、どちらもマーチャント登録必須と確認済み)。暫定対応として、店頭に貼ってある
+// 既存の静的ABA KHQR (金額なし、ABA_STATIC_KHQR_PAYLOAD) をそのままこのページにも表示し、
+// お客様がABAアプリでスキャン→画面のTOTALを見ながら金額を手入力して支払う形にする。
+//
+// 「ABAアプリを開く」ボタン (2026-10-07 二次更新): PayWay公式ドキュメントに記載された
+// ディープリンク形式 abamobilebank://ababank.com?type=payway&qrcode=<KHQR文字列> の
+// qrcode= に、PayWayが生成した文字列ではなく、店頭QRと同じ静的KHQR文字列をそのまま渡して
+// みる試み。公式には「PayWayが生成したqrcode値を渡す」前提の仕様だが、中身は同じKHQR規格の
+// ため動く可能性がある、という未確認のベストエフォート。ダメでもABAのTOP画面が開くだけで
+// 実害はなく、QR表示(スキャンして支払う方法)は常に出ているのでフォールバックになる。
 type ReceiptOrder = {
   status: 'open' | 'awaiting_payment' | 'paid' | 'void';
   subtotal: number;
@@ -217,7 +222,7 @@ function ReceiptAppInner({ token }: { token: string }) {
                   <img src={abaQrDataUrl} alt="ABA KHQR" className="h-auto w-full max-w-[220px]" />
                 )}
                 <a
-                  href="abamobilebank://"
+                  href={`abamobilebank://ababank.com?type=payway&qrcode=${encodeURIComponent(data.abaStaticKhqr)}`}
                   className="flex h-12 w-full items-center justify-center rounded-xl bg-primary text-[14.5px] font-bold text-primary-foreground active:opacity-90"
                 >
                   {t('receipt.openAbaApp')}
