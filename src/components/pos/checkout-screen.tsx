@@ -148,6 +148,8 @@ export function CheckoutScreen({
   onStartQrPayment,
   qrPaymentPending,
   qrPaymentError,
+  onPaperReceipt,
+  paperReceiptPending,
 }: {
   selectedTable: string | null;
   confirmedItems: OrderItemRecord[];
@@ -177,6 +179,10 @@ export function CheckoutScreen({
   onStartQrPayment: () => void;
   qrPaymentPending: boolean;
   qrPaymentError: string | null;
+  /** 「紙レシートでもらう」(2026-10-07 追加)。現金一括払いとして会計を即確定し、通常の
+   * 現金会計と同じ印刷経路に乗せる。QR決済ボタンと同じく、まだ支払いラインが無い時だけ選べる。 */
+  onPaperReceipt: () => void;
+  paperReceiptPending: boolean;
 }) {
   const { t } = useLanguage();
   // 分割払い・割り勘: 「残り」= 合計 - すでに追加された支払いラインの合計。0 (端数誤差込み) に
@@ -629,6 +635,17 @@ export function CheckoutScreen({
             className="h-12 rounded-xl border-2 border-primary text-[14px] font-bold text-primary disabled:opacity-60"
           >
             {qrPaymentPending ? t('common.processing') : t('checkout.qrPaymentButton')}
+          </button>
+        )}
+
+        {/* 紙レシートでもらう (2026-10-07 追加。Tom「お客さんが紙で欲しいと言った場合」) */}
+        {paymentLines.length === 0 && allServed && (
+          <button
+            onClick={onPaperReceipt}
+            disabled={paperReceiptPending}
+            className="h-12 rounded-xl border-2 border-border text-[14px] font-bold text-foreground disabled:opacity-60"
+          >
+            {paperReceiptPending ? t('common.processing') : t('checkout.paperReceiptButton')}
           </button>
         )}
 

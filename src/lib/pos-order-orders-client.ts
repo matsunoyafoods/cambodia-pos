@@ -80,7 +80,9 @@ export function getOpenOrder(tableCode: string): Promise<{ order: OpenOrderRecor
 // 使って卓の色を変え、タップでQRを表示する (handy-app.tsx 参照)。
 export function getTableBillingStatus(): Promise<{
   readyTableCodes: string[];
-  receiptTables: { code: string; token: string }[];
+  receiptTables: { code: string; token: string; orderId: string }[];
+  // 紙レシート発行待ち一覧 (2026-10-07 追加。request-paper-receipt/route.ts 参照)。
+  printRequests: { orderId: string; code: string; token: string }[];
 }> {
   return request('/api/pos-order/table-billing-status');
 }
@@ -89,6 +91,41 @@ export function getTableBillingStatus(): Promise<{
 // (2026-10-07 追加。begin-checkout/route.ts 参照)。
 export function beginCheckout(orderId: string): Promise<{ token: string }> {
   return request(`/api/pos-order/orders/${orderId}/begin-checkout`, { method: 'POST' });
+}
+
+// お客様が「紙でレシートが欲しい」と言った場合の、ハンディ発の現金会計確定
+// (2026-10-07 追加。request-paper-receipt/route.ts 参照)。実際の印刷命令はレジ画面が
+// table-billing-status のポーリングで検知し、スタッフの1タップで送る。
+export function requestPaperReceipt(orderId: string): Promise<{ token: string }> {
+  return request(`/api/pos-order/orders/${orderId}/request-paper-receipt`, { method: 'POST' });
+}
+
+// レジ画面が紙レシートの印刷命令を送った後、発行待ちフラグを下ろす
+// (2026-10-07 追加。mark-printed/route.ts 参照)。
+export function markOrderPrinted(orderId: string): Promise<{ ok: true }> {
+  return request(`/api/pos-order/orders/${orderId}/mark-printed`, { method: 'POST' });
+}
+
+// お客様向け明細・レシート (/api/receipt/[token]) の読み取り。本来はお客様のブラウザが
+// 直接叩くエンドポイントだが、紙レシート発行待ちの印刷内容を組み立てるためにレジ画面からも
+// 使う (2026-10-07 追加。receipt-app.tsx の直接 fetch と同じエンドポイント)。
+export function getReceiptSnapshot(token: string): Promise<{
+  order: {
+    status: 'open' | 'awaiting_payment' | 'paid' | 'void';
+    subtotal: number;
+    vat: number;
+    service: number;
+    couponDiscount: number;
+    orderDiscount: number;
+    total: number;
+    createdAt: string;
+    paidAt: string | null;
+  };
+  items: { name: string; qty: number; unitPrice: number; lineTotal: number }[];
+  paymentMethod: string | null;
+  storeName: string;
+}> {
+  return request(`/api/receipt/${encodeURIComponent(token)}`);
 }
 
 export function createOpenOrder(input: { tableCode: string; staffId?: string }): Promise<{ order: OpenOrderRecord }> {

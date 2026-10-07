@@ -36,17 +36,38 @@ export async function GET() {
   // 「メニュー・設定の取得に失敗しました」エラーになっていた)。
   const { data: receiptOrders, error: receiptError } = await supabase
     .from('orders')
-    .select('table_code, receipt_token')
+    .select('id, table_code, receipt_token')
     .eq('store_id', storeId)
     .in('status', ['open', 'awaiting_payment'])
     .not('receipt_token', 'is', null);
   if (receiptError) return NextResponse.json({ error: receiptError.message }, { status: 500 });
 
-  const receiptTables = (receiptOrders ?? []).map((o) => ({ code: o.table_code, token: o.receipt_token as string }));
+  // orderId (2026-10-07 追加): ハンディの「紙レシートでもらう」(request-paper-receipt) が
+  // 注文IDをパスパラメータに取るため、トークンだけでなく注文IDも返す必要がある。
+  const receiptTables = (receiptOrders ?? []).map((o) => ({
+    code: o.table_code,
+    token: o.receipt_token as string,
+    orderId: o.id,
+  }));
+
+  // 紙レシート発行待ち一覧 (2026-10-07 追加。Tom「お客さんが紙で欲しいと言った場合」)。
+  // ハンディの request-paper-receipt で現金会計済み (status='paid') になり、まだレジが
+  // 印刷していない (print_requested_at セット済み) 注文を返す。レジ画面はこれを見つけたら
+  // バナーを出し、スタッフの1タップで印刷命令を送る (pos-app.tsx 参照)。
+  const { data: printRequestOrders, error: printRequestError } = await supabase
+    .from('orders')
+    .select('id, table_code, receipt_token')
+    .eq('store_id', storeId)
+    .not('print_requested_at', 'is', null);
+  if (printRequestError) return NextResponse.json({ error: printRequestError.message }, { status: 500 });
+
+  const printRequests = (printRequestOrders ?? [])
+    .filter((o) => o.receipt_token)
+    .map((o) => ({ orderId: o.id, code: o.table_code, token: o.receipt_token as string }));
 
   const orderIds = (orders ?? []).map((o) => o.id);
   if (orderIds.length === 0) {
-    return NextResponse.json({ readyTableCodes: [], receiptTables });
+    return NextResponse.json({ readyTableCodes: [], receiptTables, printRequests });
   }
 
   const { data: items, error: itemsError } = await supabase
@@ -71,5 +92,5 @@ export async function GET() {
     })
     .map((o) => o.table_code);
 
-  return NextResponse.json({ readyTableCodes, receiptTables });
+  return NextResponse.json({ readyTableCodes, receiptTables, printRequests });
 }

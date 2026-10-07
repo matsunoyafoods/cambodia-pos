@@ -33,7 +33,9 @@ import {
   enqueueKitchenPrintJob,
   enqueueReceiptPrintJob,
   getOpenOrder,
+  getReceiptSnapshot,
   getTableBillingStatus,
+  markOrderPrinted,
   mergeTables,
   moveTable,
   recordGuestDemographics,
@@ -127,6 +129,10 @@ function PosAppInner() {
   const [reservations, setReservations] = useState<ReservationRecord[]>([]);
   // 会計待ち (billing) 判定用 (2026-09-04 追加。詳細は tableStatus の useMemo 参照)。
   const [billingReadyTables, setBillingReadyTables] = useState<string[]>([]);
+  // 紙レシート発行待ち一覧 (2026-10-07 追加。ハンディの「紙レシートでもらう」で現金会計済み
+  // になった注文。レジ画面はバナーを出し、スタッフの1タップで印刷命令を送る)。
+  const [printRequests, setPrintRequests] = useState<{ orderId: string; code: string; token: string }[]>([]);
+  const [printingOrderId, setPrintingOrderId] = useState<string | null>(null);
   const [dataLoading, setDataLoading] = useState(true);
   const [dataError, setDataError] = useState<string | null>(null);
   const [loadToken, setLoadToken] = useState(0);
@@ -206,6 +212,8 @@ function PosAppInner() {
   const [qrPaymentPending, setQrPaymentPending] = useState(false);
   const [qrPaymentError, setQrPaymentError] = useState<string | null>(null);
   const [qrPaymentToken, setQrPaymentToken] = useState<string | null>(null);
+  // 「紙レシートでもらう」(2026-10-07 追加)。
+  const [paperReceiptPending, setPaperReceiptPending] = useState(false);
   // 通常会計(現金・カード等)完了後のデジタルレシートQR (2026-10-07 追加。Tom「会計時にQRを
   // お客様に見せて読み込むとデジタルレシートを表示させることは可能か」への対応)。
   const [completedReceiptToken, setCompletedReceiptToken] = useState<string | null>(null);
@@ -254,7 +262,11 @@ function PosAppInner() {
         const reservationsPromise = getReservations().catch(() => ({ items: [] as ReservationRecord[] }));
         // 会計待ちステータスは連携モードに関係なく pos.orders/order_items から判定する
         // (2026-09-04 追加)。失敗時は空配列 (テーブルマップ表示自体は止めない)。
-        const billingStatusPromise = getTableBillingStatus().catch(() => ({ readyTableCodes: [] as string[] }));
+        const billingStatusPromise = getTableBillingStatus().catch(() => ({
+          readyTableCodes: [] as string[],
+          receiptTables: [] as { code: string; token: string }[],
+          printRequests: [] as { orderId: string; code: string; token: string }[],
+        }));
         if (menuSource === 'pos_native') {
           const [menuData, settingsData, layoutData, sessionsData, paymentMethodsData, reservationsData, billingStatusData] =
             await Promise.all([
@@ -275,6 +287,7 @@ function PosAppInner() {
           setPaymentMethods(paymentMethodsData.paymentMethods);
           setReservations(reservationsData.items);
           setBillingReadyTables(billingStatusData.readyTableCodes);
+          setPrintRequests(billingStatusData.printRequests ?? []);
         } else {
           const [menuData, settingsData, layoutData, sessionsData, paymentMethodsData, reservationsData, billingStatusData] =
             await Promise.all([
@@ -300,6 +313,7 @@ function PosAppInner() {
           setPaymentMethods(paymentMethodsData.paymentMethods);
           setReservations(reservationsData.items);
           setBillingReadyTables(billingStatusData.readyTableCodes);
+          setPrintRequests(billingStatusData.printRequests ?? []);
         }
       } catch (err) {
         if (cancelled) return;
@@ -342,7 +356,10 @@ function PosAppInner() {
       // 会計待ちステータスも他端末 (キッチンモニター等) での「提供完了」操作で変わるため、
       // 同じ周期で更新する (2026-09-04 追加)。
       getTableBillingStatus()
-        .then(({ readyTableCodes }) => setBillingReadyTables(readyTableCodes))
+        .then(({ readyTableCodes, printRequests: nextPrintRequests }) => {
+          setBillingReadyTables(readyTableCodes);
+          setPrintRequests(nextPrintRequests ?? []);
+        })
         .catch(() => {
           /* ポーリング失敗時は次回まで前回値を表示し続ける */
         });
@@ -879,9 +896,30 @@ function PosAppInner() {
     setPaymentLines((prev) => prev.filter((l) => l.id !== id));
   }
 
-  async function completeOrder() {
+  // 「紙レシートでもらう」ボタン (2026-10-07 追加) は、支払いラインを画面に入力させず
+  // 現金一括払いとして会計を確定したいので、paymentLines state を経由せず明示的な
+  // 支払いライン配列を渡せるようにしてある (state 更新の非同期タイミングに依存しないため)。
+  async function completeOrder(
+    paymentsOverride?: {
+      method: string;
+      amount: number;
+      cashReceivedUsd?: number;
+      cashReceivedKhr?: number;
+      changeUsd?: number;
+      changeKhr?: number;
+    }[],
+  ) {
     if (!currentOrder || completing) return;
-    if (paymentLinesTotal < totals.total - 0.01) return;
+    const paymentsToSend = paymentsOverride ?? paymentLines.map((l) => ({
+      method: l.method,
+      amount: l.amount,
+      cashReceivedUsd: l.cashReceivedUsd,
+      cashReceivedKhr: l.cashReceivedKhr,
+      changeUsd: l.changeUsd,
+      changeKhr: l.changeKhr,
+    }));
+    const payTotal = paymentsToSend.reduce((s, p) => s + p.amount, 0);
+    if (payTotal < totals.total - 0.01) return;
     setCompleting(true);
     setCompleteError(null);
     try {
@@ -892,14 +930,7 @@ function PosAppInner() {
         couponDiscount: totals.couponDiscount,
         orderDiscount: totals.orderDiscount,
         total: totals.total,
-        payments: paymentLines.map((l) => ({
-          method: l.method,
-          amount: l.amount,
-          cashReceivedUsd: l.cashReceivedUsd,
-          cashReceivedKhr: l.cashReceivedKhr,
-          changeUsd: l.changeUsd,
-          changeKhr: l.changeKhr,
-        })),
+        payments: paymentsToSend,
       });
       setCompletedReceiptToken(completedToken);
       // レシートの印刷キューへ (プリンター未設定の店舗では静かに何もしない)。会計完了自体は
@@ -907,7 +938,7 @@ function PosAppInner() {
       // 用紙幅・ヘッダー/フッター文言・ロゴはサーバー側でプリンターごとに当てはめるよう
       // 変更したため、生データだけ渡す)。
       const snapshotItems = confirmedItems.map((it) => ({ name: it.menu_name, qty: it.qty, lineTotal: it.line_total }));
-      const snapshotPayments = paymentLines.map((l) => ({ method: l.method, amount: l.amount }));
+      const snapshotPayments = paymentsToSend.map((l) => ({ method: l.method, amount: l.amount }));
       enqueueReceiptPrintJob({
         orderId: currentOrder.id,
         tableCode: selectedTable,
@@ -986,6 +1017,63 @@ function PosAppInner() {
       setQrPaymentError(err instanceof PosOrderOrdersApiError ? err.message : t('posApp.completeFailed'));
     } finally {
       setQrPaymentPending(false);
+    }
+  }
+
+  // 「紙レシートでもらう」(2026-10-07 追加。Tom「お客さんが紙で欲しいと言った場合」)。
+  // デジタルレシートQR同様、まだ支払いラインが無い状態でのみ出す並行の会計確定アクション。
+  // 現金一括払いとして会計を確定し、通常の現金会計と同じ印刷経路 (completeOrder 内の
+  // enqueueReceiptPrintJob → triggerPassPrntJobs) にそのまま乗せる。
+  function payWithPaperReceipt() {
+    if (!currentOrder || paperReceiptPending) return;
+    const cashMethod = paymentMethods.find((m) => m.isCash && m.enabled);
+    setPaperReceiptPending(true);
+    completeOrder([{ method: cashMethod?.name ?? '現金', amount: totals.total }]).finally(() => {
+      setPaperReceiptPending(false);
+    });
+  }
+
+  // レジ画面での紙レシート発行待ちバナー (2026-10-07 追加)。プリンターがPassPRNT (レジ端末と
+  // Bluetoothペアリング) のため、ハンディ自身は印刷命令を送れない。ハンディの
+  // 「紙レシートでもらう」(request-paper-receipt) は現金会計確定までをサーバー側で済ませ、
+  // print_requested_at を立てるだけなので、ここ (レジ画面、印刷命令を送れる端末) で
+  // スタッフが1タップして実際に送信する。/api/receipt/[token] から明細・金額を取得し、
+  // 通常の会計完了と同じ enqueueReceiptPrintJob → triggerPassPrntJobs に乗せる。
+  async function printRequestedReceipt(req: { orderId: string; code: string; token: string }) {
+    if (printingOrderId) return;
+    setPrintingOrderId(req.orderId);
+    try {
+      const snapshot = await getReceiptSnapshot(req.token);
+      const result = await enqueueReceiptPrintJob({
+        orderId: req.orderId,
+        tableCode: req.code,
+        items: snapshot.items.map((it) => ({ name: it.name, qty: it.qty, lineTotal: it.lineTotal })),
+        subtotal: snapshot.order.subtotal,
+        vat: snapshot.order.vat,
+        vatRate: settings.vatRate,
+        vatInclusive: settings.vatInclusive,
+        service: snapshot.order.service,
+        serviceRate: settings.serviceRate,
+        couponDiscount: snapshot.order.couponDiscount,
+        orderDiscount: snapshot.order.orderDiscount,
+        total: snapshot.order.total,
+        payments: snapshot.paymentMethod ? [{ method: snapshot.paymentMethod, amount: snapshot.order.total }] : [],
+      });
+      triggerPassPrntJobs(result);
+      await markOrderPrinted(req.orderId).catch(() => {
+        /* フラグが残っても次にまたタップできるだけなので致命的ではない */
+      });
+      setPrintRequests((prev) => prev.filter((p) => p.orderId !== req.orderId));
+      // 会計はハンディ側で既に完了しているので、この卓の滞在セッションもここで畳む
+      // (次のポーリングを待たない)。
+      setTableSessions((prev) => prev.filter((s) => s.table_code !== req.code));
+      clearTableSession(req.code).catch(() => {
+        /* 反映失敗時は次回ポーリングで補正される */
+      });
+    } catch {
+      /* 失敗時はバナーを残し、次回タップでリトライできるようにする */
+    } finally {
+      setPrintingOrderId(null);
     }
   }
 
@@ -1356,6 +1444,8 @@ function PosAppInner() {
           onStartQrPayment={startQrPayment}
           qrPaymentPending={qrPaymentPending}
           qrPaymentError={qrPaymentError}
+          onPaperReceipt={payWithPaperReceipt}
+          paperReceiptPending={paperReceiptPending}
         />
       )}
 
@@ -1397,6 +1487,30 @@ function PosAppInner() {
           }}
           onConfirm={confirmOptionModal}
         />
+      )}
+
+      {/* 紙レシート発行待ちバナー (2026-10-07 追加)。ハンディで「紙レシートでもらう」が押された
+          卓を、画面に関係なく常に通知する (どのテーブルの通知かはお客様の位置次第で、今見ている
+          画面とは無関係なため)。 */}
+      {printRequests.length > 0 && (
+        <div className="fixed inset-x-0 top-0 z-50 flex flex-col gap-2 p-2.5">
+          {printRequests.map((req) => (
+            <button
+              key={req.orderId}
+              type="button"
+              onClick={() => printRequestedReceipt(req)}
+              disabled={printingOrderId === req.orderId}
+              className="flex items-center justify-between rounded-xl border-2 border-primary bg-card px-4 py-3 text-left shadow-lg disabled:opacity-60"
+            >
+              <span className="text-[13.5px] font-bold text-foreground">
+                {t('posApp.printRequestBanner', { table: req.code })}
+              </span>
+              <span className="ml-3 shrink-0 rounded-lg bg-primary px-3 py-1.5 text-[12.5px] font-bold text-primary-foreground">
+                {printingOrderId === req.orderId ? t('common.processing') : t('posApp.printRequestButton')}
+              </span>
+            </button>
+          ))}
+        </div>
       )}
     </div>
   );

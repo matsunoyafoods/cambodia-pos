@@ -21,6 +21,7 @@ import {
   enqueueKitchenPrintJob,
   getOpenOrder,
   getTableBillingStatus,
+  requestPaperReceipt,
   resetTable,
   triggerPassPrntJobs,
   updateConfirmedItemQty,
@@ -76,9 +77,13 @@ function HandyAppInner() {
   // デジタルレシートQRが表示できる卓 (2026-10-07 追加。レジ画面で「会計へ進む」が押され
   // begin-checkout でトークンが先行発行された卓、または既にQR決済フローでトークン発行済み
   // の卓)。卓コード → /receipt/{token} のトークンのマップ。
-  const [receiptTokenByTable, setReceiptTokenByTable] = useState<Record<string, string>>({});
+  const [receiptTokenByTable, setReceiptTokenByTable] = useState<Record<string, { token: string; orderId: string }>>({});
   const [qrModalToken, setQrModalToken] = useState<string | null>(null);
+  const [qrModalOrderId, setQrModalOrderId] = useState<string | null>(null);
   const [qrModalDataUrl, setQrModalDataUrl] = useState<string | null>(null);
+  // 「紙レシートでもらう」(2026-10-07 追加)。
+  const [paperReceiptPending, setPaperReceiptPending] = useState(false);
+  const [paperReceiptError, setPaperReceiptError] = useState<string | null>(null);
   const [dataLoading, setDataLoading] = useState(true);
   const [dataError, setDataError] = useState<string | null>(null);
   const [loadToken, setLoadToken] = useState(0);
@@ -125,7 +130,8 @@ function HandyAppInner() {
         // 止まり、卓選択・注文入力は通常どおり動く)。
         const billingStatusPromise = getTableBillingStatus().catch(() => ({
           readyTableCodes: [] as string[],
-          receiptTables: [] as { code: string; token: string }[],
+          receiptTables: [] as { code: string; token: string; orderId: string }[],
+          printRequests: [] as { orderId: string; code: string; token: string }[],
         }));
         if (menuSource === 'pos_native') {
           const [menuData, settingsData, layoutData, sessionsData, handyGroupsData, billingStatusData] = await Promise.all([
@@ -143,7 +149,7 @@ function HandyAppInner() {
           setLayoutItems(layoutData.items);
           setTableSessions(sessionsData.items);
           setHandyGroups(handyGroupsData.groups);
-          setReceiptTokenByTable(Object.fromEntries((billingStatusData.receiptTables ?? []).map((r) => [r.code, r.token])));
+          setReceiptTokenByTable(Object.fromEntries((billingStatusData.receiptTables ?? []).map((r) => [r.code, { token: r.token, orderId: r.orderId }])));
         } else {
           const [menuData, settingsData, layoutData, sessionsData, handyGroupsData, billingStatusData] = await Promise.all([
             getPosMenus(),
@@ -165,7 +171,7 @@ function HandyAppInner() {
           setLayoutItems(layoutData.items);
           setTableSessions(sessionsData.items);
           setHandyGroups(handyGroupsData.groups);
-          setReceiptTokenByTable(Object.fromEntries((billingStatusData.receiptTables ?? []).map((r) => [r.code, r.token])));
+          setReceiptTokenByTable(Object.fromEntries((billingStatusData.receiptTables ?? []).map((r) => [r.code, { token: r.token, orderId: r.orderId }])));
         }
       } catch (err) {
         if (cancelled) return;
@@ -198,7 +204,7 @@ function HandyAppInner() {
         .then(({ items }) => setTableSessions(items))
         .catch(() => {});
       getTableBillingStatus()
-        .then(({ receiptTables }) => setReceiptTokenByTable(Object.fromEntries((receiptTables ?? []).map((r) => [r.code, r.token]))))
+        .then(({ receiptTables }) => setReceiptTokenByTable(Object.fromEntries((receiptTables ?? []).map((r) => [r.code, { token: r.token, orderId: r.orderId }]))))
         .catch(() => {});
     }, 15000);
     return () => clearInterval(id);
@@ -216,12 +222,39 @@ function HandyAppInner() {
   // ハンディの卓タップ: デジタルレシートQRが表示できる卓 (会計へ進む済み) はQRモーダルを
   // 開き、それ以外はいつもどおり注文画面へ (2026-10-07 追加)。
   function handleSelectTable(code: string) {
-    const token = receiptTokenByTable[code];
-    if (token) {
-      setQrModalToken(token);
+    const entry = receiptTokenByTable[code];
+    if (entry) {
+      setPaperReceiptError(null);
+      setQrModalToken(entry.token);
+      setQrModalOrderId(entry.orderId);
       return;
     }
     selectTable(code);
+  }
+
+  function closeQrModal() {
+    setQrModalToken(null);
+    setQrModalOrderId(null);
+    setPaperReceiptError(null);
+  }
+
+  // 「紙レシートでもらう」(2026-10-07 追加。Tom「お客さんが紙で欲しいと言った場合」)。
+  // プリンターがPassPRNT (レジ端末とBluetoothペアリング) のため、ハンディ自身はプリンターに
+  // 印刷命令を送れない。ここでは現金会計の確定までをサーバー側で行い (request-paper-receipt)、
+  // 実際の印刷命令はレジ画面側がポーリングで検知してスタッフが1タップで送る
+  // (pos-app.tsx の printRequestedReceipt 参照)。
+  async function handlePaperReceipt() {
+    if (!qrModalOrderId || paperReceiptPending) return;
+    setPaperReceiptPending(true);
+    setPaperReceiptError(null);
+    try {
+      await requestPaperReceipt(qrModalOrderId);
+      closeQrModal();
+    } catch (err) {
+      setPaperReceiptError(err instanceof PosOrderOrdersApiError ? err.message : t('handyApp.paperReceiptError'));
+    } finally {
+      setPaperReceiptPending(false);
+    }
   }
 
   useEffect(() => {
@@ -620,7 +653,7 @@ function HandyAppInner() {
       {qrModalToken && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-          onClick={() => setQrModalToken(null)}
+          onClick={closeQrModal}
         >
           <div
             className="flex w-full max-w-[340px] flex-col items-center gap-4 rounded-2xl bg-card p-6"
@@ -632,8 +665,18 @@ function HandyAppInner() {
               // eslint-disable-next-line @next/next/no-img-element
               <img src={qrModalDataUrl} alt="Digital receipt QR" className="h-auto w-full max-w-[220px]" />
             )}
+            {paperReceiptError && <div className="text-center text-[12px] text-destructive">{paperReceiptError}</div>}
+            {/* 紙レシートでもらう (2026-10-07 追加)。お客様が紙を希望した場合、現金会計を
+                確定し、レジ画面に印刷してもらうよう伝える。 */}
             <button
-              onClick={() => setQrModalToken(null)}
+              onClick={handlePaperReceipt}
+              disabled={paperReceiptPending}
+              className="h-11 w-full rounded-xl border-2 border-primary text-[14px] font-bold text-primary disabled:opacity-60"
+            >
+              {paperReceiptPending ? t('common.processing') : t('checkout.paperReceiptButton')}
+            </button>
+            <button
+              onClick={closeQrModal}
               className="h-11 w-full rounded-xl bg-primary text-[14px] font-bold text-primary-foreground"
             >
               {t('handyApp.receiptQrClose')}
