@@ -60,3 +60,44 @@ export async function notifyReservationCreated(r: ReservationNotifyInput): Promi
     // 通知失敗は予約自体の成功を妨げない (Vercelのランタイムログには残る)。
   }
 }
+
+// スタッフからのフィードバック報告 (誤字・不具合、2026-10-07 追加)。
+// Tom「スタッフが誤字を見つけたらドックフーティングでAIに送信して修繕する」への対応。
+// 専用の新しいTelegram Bot/グループを想定 (予約通知と同じ自己完結パターン。matsunoya-dine
+// 側のブリッジは使わない)。環境変数 TELEGRAM_FEEDBACK_BOT_TOKEN / TELEGRAM_FEEDBACK_CHAT_ID
+// が未設定の間は何もしない (設定漏れをエラーにしない、予約通知と同じ方針)。
+// Tomが新しくBotを作らず予約Botを使い回したい場合は、TELEGRAM_FEEDBACK_BOT_TOKEN に
+// TELEGRAM_RESERVATION_BOT_TOKEN と同じ値を設定し、グループだけ新しく作って
+// TELEGRAM_FEEDBACK_CHAT_ID にそのchat_idを設定すればよい。
+
+export type FeedbackNotifyInput = {
+  message: string;
+  pagePath: string | null;
+  staffName: string;
+  storeName?: string;
+};
+
+export async function notifyFeedbackReport(r: FeedbackNotifyInput): Promise<void> {
+  const token = process.env.TELEGRAM_FEEDBACK_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_FEEDBACK_CHAT_ID;
+  if (!token || !chatId) return;
+
+  const lines = [
+    '🐛 スタッフからのフィードバック',
+    r.storeName ? `店舗: ${r.storeName}` : null,
+    `報告者: ${r.staffName}`,
+    r.pagePath ? `画面: ${r.pagePath}` : null,
+    '',
+    r.message,
+  ].filter((line): line is string => line !== null);
+
+  try {
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text: lines.join('\n') }),
+    });
+  } catch {
+    // 通知失敗はフィードバック送信自体の成功を妨げない。
+  }
+}

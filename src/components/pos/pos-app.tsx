@@ -1360,6 +1360,12 @@ function PosAppInner() {
                     {t('posApp.menuInsights')}
                   </button>
                   <button
+                    onClick={() => router.push('/pos/advisor')}
+                    className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary"
+                  >
+                    {t('posApp.menuAdvisor')}
+                  </button>
+                  <button
                     onClick={() => router.push('/pos/sales-report')}
                     className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary"
                   >

@@ -68,6 +68,7 @@ function PosNativeOnlyNotice() {
 
 function InsightsPanel() {
   const { t, lang } = useLanguage();
+  const router = useRouter();
   const [from, setFrom] = useState(() => todayIso().slice(0, 8) + '01');
   const [to, setTo] = useState(todayIso());
   const [loading, setLoading] = useState(false);
@@ -161,6 +162,13 @@ function InsightsPanel() {
               })}
             </div>
           </div>
+
+          <button
+            onClick={() => router.push('/pos/advisor')}
+            className="self-start rounded-lg border border-primary/40 bg-primary/5 px-4 py-2.5 text-[13px] font-semibold text-primary"
+          >
+            {t('insights.consultAiLink')}
+          </button>
         </div>
       )}
     </div>
