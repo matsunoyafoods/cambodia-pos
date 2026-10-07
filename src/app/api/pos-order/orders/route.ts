@@ -36,7 +36,10 @@ export async function GET(req: Request) {
     .select(orderSelect)
     .eq('store_id', storeId)
     .eq('table_code', tableCode)
-    .eq('status', 'open')
+    // 'awaiting_payment' (QR+ABA決済待ち。2026-10-06 追加) もこの卓の「現在進行中の注文」
+    // として扱う。'open' だけで検索すると、QR決済待ち中にこのGETが呼ばれた際に
+    // order: null が返り、POSTで卓に対して新規の空注文が重複作成されてしまうバグになる。
+    .in('status', ['open', 'awaiting_payment'])
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -82,7 +85,8 @@ export async function POST(req: Request) {
     .select(orderSelect)
     .eq('store_id', storeId)
     .eq('table_code', tableCode)
-    .eq('status', 'open')
+    // 'awaiting_payment' もこの卓の既存注文として扱う (理由は上のGETと同じ)。
+    .in('status', ['open', 'awaiting_payment'])
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();

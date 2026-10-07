@@ -23,6 +23,7 @@ import {
   PosOrderApiError,
 } from '@/lib/pos-order-client';
 import {
+  checkoutWithQr,
   completeOrderPayment,
   confirmOrderItems,
   createOpenOrder,
@@ -62,6 +63,7 @@ import { useStaff } from './staff-context';
 import { TableMapScreen, type TableReservationBadge } from './table-map-screen';
 import { OrderScreen } from './order-screen';
 import { CheckoutScreen } from './checkout-screen';
+import { QrPaymentModal } from './qr-payment-modal';
 import { ReceiptScreen } from './receipt-screen';
 import { OptionModal, type ModalSelection } from './option-modal';
 import { GuestDemographicsModal } from './guest-demographics-modal';
@@ -199,6 +201,10 @@ function PosAppInner() {
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [completing, setCompleting] = useState(false);
   const [completeError, setCompleteError] = useState<string | null>(null);
+  // QR+ABA決済フロー (2026-10-06 追加)。qrPaymentToken が非nullの間、QRモーダルを表示する。
+  const [qrPaymentPending, setQrPaymentPending] = useState(false);
+  const [qrPaymentError, setQrPaymentError] = useState<string | null>(null);
+  const [qrPaymentToken, setQrPaymentToken] = useState<string | null>(null);
 
   // pos_native モード: レジ画面タブの並び順はサーバーが返す大カテゴリーの sort_order 順
   // (setPosNativeCategoryOrder、設定画面から自由に並び替え可能 2026-08-31) をそのまま使う。
@@ -945,6 +951,29 @@ function PosAppInner() {
     }
   }
 
+  // QR+ABA決済フロー (2026-10-06 追加)。会計確定(金額ロック)だけ行い、支払いはまだ
+  // 完了していない。既存の completeOrder (現金・カード等) とは別の、並行する会計確定経路。
+  async function startQrPayment() {
+    if (!currentOrder || qrPaymentPending) return;
+    setQrPaymentPending(true);
+    setQrPaymentError(null);
+    try {
+      const { token } = await checkoutWithQr(currentOrder.id, {
+        subtotal: totals.subtotal,
+        vat: totals.vat,
+        service: totals.service,
+        couponDiscount: totals.couponDiscount,
+        orderDiscount: totals.orderDiscount,
+        total: totals.total,
+      });
+      setQrPaymentToken(token);
+    } catch (err) {
+      setQrPaymentError(err instanceof PosOrderOrdersApiError ? err.message : t('posApp.completeFailed'));
+    } finally {
+      setQrPaymentPending(false);
+    }
+  }
+
   // テーブルリセット: 会計せずに、間違えて選択・注文した卓を空席へ戻す (2026-08-31 追加)。
   // 開いている伝票は void 扱いになり、この端末のカート・確定済み品目もすべて破棄される。
   // 取り消せない操作なので window.confirm で必ず確認する (order-screen.tsx の削除確認と同じ方針)。
@@ -1308,8 +1337,13 @@ function PosAppInner() {
           onComplete={completeOrder}
           completing={completing}
           completeError={completeError}
+          onStartQrPayment={startQrPayment}
+          qrPaymentPending={qrPaymentPending}
+          qrPaymentError={qrPaymentError}
         />
       )}
+
+      {qrPaymentToken && <QrPaymentModal token={qrPaymentToken} onClose={() => setQrPaymentToken(null)} />}
 
       {screen === 'receipt' && (
         <ReceiptScreen

@@ -46,7 +46,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export type OpenOrderRecord = {
   id: string;
   table_code: string;
-  status: 'open' | 'paid' | 'void';
+  // 'awaiting_payment' = QR+ABA決済待ち (2026-10-06 追加。checkout-qr/route.ts 参照)。
+  status: 'open' | 'awaiting_payment' | 'paid' | 'void';
   guest_ethnicity: GuestEthnicity;
   guest_kids_count: number;
   guest_recorded_at: string | null;
@@ -115,6 +116,22 @@ export function confirmOrderItems(
       }),
     }),
   });
+}
+
+// QR+ABA決済フローの会計確定 (2026-10-06 追加)。/complete と違い payments を渡さない —
+// この時点では支払いはまだ完了していない。戻り値のtokenで /receipt/{token} のQRを生成する。
+export function checkoutWithQr(
+  orderId: string,
+  input: {
+    subtotal: number;
+    vat: number;
+    service: number;
+    couponDiscount: number;
+    orderDiscount: number;
+    total: number;
+  },
+): Promise<{ token: string }> {
+  return request(`/api/pos-order/orders/${orderId}/checkout-qr`, { method: 'POST', body: JSON.stringify(input) });
 }
 
 // 分割払い ($10 ABA + $10 現金) や割り勘 (人数で分けて個別に会計) に対応するため、payments を

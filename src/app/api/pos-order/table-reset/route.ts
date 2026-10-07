@@ -33,7 +33,9 @@ export async function POST(req: Request) {
     .select('id')
     .eq('store_id', storeId)
     .eq('table_code', tableCode)
-    .eq('status', 'open')
+    // 'awaiting_payment' (QR+ABA決済待ち。2026-10-06 追加) もリセット対象に含める。
+    // 客がQR決済を開始せず/失敗して席を離れた卓を、スタッフがリセットできるようにするため。
+    .in('status', ['open', 'awaiting_payment'])
     .maybeSingle();
   if (openOrderError) return NextResponse.json({ error: openOrderError.message }, { status: 500 });
 

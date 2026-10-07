@@ -145,6 +145,9 @@ export function CheckoutScreen({
   onComplete,
   completing,
   completeError,
+  onStartQrPayment,
+  qrPaymentPending,
+  qrPaymentError,
 }: {
   selectedTable: string | null;
   confirmedItems: OrderItemRecord[];
@@ -168,6 +171,12 @@ export function CheckoutScreen({
   onComplete: () => void;
   completing: boolean;
   completeError: string | null;
+  /** QR+ABA決済フロー (2026-10-06 追加)。現金・カード等の既存支払いラインが無い (まだ何も
+   * 支払いを受け取っていない) 時だけ選べる — 一部だけ現金で受け取った後にQR決済に切り替える、
+   * という中途半端な状態を作らないため。 */
+  onStartQrPayment: () => void;
+  qrPaymentPending: boolean;
+  qrPaymentError: string | null;
 }) {
   const { t } = useLanguage();
   // 分割払い・割り勘: 「残り」= 合計 - すでに追加された支払いラインの合計。0 (端数誤差込み) に
@@ -609,6 +618,20 @@ export function CheckoutScreen({
         )}
 
         {completeError && <div className="text-[12px] text-destructive">{completeError}</div>}
+        {qrPaymentError && <div className="text-[12px] text-destructive">{qrPaymentError}</div>}
+
+        {/* QR+ABA決済 (2026-10-06 追加)。まだ支払いラインが無い (=現金等で一部も受け取って
+            いない) 状態でのみ出す。会計確定ボタンとは別の、並行する会計確定アクション。 */}
+        {paymentLines.length === 0 && allServed && (
+          <button
+            onClick={onStartQrPayment}
+            disabled={qrPaymentPending}
+            className="h-12 rounded-xl border-2 border-primary text-[14px] font-bold text-primary disabled:opacity-60"
+          >
+            {qrPaymentPending ? t('common.processing') : t('checkout.qrPaymentButton')}
+          </button>
+        )}
+
         <button
           onClick={onComplete}
           disabled={completing || !remainingSettled || !allServed}
