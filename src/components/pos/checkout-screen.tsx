@@ -179,9 +179,10 @@ export function CheckoutScreen({
   onStartQrPayment: () => void;
   qrPaymentPending: boolean;
   qrPaymentError: string | null;
-  /** 「紙レシートでもらう」(2026-10-07 追加)。現金一括払いとして会計を即確定し、通常の
-   * 現金会計と同じ印刷経路に乗せる。QR決済ボタンと同じく、まだ支払いラインが無い時だけ選べる。 */
-  onPaperReceipt: () => void;
+  /** 「紙レシートでもらう」(2026-10-07 追加)。選択中の決済方法で一括払いとして会計を即確定し、
+   * 通常会計と同じ印刷経路に乗せる。QR決済ボタンと同じく、まだ支払いラインが無い時だけ選べる。
+   * 2026-10-17: 選択中の決済方法名を渡すようにした (以前は常に現金扱いで記録していた)。 */
+  onPaperReceipt: (methodName: string) => void;
   paperReceiptPending: boolean;
 }) {
   const { t } = useLanguage();
@@ -638,14 +639,20 @@ export function CheckoutScreen({
           </button>
         )}
 
-        {/* 紙レシートでもらう (2026-10-07 追加。Tom「お客さんが紙で欲しいと言った場合」) */}
+        {/* 紙レシートでもらう (2026-10-07 追加。Tom「お客さんが紙で欲しいと言った場合」)。
+            2026-10-17: 選択中の決済方法で記録するようにし、ボタン文言にも方法名を出して
+            スタッフが「どの方法で確定されるか」を見て選べるようにした。 */}
         {paymentLines.length === 0 && allServed && (
           <button
-            onClick={onPaperReceipt}
-            disabled={paperReceiptPending}
+            onClick={() => selectedMethod && onPaperReceipt(selectedMethod.name)}
+            disabled={paperReceiptPending || !selectedMethod}
             className="h-12 rounded-xl border-2 border-border text-[14px] font-bold text-foreground disabled:opacity-60"
           >
-            {paperReceiptPending ? t('common.processing') : t('checkout.paperReceiptButton')}
+            {paperReceiptPending
+              ? t('common.processing')
+              : selectedMethod
+                ? t('checkout.paperReceiptButtonWithMethod', { method: selectedMethod.name })
+                : t('checkout.paperReceiptButton')}
           </button>
         )}
 

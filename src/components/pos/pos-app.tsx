@@ -1040,13 +1040,19 @@ function PosAppInner() {
 
   // 「紙レシートでもらう」(2026-10-07 追加。Tom「お客さんが紙で欲しいと言った場合」)。
   // デジタルレシートQR同様、まだ支払いラインが無い状態でのみ出す並行の会計確定アクション。
-  // 現金一括払いとして会計を確定し、通常の現金会計と同じ印刷経路 (completeOrder 内の
+  // 一括払いとして会計を確定し、通常会計と同じ印刷経路 (completeOrder 内の
   // enqueueReceiptPrintJob → triggerPassPrntJobs) にそのまま乗せる。
-  function payWithPaperReceipt() {
+  //
+  // 2026-10-17 修正: 当初は常に現金固定で記録していたため、スタッフが決済方法セレクタで
+  // QR・PPCBank等を選んでいても、このボタンで確定すると強制的にCash扱いになってしまい、
+  // レジ締めレポートの決済方法別内訳が実態と合わなくなっていた (Tom「すべてキャッシュに
+  // なっています」)。checkout-screen.tsx 側で選択中の決済方法名を渡すようにし、それを
+  // そのまま使う (未選択時のみ現金にフォールバック)。
+  function payWithPaperReceipt(methodName: string) {
     if (!currentOrder || paperReceiptPending) return;
     const cashMethod = paymentMethods.find((m) => m.isCash && m.enabled);
     setPaperReceiptPending(true);
-    completeOrder([{ method: cashMethod?.name ?? '現金', amount: totals.total }]).finally(() => {
+    completeOrder([{ method: methodName || cashMethod?.name || '現金', amount: totals.total }]).finally(() => {
       setPaperReceiptPending(false);
     });
   }

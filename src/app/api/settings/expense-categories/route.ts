@@ -30,6 +30,9 @@ export const GET = withPosStaff('part_time', async () => {
 const postSchema = z.object({ name: z.string().trim().min(1).max(160) });
 
 // 追加。manager 以上のみ。
+// 2026-10-17 追加: 大文字小文字・前後の空白違いだけの重複登録を防ぐ (Tom「ingredientsが
+// 2個あって複雑になっている」。同じ費目を2回登録してしまい、入力時にどちらを選べば
+// いいか分からなくなっていた事例への再発防止)。
 export const POST = withPosStaff('manager', async (_session, req) => {
   const json = await req.json().catch(() => null);
   const parsed = postSchema.safeParse(json);
@@ -39,14 +42,20 @@ export const POST = withPosStaff('manager', async (_session, req) => {
   const supabase = createPosAdminClient();
   const storeId = getPosStoreId();
 
-  const { data: existing, error: countError } = await supabase
+  const { data: existingAll, error: existingError } = await supabase
     .from('expense_categories')
-    .select('sort_order')
+    .select('id, name, sort_order')
     .eq('store_id', storeId)
-    .order('sort_order', { ascending: false })
-    .limit(1);
-  if (countError) return NextResponse.json({ error: countError.message }, { status: 500 });
-  const nextSortOrder = existing && existing.length > 0 ? existing[0].sort_order + 1 : 0;
+    .order('sort_order', { ascending: false });
+  if (existingError) return NextResponse.json({ error: existingError.message }, { status: 500 });
+
+  const normalizedNew = parsed.data.name.toLowerCase();
+  const duplicate = (existingAll ?? []).find((c) => c.name.trim().toLowerCase() === normalizedNew);
+  if (duplicate) {
+    return NextResponse.json({ error: `「${duplicate.name}」は既に登録されています` }, { status: 409 });
+  }
+
+  const nextSortOrder = existingAll && existingAll.length > 0 ? existingAll[0].sort_order + 1 : 0;
 
   const { data, error } = await supabase
     .from('expense_categories')

@@ -8,17 +8,26 @@ import {
   getTableSalesReport,
   getVoidHistory,
   voidOrder,
+  updateOrderPaymentMethod,
   PosSalesReportApiError,
   type DailySales,
   type TableSalesReport,
   type VoidHistory,
 } from '@/lib/sales-report-client';
+import { listPaymentMethods, PosPrinterApiError } from '@/lib/printer-client';
+import type { PaymentMethodConfig } from '@/lib/pos-types';
 import { downloadCsv } from '@/lib/csv-export';
 import { LanguageProvider, useLanguage, STAFF_LANGUAGE_STORAGE_KEY } from './language-context';
 
 // 売上レポート画面 (2026-09-02 追加)。Tom「月間日々売上・日々のテーブルごとの詳細（金額、
 // 国籍、人数、単価）が出るようにしてダウンロードできるように」への対応。AI分析 (/pos/insights)
 // とは別画面として新設した (Tom確認済み)。owner/manager限定 (店舗の売上が見える情報のため)。
+//
+// 決済方法別合計 + 会計ごとの決済方法表示・修正 (2026-10-17 追加)。Tom「売上レポートに
+// 支払い別の合計を出してほしいです。会計履歴になにで決済したかもわかるようにしてください。
+// これを遡ってスタッフが支払い方法を編集できますか？」への対応。「紙レシートでもらう」が
+// 選択中の決済方法を無視して常に現金記録していた設計バグ (pos-app.tsx で別途修正) により
+// 既に記録されてしまった過去の会計を、ここから修正できるようにする。
 
 function currentMonth() {
   return new Date().toISOString().slice(0, 7);
@@ -85,6 +94,8 @@ function SalesReportPanel() {
   const [error, setError] = useState<string | null>(null);
   // 会計取消 (2026-09-20 追加)。取消対象の orderId を保持している間だけ確認モーダルを表示する。
   const [voidTarget, setVoidTarget] = useState<string | null>(null);
+  // 決済方法の遡及修正 (2026-10-17 追加)。修正対象の orderId を保持している間だけモーダルを表示する。
+  const [paymentMethodEditTarget, setPaymentMethodEditTarget] = useState<string | null>(null);
 
   const reload = useCallback(() => {
     let cancelled = false;
@@ -156,7 +167,15 @@ function SalesReportPanel() {
     if (!tables || tables.rows.length === 0) return;
     downloadCsv(
       `${t('salesReport.tablesCsvFilename')}_${month}`,
-      [t('salesReport.csvDate'), t('salesReport.csvTable'), t('salesReport.csvAmountUsd'), t('salesReport.csvEthnicity'), t('salesReport.csvPartySize'), t('salesReport.csvUnitPriceUsd')],
+      [
+        t('salesReport.csvDate'),
+        t('salesReport.csvTable'),
+        t('salesReport.csvAmountUsd'),
+        t('salesReport.csvEthnicity'),
+        t('salesReport.csvPartySize'),
+        t('salesReport.csvUnitPriceUsd'),
+        t('salesReport.csvPaymentMethod'),
+      ],
       tables.rows.map((r) => [
         r.date,
         r.tableCode,
@@ -164,6 +183,7 @@ function SalesReportPanel() {
         r.ethnicity.map((e) => `${e.label}${e.count}`).join(' / '),
         r.partySize,
         r.unitPrice != null ? r.unitPrice.toFixed(2) : '',
+        r.paymentMethods.join(' + ') || t('salesReport.notRecorded'),
       ]),
     );
   }
@@ -261,6 +281,17 @@ function SalesReportPanel() {
         </div>
       )}
 
+      {tables && !loading && tables.paymentMethodTotals.length > 0 && (
+        <div className="rounded-xl border border-border bg-card p-5">
+          <div className="mb-3 text-[13.5px] font-semibold">{t('salesReport.paymentMethodTotalsTitle')}</div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {tables.paymentMethodTotals.map((pm) => (
+              <Stat key={pm.method} label={pm.method} value={`$${pm.total.toFixed(2)}`} />
+            ))}
+          </div>
+        </div>
+      )}
+
       {tables && !loading && (
         <div className="rounded-xl border border-border bg-card p-5">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2.5">
@@ -287,6 +318,7 @@ function SalesReportPanel() {
                     <th className="px-3 py-2 text-left font-semibold">{t('salesReport.csvEthnicity')}</th>
                     <th className="px-3 py-2 text-right font-semibold">{t('salesReport.csvPartySize')}</th>
                     <th className="px-3 py-2 text-right font-semibold">{t('salesReport.unitPriceColumn')}</th>
+                    <th className="px-3 py-2 text-left font-semibold">{t('salesReport.paymentMethodColumn')}</th>
                     <th className="px-3 py-2 text-right font-semibold">{t('salesReport.voidActionColumn')}</th>
                   </tr>
                 </thead>
@@ -299,6 +331,20 @@ function SalesReportPanel() {
                       <td className="px-3 py-2">{r.ethnicity.length > 0 ? r.ethnicity.map((e) => `${e.label}${e.count}`).join(' / ') : t('salesReport.notRecorded')}</td>
                       <td className="px-3 py-2 text-right">{r.partySize}</td>
                       <td className="px-3 py-2 text-right">{r.unitPrice != null ? `$${r.unitPrice.toFixed(2)}` : '-'}</td>
+                      <td className="px-3 py-2">
+                        <div className="flex items-center gap-1.5">
+                          <span>{r.paymentMethods.length > 0 ? r.paymentMethods.join(' + ') : t('salesReport.notRecorded')}</span>
+                          {r.paymentMethodEditable && (
+                            <button
+                              onClick={() => setPaymentMethodEditTarget(r.orderId)}
+                              className="h-6 rounded-md border border-border px-1.5 text-[11px] font-semibold text-muted-foreground hover:bg-secondary"
+                              title={t('salesReport.paymentMethodEditButton')}
+                            >
+                              {t('salesReport.paymentMethodEditButton')}
+                            </button>
+                          )}
+                        </div>
+                      </td>
                       <td className="px-3 py-2 text-right">
                         <button
                           onClick={() => setVoidTarget(r.orderId)}
@@ -352,6 +398,14 @@ function SalesReportPanel() {
       )}
 
       {voidTarget && <VoidOrderModal orderId={voidTarget} onClose={() => setVoidTarget(null)} onVoided={reload} />}
+      {paymentMethodEditTarget && (
+        <PaymentMethodEditModal
+          orderId={paymentMethodEditTarget}
+          currentMethod={tables?.rows.find((r) => r.orderId === paymentMethodEditTarget)?.paymentMethods[0] ?? ''}
+          onClose={() => setPaymentMethodEditTarget(null)}
+          onSaved={reload}
+        />
+      )}
     </div>
   );
 }
@@ -400,6 +454,102 @@ function VoidOrderModal({ orderId, onClose, onVoided }: { orderId: string; onClo
             className="h-9 rounded-lg bg-destructive px-3.5 text-[13px] font-bold text-destructive-foreground disabled:opacity-60"
           >
             {submitting ? t('salesReport.voidSubmitting') : t('salesReport.voidConfirmButton')}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 決済方法の遡及修正モーダル (2026-10-17 追加)。支払いラインがちょうど1本の会計のみ対象
+// (/api/orders/[id]/payment-method 参照)。店舗設定の決済方法一覧 (有効なもの) から選び直す。
+function PaymentMethodEditModal({
+  orderId,
+  currentMethod,
+  onClose,
+  onSaved,
+}: {
+  orderId: string;
+  currentMethod: string;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const { t } = useLanguage();
+  const [methods, setMethods] = useState<PaymentMethodConfig[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [selected, setSelected] = useState(currentMethod);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    listPaymentMethods()
+      .then((list) => {
+        if (cancelled) return;
+        const enabled = list.filter((m) => m.enabled).sort((a, b) => a.sortOrder - b.sortOrder);
+        setMethods(enabled);
+        if (!enabled.some((m) => m.name === currentMethod) && enabled.length > 0) {
+          setSelected(enabled[0].name);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) setLoadError(err instanceof PosPrinterApiError ? err.message : t('salesReport.paymentMethodLoadError'));
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function handleSave() {
+    if (!selected || selected === currentMethod) {
+      onClose();
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    try {
+      await updateOrderPaymentMethod(orderId, selected);
+      onSaved();
+      onClose();
+    } catch (err) {
+      setError(err instanceof PosSalesReportApiError ? err.message : t('salesReport.paymentMethodSaveError'));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div className="w-full max-w-[380px] rounded-xl bg-card p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-2 text-[15px] font-bold">{t('salesReport.paymentMethodEditTitle')}</div>
+        <p className="mb-4 text-[12.5px] leading-relaxed text-muted-foreground">{t('salesReport.paymentMethodEditBody', { current: currentMethod || t('salesReport.notRecorded') })}</p>
+        {loadError && <div className="mb-3 text-[12.5px] text-destructive">{loadError}</div>}
+        <div className="mb-4 flex flex-col gap-1.5">
+          {methods.map((m) => (
+            <button
+              key={m.id}
+              onClick={() => setSelected(m.name)}
+              className={
+                'h-10 rounded-lg border-2 px-3 text-left text-[13px] font-semibold ' +
+                (selected === m.name ? 'border-primary bg-primary/5 text-primary' : 'border-border text-foreground')
+              }
+            >
+              {m.name}
+            </button>
+          ))}
+        </div>
+        {error && <div className="mb-3 text-[12.5px] text-destructive">{error}</div>}
+        <div className="flex justify-end gap-2.5">
+          <button onClick={onClose} disabled={submitting} className="h-9 rounded-lg border border-border px-3.5 text-[13px] font-semibold disabled:opacity-60">
+            {t('common.cancel')}
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={submitting || !selected}
+            className="h-9 rounded-lg bg-primary px-3.5 text-[13px] font-bold text-primary-foreground disabled:opacity-60"
+          >
+            {submitting ? t('salesReport.paymentMethodSaving') : t('salesReport.paymentMethodSaveButton')}
           </button>
         </div>
       </div>

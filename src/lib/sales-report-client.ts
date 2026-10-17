@@ -86,15 +86,32 @@ export type TableSaleRow = {
   kidsCount: number;
   partySize: number;
   unitPrice: number | null;
+  /** 決済方法名 (通常1件。分割払いの場合は複数件になる) (2026-10-17 追加) */
+  paymentMethods: string[];
+  /** 支払いラインがちょうど1本で、決済方法を修正できる会計かどうか (2026-10-17 追加) */
+  paymentMethodEditable: boolean;
 };
+
+export type PaymentMethodTotal = { method: string; total: number };
 
 export type TableSalesReport = {
   month: string;
   rows: TableSaleRow[];
+  /** 月間の決済方法別合計 (2026-10-17 追加。Tom「売上レポートに支払い別の合計を出して
+   * ほしいです」への対応) */
+  paymentMethodTotals: PaymentMethodTotal[];
 };
 
 export function getTableSalesReport(month: string): Promise<TableSalesReport> {
   return request(`/api/sales-report/tables?month=${encodeURIComponent(month)}`);
+}
+
+// 決済方法の遡及修正 (2026-10-17 追加)。
+export function updateOrderPaymentMethod(orderId: string, method: string): Promise<{ ok: true; method: string }> {
+  return request(`/api/orders/${encodeURIComponent(orderId)}/payment-method`, {
+    method: 'PATCH',
+    body: JSON.stringify({ method }),
+  });
 }
 
 // 会計取消 (2026-09-20 追加)。Tom「会計を間違えて後から訂正する」への対応。

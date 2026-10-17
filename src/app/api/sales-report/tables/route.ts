@@ -10,6 +10,12 @@ import { ETHNICITY_KEYS, ETHNICITY_LABELS, type EthnicityKey } from '@/lib/pos-t
 // 国籍・人数は §0.1d の客層記録 (pos.orders.guest_ethnicity / guest_kids_count、会計時に記録)
 // をそのまま使う。人数 = 国籍内訳の合計 + 子供人数。単価 = 会計金額 ÷ 人数 (人数0件・未記録の
 // 場合は算出不能として null を返す)。
+//
+// 決済方法列 + 月間の決済方法別合計 (2026-10-17 追加)。Tom「売上レポートに支払い別の
+// 合計を出してほしいです。会計履歴になにで決済したかもわかるようにしてください」への対応。
+// pos.payments を order_id でまとめて取得し、各行に paymentMethods (支払いラインの決済方法名、
+// 通常1件・分割時は複数) を付ける。editable は支払いラインがちょうど1本の時だけ true にし、
+// 画面側はそれを見て修正ボタンを出し分ける (/api/orders/[id]/payment-method 参照)。
 
 const PHNOM_PENH_TZ = 'Asia/Phnom_Penh';
 
@@ -34,6 +40,8 @@ type OrderRow = {
   guest_kids_count: number | null;
 };
 
+type PaymentRow = { order_id: string; method: string; amount: number };
+
 // GET /api/sales-report/tables?month=YYYY-MM : 指定月の会計 (卓) 別明細。manager以上限定。
 export const GET = withPosStaff('manager', async (_session, req) => {
   const url = new URL(req.url);
@@ -56,12 +64,28 @@ export const GET = withPosStaff('manager', async (_session, req) => {
     .order('paid_at', { ascending: true });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  const rows = (data as OrderRow[] | null ?? []).map((row) => {
+  const orderRows = (data as OrderRow[] | null) ?? [];
+  const orderIds = orderRows.map((o) => o.id);
+  const paymentsByOrder = new Map<string, PaymentRow[]>();
+  const methodTotals = new Map<string, number>();
+  if (orderIds.length > 0) {
+    const { data: payments, error: paymentsError } = await supabase.from('payments').select('order_id, method, amount').in('order_id', orderIds);
+    if (paymentsError) return NextResponse.json({ error: paymentsError.message }, { status: 500 });
+    for (const p of (payments as PaymentRow[] | null) ?? []) {
+      const list = paymentsByOrder.get(p.order_id) ?? [];
+      list.push(p);
+      paymentsByOrder.set(p.order_id, list);
+      methodTotals.set(p.method, (methodTotals.get(p.method) ?? 0) + Number(p.amount));
+    }
+  }
+
+  const rows = orderRows.map((row) => {
     const ethnicity = row.guest_ethnicity ?? {};
     const ethnicityTotal = ETHNICITY_KEYS.reduce((sum, key) => sum + (ethnicity[key] ?? 0), 0);
     const kidsCount = row.guest_kids_count ?? 0;
     const partySize = ethnicityTotal + kidsCount;
     const total = Number(row.total);
+    const orderPayments = paymentsByOrder.get(row.id) ?? [];
     return {
       orderId: row.id,
       date: toPhnomPenhDate(row.paid_at),
@@ -71,8 +95,14 @@ export const GET = withPosStaff('manager', async (_session, req) => {
       kidsCount,
       partySize,
       unitPrice: partySize > 0 ? total / partySize : null,
+      paymentMethods: orderPayments.map((p) => p.method),
+      paymentMethodEditable: orderPayments.length === 1,
     };
   });
 
-  return NextResponse.json({ month, rows });
+  const paymentMethodTotals = Array.from(methodTotals.entries())
+    .map(([method, total]) => ({ method, total }))
+    .sort((a, b) => b.total - a.total);
+
+  return NextResponse.json({ month, rows, paymentMethodTotals });
 }, { deny: ['sub_manager'] });
