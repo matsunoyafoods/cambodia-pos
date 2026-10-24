@@ -155,6 +155,15 @@ export function settleExpense(id: string, paidFrom: ExpensePaidFrom): Promise<Ex
   return updateExpense(id, { paymentStatus: 'paid', paidFrom });
 }
 
+// 買掛のまとめ精算 (2026-10-24 追加)。ある仕入れ先への未払い分を1回の支払いでまとめて
+// 精算した時に使う。settleExpense (1件ずつ) とは別の一括APIを呼ぶ (POST /api/expenses/bulk-settle)。
+export async function bulkSettleExpenses(ids: string[], paidFrom: ExpensePaidFrom): Promise<{ settledCount: number; settled: ExpenseRecord[] }> {
+  return request<{ settledCount: number; settled: ExpenseRecord[] }>('/api/expenses/bulk-settle', {
+    method: 'POST',
+    body: JSON.stringify({ ids, paidFrom }),
+  });
+}
+
 export async function deleteExpense(id: string): Promise<void> {
   await request(`/api/expenses/${id}`, { method: 'DELETE' });
 }

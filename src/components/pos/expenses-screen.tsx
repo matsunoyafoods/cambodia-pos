@@ -15,6 +15,7 @@ import {
   listExpenseVendors,
   listExpenses,
   PosExpenseApiError,
+  bulkSettleExpenses,
   scanExpenseReceipt,
   settleExpense,
   updateExpense,
@@ -117,6 +118,9 @@ function ExpensesScreenInner() {
                 <>
                   <div className="print:hidden">
                     <CashBalanceCard refreshKey={refreshKey} onChanged={() => setRefreshKey((k) => k + 1)} />
+                  </div>
+                  <div className="print:hidden">
+                    <PayablesByVendorCard refreshKey={refreshKey} onChanged={() => setRefreshKey((k) => k + 1)} />
                   </div>
                   <ExpenseReport refreshKey={refreshKey} onChanged={() => setRefreshKey((k) => k + 1)} />
                   <div className="print:hidden">
@@ -653,6 +657,134 @@ function QuickEntryForm({
         >
           {submitting ? t('common.registering') : t('common.recordButton')}
         </button>
+      </div>
+    </div>
+  );
+}
+
+// 買掛サマリ (仕入れ先別) (2026-10-24 追加)。
+// Tom「現在買掛金額は合計しかわかりません。なので業者別でわかるようにしてください。そして
+// 支払いをしたらまとめて完了できるようにしてください」への対応。期間を問わず全ての未払い経費
+// (買掛) を仕入れ先ごとにグルーピングして合計を出し、1つの仕入れ先への支払いをまとめて
+// 精算できるようにする (1件ずつ ExpenseReport の「精算する」ボタンを押す必要がなくなる)。
+function PayablesByVendorCard({ refreshKey, onChanged }: { refreshKey: number; onChanged: () => void }) {
+  const { t } = useLanguage();
+  const [rows, setRows] = useState<ExpenseRecord[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [settlePaidFrom, setSettlePaidFrom] = useState<Record<string, ExpensePaidFrom>>({});
+  const [settlingKey, setSettlingKey] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    setError(null);
+    listExpenses({ status: 'unpaid' })
+      .then(setRows)
+      .catch((err) => setError(err instanceof PosExpenseApiError ? err.message : t('expenses.payablesLoadError')));
+  }, [t]);
+
+  useEffect(() => {
+    load();
+  }, [load, refreshKey]);
+
+  const groups = useMemo(() => {
+    const map = new Map<string, { key: string; label: string; total: number; items: ExpenseRecord[] }>();
+    for (const r of rows ?? []) {
+      const key = r.vendor?.trim() || '';
+      const g = map.get(key) ?? { key, label: key || t('expenses.payablesVendorUnset'), total: 0, items: [] };
+      g.total += r.amountUsd;
+      g.items.push(r);
+      map.set(key, g);
+    }
+    return Array.from(map.values()).sort((a, b) => b.total - a.total);
+  }, [rows, t]);
+
+  const grandTotal = useMemo(() => groups.reduce((sum, g) => sum + g.total, 0), [groups]);
+
+  async function handleSettleGroup(group: { key: string; label: string; total: number; items: ExpenseRecord[] }) {
+    const paidFrom = settlePaidFrom[group.key] ?? 'other';
+    const confirmed = confirm(
+      t('expenses.payablesSettleConfirm', { vendor: group.label, count: group.items.length, amount: group.total.toFixed(2) }),
+    );
+    if (!confirmed) return;
+    setSettlingKey(group.key);
+    setError(null);
+    try {
+      await bulkSettleExpenses(group.items.map((item) => item.id), paidFrom);
+      load();
+      onChanged();
+    } catch (err) {
+      setError(err instanceof PosExpenseApiError ? err.message : t('expenses.payablesSettleError'));
+    } finally {
+      setSettlingKey(null);
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-5">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2.5">
+        <div className="text-[13.5px] font-semibold">{t('expenses.payablesByVendorTitle')}</div>
+        {rows && (
+          <div className="text-[12.5px]">
+            {t('expenses.payablesTotalLabel')} <span className="font-semibold text-amber-600">${grandTotal.toFixed(2)}</span>
+          </div>
+        )}
+      </div>
+
+      {error && <div className="mb-2 text-[12.5px] text-destructive">{error}</div>}
+      {!rows && <div className="text-[12.5px] text-muted-foreground">{t('common.loadingEllipsis')}</div>}
+      {rows && groups.length === 0 && <div className="text-[12.5px] text-muted-foreground">{t('expenses.payablesNone')}</div>}
+
+      <div className="flex flex-col gap-2.5">
+        {groups.map((g) => {
+          const isOpen = !!expanded[g.key];
+          return (
+            <div key={g.key || '(none)'} className="rounded-lg border border-border px-3.5 py-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="text-[13px]">
+                  <span className="font-semibold">{g.label}</span>
+                  <span className="ml-2 text-muted-foreground">{t('expenses.masterCountLabel', { count: g.items.length })}</span>
+                  <span className="ml-2 font-semibold text-amber-600">${g.total.toFixed(2)}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setExpanded((prev) => ({ ...prev, [g.key]: !prev[g.key] }))}
+                    className="rounded-md border border-border px-2 py-1 text-[11.5px] font-semibold"
+                  >
+                    {isOpen ? t('expenses.payablesHideDetails') : t('expenses.payablesShowDetails')}
+                  </button>
+                  <select
+                    value={settlePaidFrom[g.key] ?? 'other'}
+                    onChange={(e) => setSettlePaidFrom((prev) => ({ ...prev, [g.key]: e.target.value as ExpensePaidFrom }))}
+                    className="h-7 rounded-md border border-border px-1.5 text-[11px]"
+                  >
+                    <option value="other">{t('expenses.settleWithOther')}</option>
+                    <option value="register_cash">{t('expenses.settleWithRegisterCash')}</option>
+                  </select>
+                  <button
+                    onClick={() => handleSettleGroup(g)}
+                    disabled={settlingKey === g.key}
+                    className="rounded-md border border-emerald-600 px-2 py-1 text-[11.5px] font-semibold text-emerald-700 disabled:opacity-60"
+                  >
+                    {settlingKey === g.key ? t('common.saving') : t('expenses.payablesSettleAllButton')}
+                  </button>
+                </div>
+              </div>
+              {isOpen && (
+                <div className="mt-2 flex flex-col gap-1.5 border-t border-border pt-2">
+                  {g.items.map((item) => (
+                    <div key={item.id} className="flex items-center justify-between text-[12px] text-muted-foreground">
+                      <span>
+                        {item.date} ・ {item.category}
+                        {item.note && ` ・ ${item.note}`}
+                      </span>
+                      <span className="font-semibold text-foreground">${item.amountUsd.toFixed(2)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
