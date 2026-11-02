@@ -1129,6 +1129,10 @@ export const DICTIONARY: Record<Lang, Record<string, string>> = {
     'payroll.runs.detail.totalAllowance': '手当合計',
     'payroll.runs.detail.totalDeduction': '控除合計',
     'payroll.runs.detail.finalPay': '最終支給額',
+    'payroll.runs.detail.downloadPayslip': '給料明細をダウンロード',
+    'payroll.runs.detail.generatingPayslipEllipsis': '作成中…',
+    'payroll.runs.detail.payslipError': '給料明細の作成に失敗しました',
+    'payroll.runs.detail.payslipPopupBlocked': 'ポップアップがブロックされました。ブラウザの設定で許可してください',
 
     // ---------- ログイン画面 (2026-09-04 追加) ----------
     'login.errorInvalid': 'スタッフ名またはPINが正しくありません',
@@ -2315,6 +2319,10 @@ export const DICTIONARY: Record<Lang, Record<string, string>> = {
     'payroll.runs.detail.totalAllowance': 'Total allowance',
     'payroll.runs.detail.totalDeduction': 'Total deduction',
     'payroll.runs.detail.finalPay': 'Final pay',
+    'payroll.runs.detail.downloadPayslip': 'Download payslip',
+    'payroll.runs.detail.generatingPayslipEllipsis': 'Generating…',
+    'payroll.runs.detail.payslipError': 'Failed to generate payslip',
+    'payroll.runs.detail.payslipPopupBlocked': 'Pop-up was blocked. Please allow pop-ups for this site',
 
     // ---------- Login screen (2026-09-04) ----------
     'login.errorInvalid': 'Incorrect staff name or PIN',
@@ -3501,6 +3509,10 @@ export const DICTIONARY: Record<Lang, Record<string, string>> = {
     'payroll.runs.detail.totalAllowance': 'សរុបប្រាក់ឧបត្ថម្ភ',
     'payroll.runs.detail.totalDeduction': 'សរុបការកាត់ប្រាក់',
     'payroll.runs.detail.finalPay': 'ប្រាក់ខែចុងក្រោយ',
+    'payroll.runs.detail.downloadPayslip': 'ទាញយកបញ្ជីប្រាក់ខែ',
+    'payroll.runs.detail.generatingPayslipEllipsis': 'កំពុងបង្កើត...',
+    'payroll.runs.detail.payslipError': 'បរាជ័យក្នុងការបង្កើតបញ្ជីប្រាក់ខែ',
+    'payroll.runs.detail.payslipPopupBlocked': 'វិនដូលោតត្រូវបានទប់ស្កាត់។ សូមអនុញ្ញាតវិនដូលោតសម្រាប់គេហទំព័រនេះ',
 
     // ---------- អេក្រង់ចូលប្រើប្រាស់ (2026-09-04) ----------
     'login.errorInvalid': 'ឈ្មោះបុគ្គលិក ឬ PIN មិនត្រឹមត្រូវ',
@@ -4687,6 +4699,10 @@ export const DICTIONARY: Record<Lang, Record<string, string>> = {
     'payroll.runs.detail.totalAllowance': '津贴合计',
     'payroll.runs.detail.totalDeduction': '扣款合计',
     'payroll.runs.detail.finalPay': '最终支付金额',
+    'payroll.runs.detail.downloadPayslip': '下载工资单',
+    'payroll.runs.detail.generatingPayslipEllipsis': '生成中…',
+    'payroll.runs.detail.payslipError': '工资单生成失败',
+    'payroll.runs.detail.payslipPopupBlocked': '弹出窗口被拦截，请在浏览器设置中允许弹出窗口',
 
     // ---------- 登录页面 (2026-09-04) ----------
     'login.errorInvalid': '员工姓名或PIN不正确',
@@ -5873,6 +5889,10 @@ export const DICTIONARY: Record<Lang, Record<string, string>> = {
     'payroll.runs.detail.totalAllowance': '수당 합계',
     'payroll.runs.detail.totalDeduction': '공제 합계',
     'payroll.runs.detail.finalPay': '최종 지급액',
+    'payroll.runs.detail.downloadPayslip': '급여명세서 다운로드',
+    'payroll.runs.detail.generatingPayslipEllipsis': '생성 중…',
+    'payroll.runs.detail.payslipError': '급여명세서 생성에 실패했습니다',
+    'payroll.runs.detail.payslipPopupBlocked': '팝업이 차단되었습니다. 브라우저 설정에서 팝업을 허용해주세요',
 
     // ---------- 로그인 화면 (2026-09-04) ----------
     'login.errorInvalid': '직원 이름 또는 PIN이 올바르지 않습니다',

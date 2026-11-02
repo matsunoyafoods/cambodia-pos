@@ -31,6 +31,8 @@ import type {
   PayrollStaffProfile,
 } from '@/lib/pos-types';
 import { AttendanceReportTab } from './attendance-report-tab';
+import { buildPayslipHtml } from '@/lib/payroll/payslip-html';
+import { getReceiptFormat, getReceiptLogo, PosPrinterApiError } from '@/lib/printer-client';
 
 // 給与計算システム (2026-09-04 追加)。Tomからの要望「スタッフごとの勤怠実績を入力すると
 // 給与を自動計算できるシステム」に対応。計算ロジック本体は src/lib/payroll/calc.ts
@@ -900,6 +902,44 @@ function RunDetailPanel({ run, onAmended }: { run: PayrollRun; onAmended: () => 
   const [reason, setReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [downloadingPayslip, setDownloadingPayslip] = useState(false);
+  const [payslipError, setPayslipError] = useState<string | null>(null);
+
+  // 給料明細のダウンロード (2026-11-02 追加)。別ウィンドウに独立したHTMLを書き出して
+  // そこで印刷する (他画面の内容と混ざらないようにするため。詳細は payslip-html.ts 参照)。
+  // ポップアップブロッカー対策のため、クリックハンドラ内で同期的に window.open() してから
+  // 中身を非同期で書き込む。
+  async function downloadPayslip() {
+    setPayslipError(null);
+    const win = window.open('', '_blank');
+    if (!win) {
+      setPayslipError(t('payroll.runs.detail.payslipPopupBlocked'));
+      return;
+    }
+    setDownloadingPayslip(true);
+    try {
+      const [format, logo] = await Promise.all([getReceiptFormat(), getReceiptLogo()]);
+      const storeHeaderLines = format.headerText
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0);
+      const html = buildPayslipHtml({
+        staffName: run.staffName,
+        yearMonth: run.yearMonth,
+        calc: c,
+        storeHeaderLines,
+        logoBase64: logo,
+      });
+      win.document.open();
+      win.document.write(html);
+      win.document.close();
+    } catch (err) {
+      win.close();
+      setPayslipError(err instanceof PosPrinterApiError ? err.message : t('payroll.runs.detail.payslipError'));
+    } finally {
+      setDownloadingPayslip(false);
+    }
+  }
 
   const rows: [string, string][] = [
     [t('payroll.runs.detail.standardWorkDays'), String(c.standardWorkDays)],
@@ -955,12 +995,22 @@ function RunDetailPanel({ run, onAmended }: { run: PayrollRun; onAmended: () => 
         <div className="text-[13px] font-bold">
           {run.staffName} ・ {run.yearMonth} ・ {t(`payroll.status.${run.status}`)}
         </div>
-        {run.status === 'confirmed' && me.role === 'owner' && (
-          <button onClick={() => setShowAmend((v) => !v)} className="h-8 rounded-lg border border-destructive px-3 text-[11px] font-semibold text-destructive print:hidden">
-            {showAmend ? t('common.cancel') : t('payroll.runs.amendButton')}
+        <div className="flex items-center gap-2 print:hidden">
+          <button
+            onClick={downloadPayslip}
+            disabled={downloadingPayslip}
+            className="h-8 rounded-lg border border-border px-3 text-[11px] font-semibold disabled:opacity-60"
+          >
+            {downloadingPayslip ? t('payroll.runs.detail.generatingPayslipEllipsis') : t('payroll.runs.detail.downloadPayslip')}
           </button>
-        )}
+          {run.status === 'confirmed' && me.role === 'owner' && (
+            <button onClick={() => setShowAmend((v) => !v)} className="h-8 rounded-lg border border-destructive px-3 text-[11px] font-semibold text-destructive">
+              {showAmend ? t('common.cancel') : t('payroll.runs.amendButton')}
+            </button>
+          )}
+        </div>
       </div>
+      {payslipError && <div className="mb-2 text-[11px] text-destructive print:hidden">{payslipError}</div>}
       <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-[12px] sm:grid-cols-3">
         {rows.map(([label, value]) => (
           <div key={label} className="flex justify-between border-b border-dashed border-border py-1">
