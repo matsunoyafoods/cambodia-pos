@@ -164,6 +164,43 @@ export type PaymentLineInput = {
 };
 
 // pos.settings 1行 (store 単位)
+/** 店舗ごとに使用する/使わない機能のON/OFF設定 (2026-11-04 追加。D-簡易 (個別デプロイ) 展開で
+ * 松之屋フーズ専用に作った機能を、他店舗向け販売時に非表示にできるようにするため。
+ * 未設定キー = true (有効) とみなす。既存店舗 (松之屋フーズ) は何も設定しなければ従来通り
+ * 全機能が表示される (multi-tenant-productization-spec.md 参照)。 */
+export type FeatureKey =
+  | 'reservations'
+  | 'handy'
+  | 'kitchen'
+  | 'drinks'
+  | 'qrCodes'
+  | 'expenses'
+  | 'timecard'
+  | 'insights'
+  | 'advisor'
+  | 'salesReport'
+  | 'salesEntry'
+  | 'registerClosing'
+  | 'payroll';
+
+export type EnabledFeatures = Record<FeatureKey, boolean>;
+
+export const FEATURE_KEYS: FeatureKey[] = [
+  'reservations',
+  'handy',
+  'kitchen',
+  'drinks',
+  'qrCodes',
+  'expenses',
+  'timecard',
+  'insights',
+  'advisor',
+  'salesReport',
+  'salesEntry',
+  'registerClosing',
+  'payroll',
+];
+
 export type PosSettings = {
   storeId: string;
   vatRate: number; // %
@@ -209,6 +246,8 @@ export type PosSettings = {
    * レジ締め確定時のTelegram通知の両方で、ここに設定した区間ごとの売上を集計して表示する。
    * 未設定 = DEFAULT_TIME_PERIODS (ランチ/ディナー)。最大8件。 */
   timePeriods: TimePeriod[];
+  /** 使用する機能のON/OFF (2026-11-04 追加)。未設定キーは true とみなす。 */
+  enabledFeatures: EnabledFeatures;
 };
 
 // プリンター実装 (2026-08-31 追加)。レジ画面 (Vercel/クラウド) から店舗LAN内のプリンターへ
@@ -334,6 +373,21 @@ export const DEFAULT_SETTINGS: PosSettings = {
   registerFloatUsd: 0,
   timecardHistoryResetTime: '00:00',
   timePeriods: DEFAULT_TIME_PERIODS,
+  enabledFeatures: {
+    reservations: true,
+    handy: true,
+    kitchen: true,
+    drinks: true,
+    qrCodes: true,
+    expenses: true,
+    timecard: true,
+    insights: true,
+    advisor: true,
+    salesReport: true,
+    salesEntry: true,
+    registerClosing: true,
+    payroll: true,
+  },
 };
 
 // ---------- 経費管理 (2026-08-31 追加。データ収集・AI分析機能 第一弾) ----------

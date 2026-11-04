@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 
 import { checkStaffSession } from '@/lib/api-client';
 import { checkPosStaffSession, getStaffRoster, loginWithPin, type PosStaffRosterEntry } from '@/lib/staff-client';
+import { getPosOrderMode } from '@/lib/pos-order-client';
 import { LanguageProvider, useLanguage, STAFF_LANGUAGE_STORAGE_KEY } from '@/components/pos/language-context';
 
 const ADMIN_LOGIN_URL =
@@ -39,6 +40,10 @@ function LoginPageInner() {
   const [staffName, setStaffName] = useState<string | null>(null);
 
   // POS ネイティブ PIN ログイン用の state
+  // dine (matsunoya-dine Telegram) 連携店舗かどうか (2026-11-04 追加。新規店舗販売対応。
+  // pos_native 専用店舗には matsunoya-dine 側の admin-login への案内は無意味かつ誤誘導になるため、
+  // dine 連携が設定されている店舗のときだけ出す。判定できるまでは非表示 (fail-safe)。
+  const [dineLinked, setDineLinked] = useState(false);
   const [roster, setRoster] = useState<PosStaffRosterEntry[] | null>(null);
   const [selectedStaffId, setSelectedStaffId] = useState('');
   const [pin, setPin] = useState('');
@@ -84,6 +89,12 @@ function LoginPageInner() {
     getStaffRoster()
       .then(({ staff }) => setRoster(staff))
       .catch(() => setRoster([]));
+  }, []);
+
+  useEffect(() => {
+    getPosOrderMode()
+      .then(({ menuSource }) => setDineLinked(menuSource !== 'pos_native'))
+      .catch(() => setDineLinked(false));
   }, []);
 
   async function handlePinLogin(e: React.FormEvent) {
@@ -152,6 +163,7 @@ function LoginPageInner() {
         </div>
       )}
 
+      {dineLinked && (
       <div className="w-full rounded-xl border-2 border-amber-300 bg-amber-50 p-5 text-left">
         <p className="font-bold text-amber-900 mb-3">{t('login.staffLoginRequired')}</p>
         <ol className="space-y-2 text-sm text-amber-900">
@@ -168,6 +180,7 @@ function LoginPageInner() {
           {t('login.openDineLogin')}
         </a>
       </div>
+      )}
 
       <button
         onClick={check}

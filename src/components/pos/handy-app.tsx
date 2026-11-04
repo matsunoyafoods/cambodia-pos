@@ -573,9 +573,11 @@ function HandyAppInner() {
                 <button onClick={() => router.push('/pos')} className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary">
                   {t('handyApp.goToRegister')}
                 </button>
+                {(settings.enabledFeatures.kitchen ?? true) && (
                 <button onClick={() => router.push('/pos/kitchen')} className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary">
                   {t('posApp.menuKitchen')}
                 </button>
+                )}
                 {me.authMode === 'pos_native' && (
                   <button
                     onClick={() => {

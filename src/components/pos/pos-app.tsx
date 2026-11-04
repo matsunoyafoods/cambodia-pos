@@ -1317,84 +1317,110 @@ function PosAppInner() {
                   >
                     {t('posApp.menuTableLayout')}
                   </button>
+                  {(settings.enabledFeatures.reservations ?? true) && (
                   <button
                     onClick={() => router.push('/pos/reservations')}
                     className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary"
                   >
                     {t('posApp.menuReservations')}
                   </button>
+                  )}
+                  {(settings.enabledFeatures.handy ?? true) && (
                   <button
                     onClick={() => router.push('/pos/handy')}
                     className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary"
                   >
                     {t('handyApp.title')}
                   </button>
+                  )}
+                  {(settings.enabledFeatures.kitchen ?? true) && (
                   <button
                     onClick={() => router.push('/pos/kitchen')}
                     className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary"
                   >
                     {t('posApp.menuKitchen')}
                   </button>
+                  )}
+                  {(settings.enabledFeatures.drinks ?? true) && (
                   <button
                     onClick={() => router.push('/pos/drinks')}
                     className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary"
                   >
                     {t('posApp.menuDrinkMonitor')}
                   </button>
+                  )}
+                  {(settings.enabledFeatures.qrCodes ?? true) && (
                   <button
                     onClick={() => router.push('/pos/qr-codes')}
                     className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary"
                   >
                     {t('posApp.menuQrCodes')}
                   </button>
+                  )}
+                  {(settings.enabledFeatures.expenses ?? true) && (
                   <button
                     onClick={() => router.push('/pos/expenses')}
                     className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary"
                   >
                     {t('posApp.menuExpenses')}
                   </button>
+                  )}
+                  {(settings.enabledFeatures.timecard ?? true) && (
                   <button
                     onClick={() => router.push('/pos/timecard')}
                     className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary"
                   >
                     {t('posApp.menuTimecard')}
                   </button>
+                  )}
+                  {(settings.enabledFeatures.insights ?? true) && (
                   <button
                     onClick={() => router.push('/pos/insights')}
                     className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary"
                   >
                     {t('posApp.menuInsights')}
                   </button>
+                  )}
+                  {(settings.enabledFeatures.advisor ?? true) && (
                   <button
                     onClick={() => router.push('/pos/advisor')}
                     className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary"
                   >
                     {t('posApp.menuAdvisor')}
                   </button>
+                  )}
+                  {(settings.enabledFeatures.salesReport ?? true) && (
                   <button
                     onClick={() => router.push('/pos/sales-report')}
                     className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary"
                   >
                     {t('posApp.menuSalesReport')}
                   </button>
+                  )}
+                  {(settings.enabledFeatures.salesEntry ?? true) && (
                   <button
                     onClick={() => router.push('/pos/sales-entry')}
                     className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary"
                   >
                     {t('posApp.menuSalesEntry')}
                   </button>
+                  )}
+                  {(settings.enabledFeatures.registerClosing ?? true) && (
                   <button
                     onClick={() => router.push('/pos/register-closing')}
                     className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary"
                   >
                     {t('posApp.menuRegisterClosing')}
                   </button>
+                  )}
+                  {(settings.enabledFeatures.payroll ?? true) && (
                   <button
                     onClick={() => router.push('/pos/payroll')}
                     className="block w-full px-3.5 py-2 text-left text-[12.5px] hover:bg-secondary"
                   >
                     {t('posApp.menuPayroll')}
                   </button>
+                  )}
                   {me.authMode === 'pos_native' && (
                     <button
                       onClick={() => {

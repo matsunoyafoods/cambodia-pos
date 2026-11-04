@@ -2,7 +2,14 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createPosAdminClient, getPosStoreId } from '@/lib/supabase/admin';
 import { withPosStaff } from '@/lib/pos-auth';
-import { DEFAULT_SETTINGS, DEFAULT_TIME_PERIODS, type PosSettings, type TimePeriod } from '@/lib/pos-types';
+import {
+  DEFAULT_SETTINGS,
+  DEFAULT_TIME_PERIODS,
+  FEATURE_KEYS,
+  type EnabledFeatures,
+  type PosSettings,
+  type TimePeriod,
+} from '@/lib/pos-types';
 
 // POS ネイティブ運用店舗向けの一般設定・決済設定の永続化。
 // pos.stores.settings (jsonb) を再利用する (新規マイグレーション不要)。
@@ -39,7 +46,17 @@ function toPosSettings(storeId: string, raw: unknown): PosSettings {
         ? stored.timecardHistoryResetTime
         : DEFAULT_SETTINGS.timecardHistoryResetTime,
     timePeriods: isValidTimePeriods(stored.timePeriods) ? stored.timePeriods : DEFAULT_TIME_PERIODS,
+    enabledFeatures: toEnabledFeatures(stored.enabledFeatures),
   };
+}
+
+function toEnabledFeatures(value: unknown): EnabledFeatures {
+  const raw = (value && typeof value === 'object' ? (value as Partial<EnabledFeatures>) : {}) as Partial<EnabledFeatures>;
+  const result = {} as EnabledFeatures;
+  for (const key of FEATURE_KEYS) {
+    result[key] = typeof raw[key] === 'boolean' ? (raw[key] as boolean) : true;
+  }
+  return result;
 }
 
 function isValidTimePeriods(value: unknown): value is TimePeriod[] {
@@ -110,6 +127,23 @@ const patchSchema = z.object({
       }),
     )
     .max(8, '時間帯は最大8件までです')
+    .optional(),
+  enabledFeatures: z
+    .object({
+      reservations: z.boolean(),
+      handy: z.boolean(),
+      kitchen: z.boolean(),
+      drinks: z.boolean(),
+      qrCodes: z.boolean(),
+      expenses: z.boolean(),
+      timecard: z.boolean(),
+      insights: z.boolean(),
+      advisor: z.boolean(),
+      salesReport: z.boolean(),
+      salesEntry: z.boolean(),
+      registerClosing: z.boolean(),
+      payroll: z.boolean(),
+    })
     .optional(),
 });
 

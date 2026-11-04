@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { DEFAULT_SETTINGS, type PosSettings, type TimePeriod } from '@/lib/pos-types';
+import { DEFAULT_SETTINGS, FEATURE_KEYS, type PosSettings, type TimePeriod } from '@/lib/pos-types';
 import { getPosSettings, updatePosSettings, PosApiError } from '@/lib/api-client';
 import {
   generateHandyTableGroupTranslations,
@@ -115,7 +115,7 @@ function authAwareErrorMessage(err: unknown, t: TFunc, fallback: string): string
   return fallback;
 }
 
-type Tab = 'general' | 'printer' | 'payment' | 'staff' | 'menu' | 'translations' | 'layout' | 'handy' | 'integration';
+type Tab = 'general' | 'printer' | 'payment' | 'staff' | 'menu' | 'translations' | 'layout' | 'handy' | 'integration' | 'features';
 
 const NAV: { key: Tab; labelKey: string }[] = [
   { key: 'general', labelKey: 'settings.nav.general' },
@@ -127,6 +127,7 @@ const NAV: { key: Tab; labelKey: string }[] = [
   { key: 'layout', labelKey: 'settings.nav.layout' },
   { key: 'handy', labelKey: 'settings.nav.handy' },
   { key: 'integration', labelKey: 'settings.nav.integration' },
+  { key: 'features', labelKey: 'settings.nav.features' },
 ];
 
 function roleLabel(t: TFunc, role: PosStaffRole): string {
@@ -1328,6 +1329,7 @@ function SettingsScreenInner() {
           registerFloatUsd,
           timecardHistoryResetTime,
           timePeriods,
+          enabledFeatures,
         } = settings;
         const s = await updateGeneralSettings({
           vatRate,
@@ -1347,6 +1349,7 @@ function SettingsScreenInner() {
           registerFloatUsd,
           timecardHistoryResetTime,
           timePeriods,
+          enabledFeatures,
         });
         setSettings((prev) => ({ ...prev, ...s }));
       } else {
@@ -1379,7 +1382,7 @@ function SettingsScreenInner() {
         </div>
         <div className="flex items-center gap-2.5">
           {saveError && <div className="text-xs text-destructive">{saveError}</div>}
-          {tab === 'general' && (
+          {(tab === 'general' || tab === 'features') && (
             <button
               onClick={handleSave}
               disabled={saving || !canManageSettings}
@@ -1908,6 +1911,42 @@ function SettingsScreenInner() {
           )}
 
           {tab === 'integration' && <IntegrationTab />}
+
+          {tab === 'features' && (
+            <div className="flex max-w-[640px] flex-col gap-5">
+              <div className="text-[15px] font-bold">{t('settings.nav.features')}</div>
+              <div className="rounded-xl border border-border p-3.5 text-[12px] text-muted-foreground">
+                {t('settings.features.intro')}
+              </div>
+              {!canManageSettings && (
+                <div className="rounded-xl border border-border p-3 text-[12.5px] text-muted-foreground">
+                  {t('settings.features.managerRequired')}
+                </div>
+              )}
+              <div className="flex flex-col gap-2">
+                {FEATURE_KEYS.map((key) => (
+                  <label
+                    key={key}
+                    className="flex items-center justify-between gap-3 rounded-xl border border-border p-3.5 text-[13px]"
+                  >
+                    <span className="font-semibold">{t(`settings.features.${key}`)}</span>
+                    <input
+                      type="checkbox"
+                      disabled={!canManageSettings}
+                      checked={settings.enabledFeatures[key] ?? true}
+                      onChange={(e) =>
+                        setSettings((prev) => ({
+                          ...prev,
+                          enabledFeatures: { ...prev.enabledFeatures, [key]: e.target.checked },
+                        }))
+                      }
+                      className="h-5 w-5"
+                    />
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

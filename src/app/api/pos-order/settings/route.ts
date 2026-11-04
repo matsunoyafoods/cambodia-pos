@@ -1,11 +1,26 @@
 import { NextResponse } from 'next/server';
 import { createPosAdminClient, getPosStoreId } from '@/lib/supabase/admin';
-import { DEFAULT_SETTINGS, type PosSettings, type TimePeriod } from '@/lib/pos-types';
+import {
+  DEFAULT_SETTINGS,
+  FEATURE_KEYS,
+  type EnabledFeatures,
+  type PosSettings,
+  type TimePeriod,
+} from '@/lib/pos-types';
 
 // レジ画面向け、POSネイティブ設定 (VAT率・サービス料率・KHRレート・決済手段) の
 // 公開読み取りエンドポイント (認証なし・理由は menu/route.ts と同じ)。
 
 type StoredSettings = Partial<Omit<PosSettings, 'storeId'>>;
+
+function toEnabledFeatures(value: unknown): EnabledFeatures {
+  const raw = (value && typeof value === 'object' ? (value as Partial<EnabledFeatures>) : {}) as Partial<EnabledFeatures>;
+  const result = {} as EnabledFeatures;
+  for (const key of FEATURE_KEYS) {
+    result[key] = typeof raw[key] === 'boolean' ? (raw[key] as boolean) : true;
+  }
+  return result;
+}
 
 export async function GET() {
   const supabase = createPosAdminClient();
@@ -46,6 +61,7 @@ export async function GET() {
     timePeriods: Array.isArray(stored.timePeriods) && (stored.timePeriods as TimePeriod[]).length > 0
       ? (stored.timePeriods as TimePeriod[])
       : DEFAULT_SETTINGS.timePeriods,
+    enabledFeatures: toEnabledFeatures(stored.enabledFeatures),
   };
   return NextResponse.json(settings);
 }
