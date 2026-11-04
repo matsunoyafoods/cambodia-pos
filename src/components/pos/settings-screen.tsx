@@ -7,6 +7,7 @@ import { getPosSettings, updatePosSettings, PosApiError } from '@/lib/api-client
 import {
   generateHandyTableGroupTranslations,
   getGeneralSettings,
+  getFeatureCatalog,
   getHandyTableGroups,
   getIntegrationSettings,
   saveHandyTableGroups,
@@ -1165,6 +1166,9 @@ function SettingsScreenInner() {
   const [saveError, setSaveError] = useState<string | null>(null);
 
   // プリンター設定 (2026-08-31 プリンター実装で追加)。POS ネイティブ店舗のみ。
+  // 機能ごとの月額価格 (2026-11-04 追加。契約店舗管理画面で編集、ここは表示のみ)。
+  const [featurePrices, setFeaturePrices] = useState<Record<string, number>>({});
+  const [featurePricesLoaded, setFeaturePricesLoaded] = useState(false);
   const [printers, setPrinters] = useState<PrinterConfig[]>([]);
   const [printersLoaded, setPrintersLoaded] = useState(false);
   const [printerError, setPrinterError] = useState<string | null>(null);
@@ -1209,6 +1213,26 @@ function SettingsScreenInner() {
       cancelled = true;
     };
   }, [isPosNative, tab, printersLoaded, t]);
+
+  useEffect(() => {
+    if (!isPosNative || tab !== 'features' || featurePricesLoaded) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { entries } = await getFeatureCatalog();
+        if (cancelled) return;
+        const map: Record<string, number> = {};
+        for (const e of entries) map[e.featureKey] = e.monthlyPriceUsd;
+        setFeaturePrices(map);
+        setFeaturePricesLoaded(true);
+      } catch {
+        // 価格が取れなくてもON/OFF自体は従来通り操作できる。
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isPosNative, tab, featurePricesLoaded]);
 
   async function handleRegenerateToken() {
     setTokenBusy(true);
@@ -1929,7 +1953,14 @@ function SettingsScreenInner() {
                     key={key}
                     className="flex items-center justify-between gap-3 rounded-xl border border-border p-3.5 text-[13px]"
                   >
-                    <span className="font-semibold">{t(`settings.features.${key}`)}</span>
+                    <span className="flex flex-col gap-0.5">
+                      <span className="font-semibold">{t(`settings.features.${key}`)}</span>
+                      {featurePricesLoaded && (featurePrices[key] ?? 0) > 0 && (
+                        <span className="text-[11px] text-muted-foreground">
+                          {t('settings.features.priceLabel', { price: (featurePrices[key] ?? 0).toFixed(2) })}
+                        </span>
+                      )}
+                    </span>
                     <input
                       type="checkbox"
                       disabled={!canManageSettings}

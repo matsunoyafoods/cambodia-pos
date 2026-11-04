@@ -63,6 +63,15 @@ export function getPosOrderSettings(): Promise<PosSettings> {
   return request('/api/pos-order/settings');
 }
 
+export type PosOrderContractStatus = {
+  contractStatus: 'trial' | 'active' | 'suspended' | 'cancelled' | 'expired';
+  trialEndsAt: string | null;
+};
+
+export function getPosOrderContractStatus(): Promise<PosOrderContractStatus> {
+  return request('/api/pos-order/contract-status');
+}
+
 export function getPosOrderTableLayout(): Promise<{ items: TableLayoutItemRecord[] }> {
   return request('/api/pos-order/table-layout');
 }

@@ -46,6 +46,13 @@ export function updateGeneralSettings(patch: Partial<Omit<PosSettings, 'storeId'
   return request('/api/settings/general', { method: 'PATCH', body: JSON.stringify(patch) });
 }
 
+// 機能ごとの月額価格一覧 (全店舗共通、2026-11-04 追加。設定画面「使用する機能」タブで表示)。
+export type FeatureCatalogEntry = { featureKey: string; monthlyPriceUsd: number };
+
+export function getFeatureCatalog(): Promise<{ entries: FeatureCatalogEntry[] }> {
+  return request('/api/settings/feature-catalog');
+}
+
 export type IntegrationMode = 'pos_native' | 'dine_live';
 
 export function getIntegrationSettings(): Promise<{ menuSource: IntegrationMode }> {

@@ -18,6 +18,7 @@ import { getPosMenus, getPosSettings, PosApiError } from '@/lib/api-client';
 import { listPrinters } from '@/lib/printer-client';
 import { printerConnectionLabel } from './settings-screen';
 import {
+  getPosOrderContractStatus,
   getPosOrderMenu,
   getPosOrderMode,
   getPosOrderPaymentMethods,
@@ -162,6 +163,34 @@ function PosAppInner() {
         /* 取得失敗時は前回値を表示し続ける (次回ポーリングで補正) */
       });
   }, [canViewSales]);
+
+  // 契約・トライアル状況バナー (2026-11-04 追加)。owner/manager のみに表示
+  // (contract-management-addendum-2026-11 参照)。取得失敗時は何も表示しない (fail-open)。
+  const canSeeContractStatus = canViewSales && (me.role === 'owner' || me.role === 'manager');
+  const [trialDaysRemaining, setTrialDaysRemaining] = useState<number | null>(null);
+  const [contractExpired, setContractExpired] = useState(false);
+  useEffect(() => {
+    if (!canSeeContractStatus) return;
+    let cancelled = false;
+    getPosOrderContractStatus()
+      .then(({ contractStatus, trialEndsAt }) => {
+        if (cancelled) return;
+        if (contractStatus === 'expired') {
+          setContractExpired(true);
+          return;
+        }
+        if (contractStatus === 'trial' && trialEndsAt) {
+          const days = Math.ceil((new Date(trialEndsAt).getTime() - Date.now()) / 86400000);
+          if (days <= 5) setTrialDaysRemaining(Math.max(days, 0));
+        }
+      })
+      .catch(() => {
+        /* 取得失敗時は何も表示しない */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [canSeeContractStatus]);
 
   const [screen, setScreen] = useState<Screen>('tablemap');
   const [statusFilter, setStatusFilter] = useState<'all' | TableStatus>('all');
@@ -1266,6 +1295,18 @@ function PosAppInner() {
             <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
             {t('posApp.online')}
           </div>
+          {contractExpired && (
+            <div className="flex items-center gap-1.5 rounded-full bg-destructive/10 px-2.5 py-1 text-xs font-semibold text-destructive">
+              {t('posApp.contractExpiredBadge')}
+            </div>
+          )}
+          {!contractExpired && trialDaysRemaining !== null && (
+            <div className="flex items-center gap-1.5 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">
+              {trialDaysRemaining > 0
+                ? t('posApp.trialEndingSoonBadge', { days: trialDaysRemaining })
+                : t('posApp.trialEndsTodayBadge')}
+            </div>
+          )}
           <div className="relative">
             <button
               onClick={() => setMenuOpen((v) => !v)}
