@@ -10,9 +10,9 @@ import type { MetadataRoute } from 'next';
 // ブラウザ利用には影響しない。
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "I'mHungry POS",
-    short_name: 'I\'mHungry POS',
-    description: 'Cambodia POS — matsunoya-dine 店内会計・注文管理システム',
+    name: 'Cambodia POS',
+    short_name: 'Cambodia POS',
+    description: 'Cambodia POS — 店内会計・注文管理システム',
     start_url: '/',
     display: 'standalone',
     background_color: '#01236d',

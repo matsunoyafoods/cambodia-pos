@@ -3,14 +3,14 @@ import './globals.css';
 import { PwaRegister } from '@/components/pwa-register';
 
 export const metadata: Metadata = {
-  title: "I'mHungry POS",
-  description: 'Cambodia POS — matsunoya-dine 店内会計・注文管理システム',
-  // PWA化 (2026-09-05 追加。詳細は manifest.ts のコメント参照)。ホーム画面に追加した際に
-  // iOS/Android で「アプリらしく」ステータスバー等が馴染むようにする設定。
+  // 2026-11-05: タブ名が「I'mHungry POS」(松之屋フーズ自社ブランド名) のままだったのを、
+  // 他店舗にも販売する多店舗対応製品として汎用的な「Cambodia POS」に変更 (Tom指摘)。
+  title: 'Cambodia POS',
+  description: 'Cambodia POS — 店内会計・注文管理システム',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'black-translucent',
-    title: "I'mHungry POS",
+    title: 'Cambodia POS',
   },
 };
 
