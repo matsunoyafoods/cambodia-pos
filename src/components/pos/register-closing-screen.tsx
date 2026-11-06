@@ -7,7 +7,9 @@ import {
   confirmRegisterClosing,
   deleteRegisterClosing,
   getRegisterClosingStatus,
+  listRegisterClosings,
   PosRegisterClosingApiError,
+  type RegisterClosingHistory,
   type RegisterClosingRecord,
   type RegisterClosingStatus,
 } from '@/lib/register-closing-client';
@@ -36,6 +38,13 @@ const WEATHER_LABEL_KEYS: Record<WeatherCode, string> = {
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
+}
+
+// 履歴ビュー (2026-11-06 追加) の期間初期値計算用。
+function addDaysToIso(date: string, days: number): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
 }
 
 function PosNativeOnlyNotice() {
@@ -81,6 +90,7 @@ function RegisterClosingScreenInner() {
   }, [isPosNative]);
 
   const [date, setDate] = useState(todayIso());
+  const [viewMode, setViewMode] = useState<'day' | 'history'>('day');
   const [status, setStatus] = useState<RegisterClosingStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -107,7 +117,27 @@ function RegisterClosingScreenInner() {
           ← {t('common.backToRegister')}
         </button>
         <div className="text-[15px] font-bold">{t('registerClosing.title')}</div>
-        {isPosNative && (
+        {isPosNative && canManage && (
+          <div className="ml-2 flex rounded-lg border border-border p-0.5 text-[12.5px]">
+            <button
+              onClick={() => setViewMode('day')}
+              className={
+                'rounded-md px-2.5 py-1 font-semibold ' + (viewMode === 'day' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground')
+              }
+            >
+              {t('registerClosing.viewDay')}
+            </button>
+            <button
+              onClick={() => setViewMode('history')}
+              className={
+                'rounded-md px-2.5 py-1 font-semibold ' + (viewMode === 'history' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground')
+              }
+            >
+              {t('registerClosing.viewHistory')}
+            </button>
+          </div>
+        )}
+        {isPosNative && viewMode === 'day' && (
           <input
             type="date"
             value={date}
@@ -120,6 +150,13 @@ function RegisterClosingScreenInner() {
         <div className="mx-auto flex max-w-[900px] flex-col gap-5">
           {!isPosNative ? (
             <PosNativeOnlyNotice />
+          ) : viewMode === 'history' ? (
+            <HistoryView
+              onSelectDate={(d) => {
+                setDate(d);
+                setViewMode('day');
+              }}
+            />
           ) : loading ? (
             <div className="text-[13px] text-muted-foreground">{t('common.loadingEllipsis')}</div>
           ) : loadError ? (
@@ -139,6 +176,117 @@ function RegisterClosingScreenInner() {
           ) : null}
         </div>
       </div>
+    </div>
+  );
+}
+
+// 期間指定の履歴一覧 (2026-11-06 追加。Tom「レジ締め履歴を期間で見れるようにして」)。
+// manager 以上限定 (ヘッダーのタブ自体も canManage でのみ表示、サーバー側 API も manager 以上)。
+function HistoryView({ onSelectDate }: { onSelectDate: (date: string) => void }) {
+  const { t } = useLanguage();
+  const [from, setFrom] = useState(() => addDaysToIso(todayIso(), -29));
+  const [to, setTo] = useState(todayIso());
+  const [data, setData] = useState<RegisterClosingHistory | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLoading(true);
+    setError(null);
+    listRegisterClosings(from, to)
+      .then(setData)
+      .catch((err) => setError(err instanceof PosRegisterClosingApiError ? err.message : t('registerClosing.historyLoadError')))
+      .finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [from, to]);
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <label className="flex items-center gap-1.5 text-[13px]">
+          <span className="text-muted-foreground">{t('registerClosing.historyFromLabel')}</span>
+          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-9 rounded-lg border border-border px-2.5 text-[13px]" />
+        </label>
+        <label className="flex items-center gap-1.5 text-[13px]">
+          <span className="text-muted-foreground">{t('registerClosing.historyToLabel')}</span>
+          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-9 rounded-lg border border-border px-2.5 text-[13px]" />
+        </label>
+      </div>
+
+      {loading ? (
+        <div className="text-[13px] text-muted-foreground">{t('common.loadingEllipsis')}</div>
+      ) : error ? (
+        <div className="text-[13px] text-destructive">{error}</div>
+      ) : data ? (
+        <>
+          <div
+            className={
+              'rounded-xl border p-3.5 ' + (data.missingDates.length > 0 ? 'border-amber-300 bg-amber-50' : 'border-emerald-300 bg-emerald-50')
+            }
+          >
+            <div className={'mb-1.5 text-[13px] font-bold ' + (data.missingDates.length > 0 ? 'text-amber-800' : 'text-emerald-700')}>
+              {data.missingDates.length > 0
+                ? t('registerClosing.missingDatesTitle', { count: data.missingDates.length })
+                : t('registerClosing.missingDatesNone')}
+            </div>
+            {data.missingDates.length > 0 && (
+              <>
+                <div className="flex flex-wrap gap-1.5">
+                  {data.missingDates.map((d) => (
+                    <button
+                      key={d}
+                      onClick={() => onSelectDate(d)}
+                      className="rounded-md border border-amber-400 bg-white px-2 py-1 text-[12px] font-semibold text-amber-800"
+                    >
+                      {d}
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-1.5 text-[11.5px] text-amber-700">{t('registerClosing.missingDatesNote')}</div>
+              </>
+            )}
+          </div>
+
+          {data.closings.length === 0 ? (
+            <div className="text-[13px] text-muted-foreground">{t('registerClosing.historyEmpty')}</div>
+          ) : (
+            <div className="overflow-auto rounded-xl border border-border">
+              <table className="w-full text-[13px]">
+                <thead className="bg-muted/50 text-[11.5px] uppercase text-muted-foreground">
+                  <tr>
+                    <th className="px-3 py-2 text-left">{t('registerClosing.historyDateCol')}</th>
+                    <th className="px-3 py-2 text-right">{t('registerClosing.historySystemCashCol')}</th>
+                    <th className="px-3 py-2 text-right">{t('registerClosing.historyCountedCol')}</th>
+                    <th className="px-3 py-2 text-right">{t('registerClosing.historyDifferenceCol')}</th>
+                    <th className="px-3 py-2 text-left">{t('registerClosing.historyConfirmedByCol')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.closings.map((c) => {
+                    const diffOk = Math.abs(c.differenceUsd) < 0.005;
+                    return (
+                      <tr key={c.id} onClick={() => onSelectDate(c.date)} className="cursor-pointer border-t border-border hover:bg-muted/40">
+                        <td className="px-3 py-2 font-semibold">{c.date}</td>
+                        <td className="px-3 py-2 text-right">${c.systemCashTotal.toFixed(2)}</td>
+                        <td className="px-3 py-2 text-right">${c.countedTotalUsd.toFixed(2)}</td>
+                        <td
+                          className={
+                            'px-3 py-2 text-right font-semibold ' +
+                            (diffOk ? 'text-emerald-600' : c.differenceUsd > 0 ? 'text-sky-600' : 'text-destructive')
+                          }
+                        >
+                          {c.differenceUsd >= 0 ? '+' : '-'}${Math.abs(c.differenceUsd).toFixed(2)}
+                        </td>
+                        <td className="px-3 py-2">{c.confirmedByName ?? '-'}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      ) : null}
     </div>
   );
 }

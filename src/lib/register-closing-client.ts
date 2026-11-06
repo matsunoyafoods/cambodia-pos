@@ -69,6 +69,18 @@ export function getRegisterClosingStatus(date: string): Promise<RegisterClosingS
   return request(`/api/register-closings?date=${encodeURIComponent(date)}`);
 }
 
+// 期間指定の履歴一覧 (2026-11-06 追加。Tom「レジ締め履歴を期間で見れるようにして」)。
+// manager 以上のみ閲覧可 (サーバー側 /api/register-closings の from/to ブランチ参照)。
+export type RegisterClosingHistory = {
+  closings: RegisterClosingRecord[];
+  /** 期間内で確定済みレジ締めが無い日 (未来日を除く、YYYY-MM-DD の配列)。 */
+  missingDates: string[];
+};
+
+export function listRegisterClosings(from: string, to: string): Promise<RegisterClosingHistory> {
+  return request(`/api/register-closings?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+}
+
 export function confirmRegisterClosing(input: {
   date: string;
   shift?: string;

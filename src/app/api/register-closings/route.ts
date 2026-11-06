@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createPosAdminClient, getPosStoreId } from '@/lib/supabase/admin';
-import { withPosStaff } from '@/lib/pos-auth';
+import { withPosStaff, posRoleAtLeast } from '@/lib/pos-auth';
 import { notifyRegisterClosing } from '@/lib/sales-report-notify';
 import { DEFAULT_TIME_PERIODS, WEATHER_CODES, type EthnicityKey, type TimePeriod } from '@/lib/pos-types';
 import { computeGuestStats, computeTimePeriodSales, type EthnicityTotal, type TimePeriodSalesResult } from '@/lib/sales-aggregation';
@@ -22,6 +22,17 @@ function dayRangeUtc(date: string): { startIso: string; endIso: string } {
   const startIso = `${date}T00:00:00+07:00`;
   const endIso = new Date(new Date(startIso).getTime() + 24 * 60 * 60 * 1000).toISOString();
   return { startIso, endIso };
+}
+
+// 履歴一覧 (2026-11-06 追加) 用のヘルパー。カンボジアは常にUTC+7 (DST無し、dayRangeUtc と同じ前提)。
+function addDaysIso(date: string, days: number): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function todayIsoUtc7(): string {
+  return new Date(Date.now() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
 type SystemTotals = {
@@ -162,15 +173,62 @@ const closingSelectCols =
 
 // 指定日のレジ締め状況を取得。既に確定済みならその記録を、未確定ならその場で集計したシステム
 // 合計 (未確定・実査待ち) を返す。staff 以上 (締め作業はシフトの担当者が誰でも行えるように)。
-export const GET = withPosStaff('part_time', async (_session, req) => {
+export const GET = withPosStaff('part_time', async (session, req) => {
   const url = new URL(req.url);
   const date = url.searchParams.get('date');
-  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-    return NextResponse.json({ error: 'date (YYYY-MM-DD) を指定してください' }, { status: 400 });
-  }
 
   const supabase = createPosAdminClient();
   const storeId = getPosStoreId();
+
+  // 期間指定の履歴一覧モード (2026-11-06 追加。Tom「レジ締め履歴を期間で見れるようにして」)。
+  // date を指定しなかった場合はこちら。店舗の資金状況が見える情報のため /api/cash-balance 等と
+  // 同じく manager 以上限定 (withPosStaff 自体は 'part_time' のままにして、このブランチだけ
+  // 手動でランクを上げてチェックする。単日の締め作業自体は staff でも行えるようにするため)。
+  if (!date) {
+    if (!posRoleAtLeast(session.role, 'manager')) {
+      return NextResponse.json({ error: 'forbidden' }, { status: 403 });
+    }
+    const from = url.searchParams.get('from');
+    const to = url.searchParams.get('to');
+    if (!from || !to || !/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+      return NextResponse.json({ error: 'date、または from・to (YYYY-MM-DD) を指定してください' }, { status: 400 });
+    }
+    if (from > to) {
+      return NextResponse.json({ error: 'from は to 以前の日付にしてください' }, { status: 400 });
+    }
+    const spanDays =
+      Math.round((new Date(`${to}T00:00:00Z`).getTime() - new Date(`${from}T00:00:00Z`).getTime()) / (24 * 60 * 60 * 1000)) + 1;
+    if (spanDays > 366) {
+      return NextResponse.json({ error: '期間は366日以内で指定してください' }, { status: 400 });
+    }
+
+    const { data, error } = await supabase
+      .from('register_closings')
+      .select(closingSelectCols)
+      .eq('store_id', storeId)
+      .gte('date', from)
+      .lte('date', to)
+      .order('date', { ascending: false });
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    const closings = (data ?? []).map((r) => toApi(r as ClosingRow));
+    const confirmedDates = new Set(closings.map((c) => c.date));
+    const todayStr = todayIsoUtc7();
+    // 期間内で確定済みレジ締めが無い日 (未来日は除く)。Tom が過去に確認した「レジ締めを
+    // 飛ばした日があると現金残高がズレる」問題を、見つけやすくするためのリスト。
+    const missingDates: string[] = [];
+    for (let i = 0; i < spanDays; i++) {
+      const d = addDaysIso(from, i);
+      if (d > todayStr) break;
+      if (!confirmedDates.has(d)) missingDates.push(d);
+    }
+
+    return NextResponse.json({ closings, missingDates });
+  }
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return NextResponse.json({ error: 'date (YYYY-MM-DD) を指定してください' }, { status: 400 });
+  }
 
   const { data: existing, error: existingError } = await supabase
     .from('register_closings')

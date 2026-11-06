@@ -123,6 +123,16 @@ const ROLE_RANK: Record<PosStaffRole, number> = {
  * ロールを個別に締め出すための追加チェック (2026-09-04 追加)。rank チェックを通過した後、
  * session.role が deny リストに含まれていれば 403。
  */
+/**
+ * ROLE_RANK に基づき、role が minRole 以上かどうかを返す (2026-11-06 追加)。
+ * withPosStaff の minRole チェックと同じ基準を、ハンドラー内部で「このブランチだけ
+ * 追加でランクを上げてチェックしたい」場合に使う (例: register-closings の履歴一覧は
+ * manager 以上限定だが、単日の締め作業自体は part_time のまま開放したいケース)。
+ */
+export function posRoleAtLeast(role: PosStaffRole, minRole: PosStaffRole): boolean {
+  return ROLE_RANK[role] >= ROLE_RANK[minRole];
+}
+
 export function withPosStaff<Args extends unknown[]>(
   minRole: PosStaffRole,
   handler: (session: PosStaffSessionPayload, req: Request, ...args: Args) => Promise<Response>,
