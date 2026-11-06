@@ -29,7 +29,7 @@ import {
   type OpenOrderRecord,
   type OrderItemRecord,
 } from '@/lib/pos-order-orders-client';
-import type { TableLayoutItemRecord } from '@/lib/table-layout-client';
+import type { TableFloorRecord, TableLayoutItemRecord } from '@/lib/table-layout-client';
 import { extendDrinkTimer, getTableSessions, startDrinkTimer, startTableStay, type TableSessionRecord } from '@/lib/table-session-client';
 import { effectiveBasePrice, isHappyHourNow } from '@/lib/happy-hour';
 import { cartLineNetTotal } from '@/lib/cart';
@@ -70,6 +70,7 @@ function HandyAppInner() {
   const [menu, setMenu] = useState<MenuItem[]>([]);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [layoutItems, setLayoutItems] = useState<TableLayoutItemRecord[]>([]);
+  const [layoutFloors, setLayoutFloors] = useState<TableFloorRecord[]>([]);
   const [tableSessions, setTableSessions] = useState<TableSessionRecord[]>([]);
   // 卓グループ・並び順 (設定画面「ハンディ表示」タブ、2026-08-31 追加)。未設定の店舗では
   // 空配列のまま (handy-table-list.tsx 側で卓番号順にフォールバックする)。
@@ -121,7 +122,7 @@ function HandyAppInner() {
     (async () => {
       try {
         const { menuSource } = await getPosOrderMode();
-        const layoutPromise = getPosOrderTableLayout().catch(() => ({ items: [] as TableLayoutItemRecord[] }));
+        const layoutPromise = getPosOrderTableLayout().catch(() => ({ items: [] as TableLayoutItemRecord[], floors: [] as TableFloorRecord[] }));
         const sessionsPromise = getTableSessions().catch(() => ({ items: [] as TableSessionRecord[] }));
         // 卓グループはレイアウト連携モードに関係なく卓番号ベースで動く。未設定・取得失敗時は
         // 空配列 (=グループ分けなし、卓番号順) のまま会計・注文自体は止めない。
@@ -147,6 +148,7 @@ function HandyAppInner() {
           setPosNativeCategoryOrder(menuData.categories);
           setSettings((prev) => ({ ...prev, ...settingsData }));
           setLayoutItems(layoutData.items);
+          setLayoutFloors(layoutData.floors ?? []);
           setTableSessions(sessionsData.items);
           setHandyGroups(handyGroupsData.groups);
           setReceiptTokenByTable(Object.fromEntries((billingStatusData.receiptTables ?? []).map((r) => [r.code, { token: r.token, orderId: r.orderId }])));
@@ -169,6 +171,7 @@ function HandyAppInner() {
           setPosNativeCategoryOrder(null);
           setSettings((prev) => ({ ...prev, ...settingsData }));
           setLayoutItems(layoutData.items);
+          setLayoutFloors(layoutData.floors ?? []);
           setTableSessions(sessionsData.items);
           setHandyGroups(handyGroupsData.groups);
           setReceiptTokenByTable(Object.fromEntries((billingStatusData.receiptTables ?? []).map((r) => [r.code, { token: r.token, orderId: r.orderId }])));
@@ -601,6 +604,7 @@ function HandyAppInner() {
           onStatusFilter={setStatusFilter}
           onSelectTable={handleSelectTable}
           layoutItems={layoutItems}
+          layoutFloors={layoutFloors}
           tableSessions={tableSessions}
           handyGroups={handyGroups}
         />

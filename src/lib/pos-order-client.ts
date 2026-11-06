@@ -6,7 +6,7 @@
  */
 
 import type { HandyTableGroup, MenuItem, PaymentMethodConfig, PosSettings } from '@/lib/pos-types';
-import type { TableLayoutItemRecord } from '@/lib/table-layout-client';
+import type { TableFloorRecord, TableLayoutItemRecord } from '@/lib/table-layout-client';
 
 export class PosOrderApiError extends Error {
   constructor(
@@ -72,7 +72,7 @@ export function getPosOrderContractStatus(): Promise<PosOrderContractStatus> {
   return request('/api/pos-order/contract-status');
 }
 
-export function getPosOrderTableLayout(): Promise<{ items: TableLayoutItemRecord[] }> {
+export function getPosOrderTableLayout(): Promise<{ items: TableLayoutItemRecord[]; floors?: TableFloorRecord[] }> {
   return request('/api/pos-order/table-layout');
 }
 

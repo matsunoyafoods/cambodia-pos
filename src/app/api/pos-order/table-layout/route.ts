@@ -11,7 +11,7 @@ export async function GET() {
 
   const { data, error } = await supabase
     .from('table_layouts')
-    .select('id, table_code, kind, seats, x, y, width, height, sort_order')
+    .select('id, table_code, kind, seats, x, y, width, height, sort_order, floor_id')
     .eq('store_id', storeId)
     .order('sort_order')
     .order('table_code');
@@ -19,5 +19,14 @@ export async function GET() {
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
-  return NextResponse.json({ items: data ?? [] });
+  const { data: floors, error: floorsError } = await supabase
+    .from('table_floors')
+    .select('id, name, sort_order')
+    .eq('store_id', storeId)
+    .order('sort_order')
+    .order('name');
+  if (floorsError) {
+    return NextResponse.json({ error: floorsError.message }, { status: 500 });
+  }
+  return NextResponse.json({ items: data ?? [], floors: floors ?? [] });
 }

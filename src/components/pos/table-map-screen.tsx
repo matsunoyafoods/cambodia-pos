@@ -4,8 +4,26 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { TableStatus } from '@/lib/pos-types';
 import { DEMO_TABLE_GROUPS } from '@/lib/demo-data';
-import type { TableLayoutItemRecord } from '@/lib/table-layout-client';
-import { TABLE_LAYOUT_CANVAS_HEIGHT, TABLE_LAYOUT_CANVAS_WIDTH } from '@/lib/table-layout-geometry';
+import type { TableFloorRecord, TableLayoutItemRecord } from '@/lib/table-layout-client';
+import { TABLE_LAYOUT_CANVAS_HEIGHT, TABLE_LAYOUT_CANVAS_WIDTH, resolveFloorId } from '@/lib/table-layout-geometry';
+
+// 複数階対応 (2026-11-06)。レジ端末ごとに最後に開いていた階を覚えておく (端末ごとの便利機能なので
+// localStorage。読めない環境では先頭の階に戻るだけ)。
+const TABLE_MAP_FLOOR_STORAGE_KEY = 'pos.tableMap.floorId';
+function readStoredFloorId(): string | null {
+  try {
+    return window.localStorage.getItem(TABLE_MAP_FLOOR_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+function writeStoredFloorId(id: string) {
+  try {
+    window.localStorage.setItem(TABLE_MAP_FLOOR_STORAGE_KEY, id);
+  } catch {
+    // ignore
+  }
+}
 import type { TableSessionRecord } from '@/lib/table-session-client';
 import { drinkTimerState, elapsedMinutes, formatDuration } from '@/lib/table-timer';
 import { resolveQuickMenuItems } from '@/lib/pos-quick-menu';
@@ -124,6 +142,7 @@ export function TableMapScreen({
   onStatusFilter,
   onSelectTable,
   layoutItems,
+  layoutFloors = [],
   tableSessions,
   reservationsByTable = {},
   tableActionMode = 'none',
@@ -144,6 +163,8 @@ export function TableMapScreen({
   onStatusFilter: (v: 'all' | TableStatus) => void;
   onSelectTable: (code: string) => void;
   layoutItems: TableLayoutItemRecord[];
+  /** テーブルレイアウトの階 (2026-11-06 追加)。2件以上のときだけ階タブを表示する。 */
+  layoutFloors?: TableFloorRecord[];
   tableSessions: TableSessionRecord[];
   /** 卓別の直近予約 (2026-09-02 追加)。省略時はバッジを表示しない。 */
   reservationsByTable?: Record<string, TableReservationBadge>;
@@ -179,11 +200,36 @@ export function TableMapScreen({
     { key: 'billing', label: t('tableMap.statusBilling') },
   ];
 
-  const tables = layoutItems.filter((tbl) => tbl.kind === 'table');
-  const obstacles = layoutItems.filter((tbl) => tbl.kind !== 'table');
+  const allTables = layoutItems.filter((tbl) => tbl.kind === 'table');
+
+  // 複数階対応 (2026-11-06)。階が2件以上ある店舗だけ階タブを出し、選択中の階の卓・障害物だけを描く。
+  // 階が0〜1件の店舗 (既存店舗すべて) はこれまで通り全項目を1枚に描く。
+  const hasFloorTabs = layoutFloors.length >= 2;
+  const [storedFloorId, setStoredFloorId] = useState<string | null>(null);
+  useEffect(() => {
+    setStoredFloorId(readStoredFloorId());
+  }, []);
+  const activeFloorId = hasFloorTabs
+    ? layoutFloors.some((f) => f.id === storedFloorId)
+      ? storedFloorId
+      : layoutFloors[0].id
+    : null;
+  function selectFloor(id: string) {
+    setStoredFloorId(id);
+    writeStoredFloorId(id);
+  }
+  const onActiveFloor = (tbl: TableLayoutItemRecord) => !hasFloorTabs || resolveFloorId(tbl, layoutFloors) === activeFloorId;
+  function busyCountOnFloor(floorId: string): number {
+    return allTables.filter(
+      (tbl) => resolveFloorId(tbl, layoutFloors) === floorId && (tableStatus[tbl.table_code] ?? 'available') !== 'available',
+    ).length;
+  }
+
+  const tables = allTables.filter(onActiveFloor);
+  const obstacles = layoutItems.filter((tbl) => tbl.kind !== 'table' && onActiveFloor(tbl));
   // 設定画面の「テーブルレイアウト」で卓を1つも配置していない店舗は、これまで通りの
   // サンプル配置 (フロア/テラス/個室/カウンター) を表示する (既存店舗の挙動を壊さない)。
-  const hasCustomLayout = tables.length > 0;
+  const hasCustomLayout = allTables.length > 0;
 
   // 席移動・会計合算 (2026-08-31 追加)。モード中はテーブルをタップすると通常の注文画面遷移
   // ではなく、移動元/移動先・合算先/合算元の選択として扱う。
@@ -278,6 +324,37 @@ export function TableMapScreen({
 
       {hasCustomLayout ? (
         <div className="flex-1 overflow-auto px-5 py-4">
+          {hasFloorTabs && (
+            // 席移動・会計合算のモード中も階を切り替えられるようにしておく (階をまたいだ移動・合算のため)。
+            <div className="mx-auto mb-3 flex flex-wrap gap-2" style={{ width: TABLE_LAYOUT_CANVAS_WIDTH }}>
+              {layoutFloors.map((f) => {
+                const busy = busyCountOnFloor(f.id);
+                const active = f.id === activeFloorId;
+                return (
+                  <button
+                    key={f.id}
+                    onClick={() => selectFloor(f.id)}
+                    className={
+                      'flex h-[38px] items-center gap-2 rounded-lg border px-4 text-[13px] font-bold ' +
+                      (active ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-card text-foreground')
+                    }
+                  >
+                    {f.name}
+                    {busy > 0 && (
+                      <span
+                        className={
+                          'rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none ' +
+                          (active ? 'bg-primary-foreground/20' : 'bg-brand text-brand-foreground')
+                        }
+                      >
+                        {t('tableMap.floorBusy', { n: busy })}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
           <div
             className="relative mx-auto overflow-hidden rounded-2xl border-[1.5px] border-dashed border-border"
             style={{

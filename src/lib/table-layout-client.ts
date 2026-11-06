@@ -48,10 +48,41 @@ export type TableLayoutItemRecord = {
   width: number;
   height: number;
   sort_order: number;
+  /** 複数階対応 (2026-11-06)。null = 先頭の階 (階が無い店舗は従来の1枚レイアウト)。 */
+  floor_id: string | null;
 };
 
-export function listTableLayout(): Promise<{ items: TableLayoutItemRecord[] }> {
+/** テーブルレイアウトの階 (フロア)。0件の店舗は従来通りの1枚レイアウト。 */
+export type TableFloorRecord = {
+  id: string;
+  name: string;
+  sort_order: number;
+};
+
+export function listTableLayout(): Promise<{ items: TableLayoutItemRecord[]; floors: TableFloorRecord[] }> {
   return request('/api/table-layout');
+}
+
+/**
+ * 階を追加する。階が1件も無い店舗では、サーバー側で先に defaultFloorName の階を作り、
+ * 既存の卓 (floor_id = null) を全部そこへ入れてから新しい階を作る (返り値の defaultFloor)。
+ */
+export function createTableFloor(input: {
+  name: string;
+  defaultFloorName?: string;
+}): Promise<{ floor: TableFloorRecord; defaultFloor: TableFloorRecord | null }> {
+  return request('/api/table-floors', { method: 'POST', body: JSON.stringify(input) });
+}
+
+export function updateTableFloor(
+  id: string,
+  patch: Partial<{ name: string; sortOrder: number }>,
+): Promise<{ floor: TableFloorRecord }> {
+  return request(`/api/table-floors/${id}`, { method: 'PATCH', body: JSON.stringify(patch) });
+}
+
+export function deleteTableFloor(id: string): Promise<{ ok: boolean }> {
+  return request(`/api/table-floors/${id}`, { method: 'DELETE' });
 }
 
 export function createTableLayoutItem(input: {
@@ -62,6 +93,7 @@ export function createTableLayoutItem(input: {
   y?: number;
   width?: number;
   height?: number;
+  floorId?: string | null;
 }): Promise<{ item: TableLayoutItemRecord }> {
   return request('/api/table-layout', { method: 'POST', body: JSON.stringify(input) });
 }
@@ -77,6 +109,7 @@ export function updateTableLayoutItem(
     width: number;
     height: number;
     sortOrder: number;
+    floorId: string | null;
   }>,
 ): Promise<{ item: TableLayoutItemRecord }> {
   return request(`/api/table-layout/${id}`, { method: 'PATCH', body: JSON.stringify(patch) });

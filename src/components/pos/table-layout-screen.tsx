@@ -4,15 +4,19 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useStaff } from './staff-context';
 import {
+  createTableFloor,
   createTableLayoutItem,
+  deleteTableFloor,
   deleteTableLayoutItem,
   listTableLayout,
+  updateTableFloor,
   updateTableLayoutItem,
   PosTableLayoutApiError,
+  type TableFloorRecord,
   type TableLayoutItemRecord,
   type TableLayoutKind,
 } from '@/lib/table-layout-client';
-import { TABLE_LAYOUT_CANVAS_HEIGHT, TABLE_LAYOUT_CANVAS_WIDTH } from '@/lib/table-layout-geometry';
+import { TABLE_LAYOUT_CANVAS_HEIGHT, TABLE_LAYOUT_CANVAS_WIDTH, resolveFloorId } from '@/lib/table-layout-geometry';
 import { LanguageProvider, useLanguage, STAFF_LANGUAGE_STORAGE_KEY } from './language-context';
 
 // 多言語化 (2026-09-04 追加。以前は「別画面なのでスコープ外」としていたが、Tom からの
@@ -66,6 +70,11 @@ function TableLayoutScreenInner() {
   const canManage = isPosNative && (me.role === 'owner' || me.role === 'manager' || me.role === 'sub_manager');
 
   const [items, setItems] = useState<TableLayoutItemRecord[] | null>(null);
+  // 複数階対応 (2026-11-06)。階は追加・名前変更・削除した時点で即サーバーに保存する
+  // (卓の配置のような「保存」ボタンでのまとめ保存はしない)。0件なら従来の1枚レイアウト。
+  const [floors, setFloors] = useState<TableFloorRecord[]>([]);
+  const [activeFloorId, setActiveFloorId] = useState<string | null>(null);
+  const [floorBusy, setFloorBusy] = useState(false);
   const [dirtyIds, setDirtyIds] = useState<Set<string>>(new Set());
   const [deletedIds, setDeletedIds] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
@@ -84,6 +93,9 @@ function TableLayoutScreenInner() {
     setError(null);
     listTableLayout()
       .then((res) => {
+        const nextFloors = res.floors ?? [];
+        setFloors(nextFloors);
+        setActiveFloorId((prev) => (prev && nextFloors.some((f) => f.id === prev) ? prev : (nextFloors[0]?.id ?? null)));
         setItems(res.items);
         setDirtyIds(new Set());
         setDeletedIds(new Set());
@@ -98,6 +110,75 @@ function TableLayoutScreenInner() {
   }, [load]);
 
   const selected = items?.find((t) => t.id === selectedId) ?? null;
+  const visibleItems = (items ?? []).filter((t) => resolveFloorId(t, floors) === activeFloorId);
+
+  function switchFloor(id: string) {
+    setActiveFloorId(id);
+    setSelectedId(null);
+  }
+
+  async function addFloor() {
+    const suggested = `${Math.max(floors.length, 1) + 1}F`;
+    const name = window.prompt(tr('tableLayout.floor.newNamePrompt'), suggested)?.trim();
+    if (!name) return;
+    setFloorBusy(true);
+    setError(null);
+    try {
+      const { floor, defaultFloor } = await createTableFloor({ name, defaultFloorName: tr('tableLayout.floor.defaultName') });
+      if (defaultFloor) {
+        // サーバー側で既存の卓を全部「最初の階」に入れたので、ローカルの (未保存分を含む) 卓も合わせる。
+        setItems((prev) => (prev ?? []).map((t) => (t.floor_id ? t : { ...t, floor_id: defaultFloor.id })));
+        setFloors([defaultFloor, floor]);
+      } else {
+        setFloors((prev) => [...prev, floor]);
+      }
+      switchFloor(floor.id);
+    } catch (err) {
+      setError(err instanceof PosTableLayoutApiError ? err.message : tr('tableLayout.floor.error'));
+    } finally {
+      setFloorBusy(false);
+    }
+  }
+
+  async function renameFloor() {
+    const floor = floors.find((f) => f.id === activeFloorId);
+    if (!floor) return;
+    const name = window.prompt(tr('tableLayout.floor.renamePrompt'), floor.name)?.trim();
+    if (!name || name === floor.name) return;
+    setFloorBusy(true);
+    setError(null);
+    try {
+      const { floor: updated } = await updateTableFloor(floor.id, { name });
+      setFloors((prev) => prev.map((f) => (f.id === updated.id ? updated : f)));
+    } catch (err) {
+      setError(err instanceof PosTableLayoutApiError ? err.message : tr('tableLayout.floor.error'));
+    } finally {
+      setFloorBusy(false);
+    }
+  }
+
+  async function removeFloor() {
+    const floor = floors.find((f) => f.id === activeFloorId);
+    if (!floor) return;
+    if (visibleItems.length > 0) {
+      window.alert(tr('tableLayout.floor.notEmpty'));
+      return;
+    }
+    if (!window.confirm(tr('tableLayout.floor.deleteConfirm', { name: floor.name }))) return;
+    setFloorBusy(true);
+    setError(null);
+    try {
+      await deleteTableFloor(floor.id);
+      const rest = floors.filter((f) => f.id !== floor.id);
+      setFloors(rest);
+      setActiveFloorId(rest[0]?.id ?? null);
+      setSelectedId(null);
+    } catch (err) {
+      setError(err instanceof PosTableLayoutApiError ? err.message : tr('tableLayout.floor.error'));
+    } finally {
+      setFloorBusy(false);
+    }
+  }
   const hasUnsavedChanges = dirtyIds.size > 0 || deletedIds.size > 0 || (items ?? []).some((t) => isNewItem(t.id));
 
   useEffect(() => {
@@ -184,6 +265,7 @@ function TableLayoutScreenInner() {
       width,
       height,
       sort_order: (items ?? []).length,
+      floor_id: activeFloorId,
     };
     setItems((prev) => [...(prev ?? []), newItem]);
     setSelectedId(newItem.id);
@@ -218,6 +300,7 @@ function TableLayoutScreenInner() {
       width: clipboard.width,
       height: clipboard.height,
       sort_order: (items ?? []).length,
+      floor_id: activeFloorId,
     };
     setItems((prev) => [...(prev ?? []), newItem]);
     setSelectedId(newItem.id);
@@ -339,6 +422,7 @@ function TableLayoutScreenInner() {
             y: item.y,
             width: item.width,
             height: item.height,
+            floorId: item.floor_id,
           });
           nextItems.push(created);
           if (selectedId === item.id) setSelectedId(created.id);
@@ -357,6 +441,7 @@ function TableLayoutScreenInner() {
             y: item.y,
             width: item.width,
             height: item.height,
+            floorId: item.floor_id,
           });
           nextItems.push(updated);
         } catch (err) {
@@ -462,6 +547,53 @@ function TableLayoutScreenInner() {
 
       <div className="flex flex-1 overflow-hidden">
         <div className="flex-1 overflow-auto p-5">
+          {(floors.length > 0 || canManage) && (
+            <div className="mb-3 flex flex-wrap items-center gap-2" style={{ width: TABLE_LAYOUT_CANVAS_WIDTH }}>
+              {floors.map((f) => (
+                <button
+                  key={f.id}
+                  onClick={() => switchFloor(f.id)}
+                  className={
+                    'h-[34px] rounded-lg border px-3.5 text-[12.5px] font-semibold ' +
+                    (f.id === activeFloorId
+                      ? 'border-primary bg-primary text-primary-foreground'
+                      : 'border-border bg-card text-foreground')
+                  }
+                >
+                  {f.name}
+                </button>
+              ))}
+              {canManage && (
+                <>
+                  <button
+                    onClick={addFloor}
+                    disabled={floorBusy}
+                    className="h-[34px] rounded-lg border border-dashed border-brand px-3 text-[12.5px] font-semibold text-brand disabled:opacity-50"
+                  >
+                    {tr('tableLayout.floor.add')}
+                  </button>
+                  {activeFloorId && (
+                    <div className="ml-auto flex gap-2">
+                      <button
+                        onClick={renameFloor}
+                        disabled={floorBusy}
+                        className="h-[34px] rounded-lg border border-border px-3 text-[12px] font-semibold text-muted-foreground disabled:opacity-50"
+                      >
+                        {tr('tableLayout.floor.rename')}
+                      </button>
+                      <button
+                        onClick={removeFloor}
+                        disabled={floorBusy}
+                        className="h-[34px] rounded-lg border border-destructive/60 px-3 text-[12px] font-semibold text-destructive disabled:opacity-50"
+                      >
+                        {tr('tableLayout.floor.delete')}
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
           <div
             ref={canvasRef}
             onDragOver={(e) => canManage && e.preventDefault()}
@@ -477,7 +609,7 @@ function TableLayoutScreenInner() {
             {items === null && !error && (
               <div className="p-5 text-[12.5px] text-muted-foreground">{tr('tableLayout.loading')}</div>
             )}
-            {items?.map((t) => {
+            {visibleItems.map((t) => {
               const isSel = t.id === selectedId;
               const isTable = t.kind === 'table';
               const dirty = isNewItem(t.id) || dirtyIds.has(t.id);
@@ -548,6 +680,28 @@ function TableLayoutScreenInner() {
                       ＋
                     </button>
                   </div>
+                </div>
+              )}
+
+              {floors.length >= 2 && (
+                <div>
+                  <div className="mb-1 text-[11.5px] text-muted-foreground">{tr('tableLayout.floor.label')}</div>
+                  <select
+                    value={resolveFloorId(selected, floors) ?? ''}
+                    onChange={(e) => {
+                      updateLocal(selected.id, { floor_id: e.target.value });
+                      // 移動先の階へ表示も切り替え、移動した卓を選択したままにする。
+                      setActiveFloorId(e.target.value);
+                    }}
+                    disabled={!canManage}
+                    className="h-[38px] w-full rounded-lg border border-border bg-background px-2 text-[13px] disabled:opacity-60"
+                  >
+                    {floors.map((f) => (
+                      <option key={f.id} value={f.id}>
+                        {f.name}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               )}
 
@@ -636,6 +790,7 @@ function TableLayoutScreenInner() {
           )}
 
           <div className="mt-auto text-[11px] leading-relaxed text-muted-foreground">
+            {floors.length >= 2 && <div className="mb-1.5">{tr('tableLayout.floor.hint')}</div>}
             {tr('tableLayout.footerNote')}
           </div>
         </div>

@@ -14,7 +14,24 @@ const updateSchema = z.object({
   width: z.number().int().min(24).max(600).optional(),
   height: z.number().int().min(24).max(600).optional(),
   sortOrder: z.number().int().optional(),
+  // 複数階対応 (2026-11-06)。卓を別の階へ移動する。
+  floorId: z.string().uuid().nullable().optional(),
 });
+
+// floorId が指定された場合、その階がこの店舗のものか確認する (他店舗の階への紐付けを防ぐ)。
+async function floorBelongsToStore(
+  supabase: ReturnType<typeof createPosAdminClient>,
+  storeId: string,
+  floorId: string,
+): Promise<boolean> {
+  const { data } = await supabase
+    .from('table_floors')
+    .select('id')
+    .eq('id', floorId)
+    .eq('store_id', storeId)
+    .maybeSingle();
+  return !!data;
+}
 
 // 更新 (位置 / サイズ / 名前 / 種類 / 席数 / 並び順)。ドラッグ移動・リサイズも都度これを叩く。
 // manager 以上のみ。
@@ -37,6 +54,12 @@ export const PATCH = withPosStaff('manager', async (_session, req, ctx: RouteCon
   if (parsed.data.width !== undefined) patch.width = parsed.data.width;
   if (parsed.data.height !== undefined) patch.height = parsed.data.height;
   if (parsed.data.sortOrder !== undefined) patch.sort_order = parsed.data.sortOrder;
+  if (parsed.data.floorId !== undefined) {
+    if (parsed.data.floorId && !(await floorBelongsToStore(supabase, storeId, parsed.data.floorId))) {
+      return NextResponse.json({ error: 'invalid_floor' }, { status: 400 });
+    }
+    patch.floor_id = parsed.data.floorId;
+  }
   patch.updated_at = new Date().toISOString();
 
   const { data, error } = await supabase
@@ -44,7 +67,7 @@ export const PATCH = withPosStaff('manager', async (_session, req, ctx: RouteCon
     .update(patch)
     .eq('id', id)
     .eq('store_id', storeId)
-    .select('id, table_code, kind, seats, x, y, width, height, sort_order')
+    .select('id, table_code, kind, seats, x, y, width, height, sort_order, floor_id')
     .maybeSingle();
 
   if (error) {

@@ -6,3 +6,14 @@
 // h-[800px]) ことに合わせ、こちらも固定ピクセルサイズにする。
 export const TABLE_LAYOUT_CANVAS_WIDTH = 940;
 export const TABLE_LAYOUT_CANVAS_HEIGHT = 640;
+
+// 複数階対応 (2026-11-06)。floor_id が null の項目は「並び順が先頭の階」に属するものとして扱う。
+// 階が0件の店舗では常に null (= 従来の1枚レイアウト)。
+export function resolveFloorId(
+  item: { floor_id: string | null },
+  floors: { id: string }[],
+): string | null {
+  if (floors.length === 0) return null;
+  if (item.floor_id && floors.some((f) => f.id === item.floor_id)) return item.floor_id;
+  return floors[0].id;
+}

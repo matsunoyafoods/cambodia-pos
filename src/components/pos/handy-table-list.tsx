@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react';
 import type { HandyTableGroup, TableStatus } from '@/lib/pos-types';
 import { DEMO_TABLE_GROUPS } from '@/lib/demo-data';
-import type { TableLayoutItemRecord } from '@/lib/table-layout-client';
+import type { TableFloorRecord, TableLayoutItemRecord } from '@/lib/table-layout-client';
+import { resolveFloorId } from '@/lib/table-layout-geometry';
 import type { TableSessionRecord } from '@/lib/table-session-client';
 import { drinkTimerState, elapsedMinutes, formatDuration } from '@/lib/table-timer';
 import { useLanguage } from './language-context';
@@ -90,6 +91,7 @@ export function HandyTableList({
   onStatusFilter,
   onSelectTable,
   layoutItems,
+  layoutFloors = [],
   tableSessions,
   handyGroups,
 }: {
@@ -98,6 +100,8 @@ export function HandyTableList({
   onStatusFilter: (v: 'all' | TableStatus) => void;
   onSelectTable: (code: string) => void;
   layoutItems: TableLayoutItemRecord[];
+  /** テーブルレイアウトの階 (2026-11-06 追加)。卓グループ未設定かつ2階以上ある店舗では階ごとにまとめる。 */
+  layoutFloors?: TableFloorRecord[];
   tableSessions: TableSessionRecord[];
   /** 設定画面「ハンディ表示」タブで設定した卓グループ・並び順 (2026-08-31 追加) */
   handyGroups: HandyTableGroup[];
@@ -105,7 +109,9 @@ export function HandyTableList({
   const { t: tr, menuText } = useLanguage();
   const sessionByTable = new Map(tableSessions.map((s) => [s.table_code, s]));
 
-  const realTables = layoutItems.filter((t) => t.kind === 'table').map((t) => ({ code: t.table_code, seats: t.seats }));
+  const realTables = layoutItems
+    .filter((t) => t.kind === 'table')
+    .map((t) => ({ code: t.table_code, seats: t.seats, floorId: resolveFloorId(t, layoutFloors) }));
 
   let groups: { label: string | null; tables: { code: string; seats: number }[] }[];
   if (realTables.length > 0) {
@@ -128,6 +134,12 @@ export function HandyTableList({
 
     if (configured.length > 0) {
       groups = ungrouped.length > 0 ? [...configured, { label: tr('settings.handy.unassignedGroupLabel'), tables: ungrouped }] : configured;
+    } else if (layoutFloors.length >= 2) {
+      // 複数階対応 (2026-11-06)。卓グループを作っていない店舗は、階ごとに自動でまとめる。
+      groups = layoutFloors.map((f) => ({
+        label: f.name,
+        tables: realTables.filter((t) => t.floorId === f.id).sort((a, b) => naturalTableCompare(a.code, b.code)),
+      }));
     } else {
       groups = [{ label: null, tables: realTables.slice().sort((a, b) => naturalTableCompare(a.code, b.code)) }];
     }

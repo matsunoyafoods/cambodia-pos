@@ -11,7 +11,7 @@ export const GET = withPosStaff('part_time', async () => {
 
   const { data, error } = await supabase
     .from('table_layouts')
-    .select('id, table_code, kind, seats, x, y, width, height, sort_order')
+    .select('id, table_code, kind, seats, x, y, width, height, sort_order, floor_id')
     .eq('store_id', storeId)
     .order('sort_order')
     .order('table_code');
@@ -19,7 +19,16 @@ export const GET = withPosStaff('part_time', async () => {
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
-  return NextResponse.json({ items: data ?? [] });
+  const { data: floors, error: floorsError } = await supabase
+    .from('table_floors')
+    .select('id, name, sort_order')
+    .eq('store_id', storeId)
+    .order('sort_order')
+    .order('name');
+  if (floorsError) {
+    return NextResponse.json({ error: floorsError.message }, { status: 500 });
+  }
+  return NextResponse.json({ items: data ?? [], floors: floors ?? [] });
 });
 
 const createSchema = z.object({
@@ -30,7 +39,24 @@ const createSchema = z.object({
   y: z.number().int().optional(),
   width: z.number().int().min(24).max(600).optional(),
   height: z.number().int().min(24).max(600).optional(),
+  // 複数階対応 (2026-11-06)。null / 省略 = 先頭の階 (階が無い店舗は従来の1枚レイアウト)。
+  floorId: z.string().uuid().nullable().optional(),
 });
+
+// floorId が指定された場合、その階がこの店舗のものか確認する (他店舗の階への紐付けを防ぐ)。
+async function floorBelongsToStore(
+  supabase: ReturnType<typeof createPosAdminClient>,
+  storeId: string,
+  floorId: string,
+): Promise<boolean> {
+  const { data } = await supabase
+    .from('table_floors')
+    .select('id')
+    .eq('id', floorId)
+    .eq('store_id', storeId)
+    .maybeSingle();
+  return !!data;
+}
 
 // 新規追加 (卓 または 障害物)。並び順は末尾に自動追加。manager 以上のみ。
 export const POST = withPosStaff('manager', async (_session, req) => {
@@ -42,6 +68,10 @@ export const POST = withPosStaff('manager', async (_session, req) => {
 
   const storeId = getPosStoreId();
   const supabase = createPosAdminClient();
+
+  if (parsed.data.floorId && !(await floorBelongsToStore(supabase, storeId, parsed.data.floorId))) {
+    return NextResponse.json({ error: 'invalid_floor' }, { status: 400 });
+  }
 
   const { data: existing, error: maxError } = await supabase
     .from('table_layouts')
@@ -69,8 +99,9 @@ export const POST = withPosStaff('manager', async (_session, req) => {
       width: parsed.data.width ?? (kind === 'table' ? 84 : kind === 'pillar' ? 32 : 160),
       height: parsed.data.height ?? (kind === 'table' ? 64 : kind === 'pillar' ? 32 : 40),
       sort_order: nextSortOrder,
+      floor_id: parsed.data.floorId ?? null,
     })
-    .select('id, table_code, kind, seats, x, y, width, height, sort_order')
+    .select('id, table_code, kind, seats, x, y, width, height, sort_order, floor_id')
     .single();
 
   if (error) {

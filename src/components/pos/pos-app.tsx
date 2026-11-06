@@ -52,7 +52,7 @@ import {
   type OrderItemRecord,
 } from '@/lib/pos-order-orders-client';
 import { markKitchenTicketDone, undoKitchenTicketDone } from '@/lib/pos-order-kitchen-client';
-import type { TableLayoutItemRecord } from '@/lib/table-layout-client';
+import type { TableFloorRecord, TableLayoutItemRecord } from '@/lib/table-layout-client';
 import {
   clearTableSession,
   extendDrinkTimer,
@@ -129,6 +129,7 @@ function PosAppInner() {
   const [menu, setMenu] = useState<MenuItem[]>([]);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [layoutItems, setLayoutItems] = useState<TableLayoutItemRecord[]>([]);
+  const [layoutFloors, setLayoutFloors] = useState<TableFloorRecord[]>([]);
   const [tableSessions, setTableSessions] = useState<TableSessionRecord[]>([]);
   const [reservations, setReservations] = useState<ReservationRecord[]>([]);
   // 会計待ち (billing) 判定用 (2026-09-04 追加。詳細は tableStatus の useMemo 参照)。
@@ -288,7 +289,7 @@ function PosAppInner() {
         // から読む (設定画面「テーブルレイアウト」で作った見取り図)。まだ何も配置して
         // いない店舗向けに、失敗・0件時は空配列のまま (table-map-screen.tsx 側で
         // 既存のサンプル配置にフォールバックする)。
-        const layoutPromise = getPosOrderTableLayout().catch(() => ({ items: [] as TableLayoutItemRecord[] }));
+        const layoutPromise = getPosOrderTableLayout().catch(() => ({ items: [] as TableLayoutItemRecord[], floors: [] as TableFloorRecord[] }));
         // 滞在タイマー・飲み放題タイマーは連携モードに関係なく卓単位で動く (pos.table_sessions)。
         const sessionsPromise = getTableSessions().catch(() => ({ items: [] as TableSessionRecord[] }));
         // 決済方法は連携モードに関係なく pos.payment_methods (店舗単位) から読む
@@ -320,6 +321,7 @@ function PosAppInner() {
           setPosNativeCategoryOrder(menuData.categories);
           setSettings((prev) => ({ ...prev, ...settingsData }));
           setLayoutItems(layoutData.items);
+          setLayoutFloors(layoutData.floors ?? []);
           setTableSessions(sessionsData.items);
           setPaymentMethods(paymentMethodsData.paymentMethods);
           setReservations(reservationsData.items);
@@ -346,6 +348,7 @@ function PosAppInner() {
           setPosNativeCategoryOrder(null);
           setSettings((prev) => ({ ...prev, ...settingsData }));
           setLayoutItems(layoutData.items);
+          setLayoutFloors(layoutData.floors ?? []);
           setTableSessions(sessionsData.items);
           setPaymentMethods(paymentMethodsData.paymentMethods);
           setReservations(reservationsData.items);
@@ -1503,6 +1506,7 @@ function PosAppInner() {
           onStatusFilter={setStatusFilter}
           onSelectTable={selectTable}
           layoutItems={layoutItems}
+          layoutFloors={layoutFloors}
           tableSessions={tableSessions}
           reservationsByTable={reservationsByTable}
           tableActionMode={tableActionMode}
