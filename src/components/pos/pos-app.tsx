@@ -1080,8 +1080,25 @@ function PosAppInner() {
   function payWithPaperReceipt(methodName: string) {
     if (!currentOrder || paperReceiptPending) return;
     const cashMethod = paymentMethods.find((m) => m.isCash && m.enabled);
+    const resolvedMethodName = methodName || cashMethod?.name || '現金';
+    // 2026-11-06 修正: 選択中の決済方法がレジの「現金として扱う」設定 (isCash) と一致する場合、
+    // cashReceivedUsd を明示的に付与するようにした。従来はここで一切 cashReceivedUsd/
+    // cashReceivedKhr を渡していなかったため、紙レシートでもらうボタンで確定した現金払いは
+    // method名こそ正しく記録されるものの、payments.cash_received_usd が常にnullのまま保存され、
+    // レジ締めのシステム現金売上 (/api/register-closings、cash-balance) には一切反映されない
+    // 不具合があった (Tom「現金売上が全部0になっています」「入金した時に$220くらいあったから
+    // 確実に間違えている」で発覚)。このボタンは「お預かり金額」の入力自体を省略する設計なので、
+    // お釣りは常に0として扱い、received額は会計金額そのものとする (システム側は
+    // cash_received_usd の有無しか見ないため、値そのものの精度は問われない)。
+    const isCashPayment = Boolean(cashMethod) && resolvedMethodName === cashMethod?.name;
     setPaperReceiptPending(true);
-    completeOrder([{ method: methodName || cashMethod?.name || '現金', amount: totals.total }]).finally(() => {
+    completeOrder([
+      {
+        method: resolvedMethodName,
+        amount: totals.total,
+        ...(isCashPayment ? { cashReceivedUsd: totals.total, cashReceivedKhr: 0, changeUsd: 0, changeKhr: 0 } : {}),
+      },
+    ]).finally(() => {
       setPaperReceiptPending(false);
     });
   }

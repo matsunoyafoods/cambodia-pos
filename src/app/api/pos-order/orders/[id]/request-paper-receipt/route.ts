@@ -110,10 +110,21 @@ export async function POST(_req: Request, ctx: RouteContext) {
   const { error: updateError } = await supabase.from('orders').update(updatePayload).eq('id', id);
   if (updateError) return NextResponse.json({ error: updateError.message }, { status: 500 });
 
+  // 2026-11-06 修正: ここは常に「現金で会計完了」扱いの経路なのに、payments.cash_received_usd
+  // を一切設定していなかったため、レジ締めのシステム現金売上 (/api/register-closings、
+  // cash-balance) には一切反映されない不具合があった (Tom「現金売上が全部0になっています」
+  // 「入金した時に$220くらいあったから確実に間違えている」で発覚。pos-app.tsx の
+  // payWithPaperReceipt にも同種の不具合があり同時に修正した)。お預かり金額の入力自体が
+  // 無い経路なので、received額は会計金額そのもの・お釣りは0として扱う (システム側は
+  // cash_received_usd の有無しか見ないため、値そのものの精度は問われない)。
   const { error: paymentError } = await supabase.from('payments').insert({
     order_id: id,
     method: cashMethodName,
     amount: total,
+    cash_received_usd: total,
+    cash_received_khr: 0,
+    change_usd: 0,
+    change_khr: 0,
     confirmed_at: nowIso,
   });
   if (paymentError) return NextResponse.json({ error: paymentError.message }, { status: 500 });
