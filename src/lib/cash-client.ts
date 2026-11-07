@@ -43,6 +43,8 @@ export type CashBalance = {
   cashExpensesTotal: number;
   balance: number;
   lastClosingDate: string | null;
+  /** 現金残高の起点 (2026-11-07 追加)。asOfDate の営業終了時点の実査額 (レジ金を除く)。 */
+  baseline?: { asOfDate: string; amountUsd: number; note?: string | null } | null;
 };
 
 export function getCashBalance(): Promise<CashBalance> {

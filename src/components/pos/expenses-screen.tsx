@@ -213,6 +213,11 @@ function CashBalanceCard({ refreshKey, onChanged }: { refreshKey: number; onChan
                 expenses: balance.cashExpensesTotal.toFixed(2),
               })}
             </div>
+            {balance.baseline && (
+              <div className="mt-1 text-[11px] text-muted-foreground">
+                {t('cash.baselineNote', { date: balance.baseline.asOfDate, amount: balance.baseline.amountUsd.toFixed(2) })}
+              </div>
+            )}
             <div className="mt-1 text-[11px] text-muted-foreground">
               {balance.lastClosingDate ? t('cash.lastClosingDate', { date: balance.lastClosingDate }) : t('cash.noClosingYet')}
             </div>
