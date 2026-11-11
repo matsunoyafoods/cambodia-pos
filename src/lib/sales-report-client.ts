@@ -44,6 +44,8 @@ export type DailySalesDay = {
   partyCount: number;
   ethnicityTotals: EthnicityTotal[];
   timePeriodSales: TimePeriodSales[];
+  /** 支払い方法別の金額 (2026-11-11 追加)。キーは決済方法名。 */
+  paymentMethodTotals?: Record<string, number>;
 };
 
 export type DailySales = {
@@ -56,6 +58,9 @@ export type DailySales = {
   ethnicityTotals: EthnicityTotal[];
   timePeriodSales: TimePeriodSales[];
   timePeriods: TimePeriod[];
+  /** 月内に使われた決済方法名 (月間合計の多い順、2026-11-11 追加)。 */
+  paymentMethods?: string[];
+  paymentMethodTotals?: Record<string, number>;
 };
 
 export function getDailySales(month: string): Promise<DailySales> {

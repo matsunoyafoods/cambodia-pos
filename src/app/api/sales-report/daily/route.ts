@@ -30,6 +30,7 @@ async function getTimePeriods(supabase: ReturnType<typeof createPosAdminClient>,
 }
 
 type OrderRow = {
+  id: string;
   total: number;
   paid_at: string;
   guest_ethnicity: Partial<Record<EthnicityKey, number>> | null;
@@ -52,7 +53,7 @@ export const GET = withPosStaff('manager', async (_session, req) => {
   const [{ data, error }, timePeriods] = await Promise.all([
     supabase
       .from('orders')
-      .select('total, paid_at, guest_ethnicity, guest_kids_count')
+      .select('id, total, paid_at, guest_ethnicity, guest_kids_count')
       .eq('store_id', storeId)
       .eq('status', 'paid')
       .gte('paid_at', startIso)
@@ -62,6 +63,34 @@ export const GET = withPosStaff('manager', async (_session, req) => {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   const allRows = (data as OrderRow[] | null) ?? [];
+
+  // 日別の支払い方法別内訳 (2026-11-11 追加。Tom「日別売上の表は支払い別の金額が分からないので、
+  // 現金やABAなど」)。pos.payments を order_id でまとめて取得する (tables/route.ts と同じ方式。
+  // URL が長くなりすぎないよう 200 件ずつに分割)。method は支払い時点の決済方法名のスナップショット。
+  const paymentsByOrder = new Map<string, { method: string; amount: number }[]>();
+  const orderIds = allRows.map((r) => r.id);
+  for (let i = 0; i < orderIds.length; i += 200) {
+    const chunk = orderIds.slice(i, i + 200);
+    const { data: payments, error: paymentsError } = await supabase
+      .from('payments')
+      .select('order_id, method, amount')
+      .in('order_id', chunk);
+    if (paymentsError) return NextResponse.json({ error: paymentsError.message }, { status: 500 });
+    for (const p of (payments as { order_id: string; method: string; amount: number }[] | null) ?? []) {
+      const list = paymentsByOrder.get(p.order_id) ?? [];
+      list.push({ method: p.method, amount: Number(p.amount) });
+      paymentsByOrder.set(p.order_id, list);
+    }
+  }
+  function methodTotalsOf(rows: OrderRow[]): Record<string, number> {
+    const totals: Record<string, number> = {};
+    for (const row of rows) {
+      for (const p of paymentsByOrder.get(row.id) ?? []) {
+        totals[p.method] = Math.round(((totals[p.method] ?? 0) + p.amount) * 100) / 100;
+      }
+    }
+    return totals;
+  }
 
   const byDate = new Map<string, OrderRow[]>();
   for (const row of allRows) {
@@ -83,6 +112,7 @@ export const GET = withPosStaff('manager', async (_session, req) => {
         partyCount: guestStats.partyCount,
         ethnicityTotals: guestStats.ethnicityTotals,
         timePeriodSales: computeTimePeriodSales(rows, timePeriods),
+        paymentMethodTotals: methodTotalsOf(rows),
       };
     })
     .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
@@ -91,6 +121,9 @@ export const GET = withPosStaff('manager', async (_session, req) => {
   const orderCount = days.reduce((s, d) => s + d.orderCount, 0);
   const monthGuestStats = computeGuestStats(allRows);
   const monthTimePeriodSales = computeTimePeriodSales(allRows, timePeriods);
+  const monthMethodTotals = methodTotalsOf(allRows);
+  // 表の列順: 月間合計の多い順
+  const paymentMethods = Object.keys(monthMethodTotals).sort((a, b) => monthMethodTotals[b] - monthMethodTotals[a]);
 
   return NextResponse.json({
     month,
@@ -102,5 +135,7 @@ export const GET = withPosStaff('manager', async (_session, req) => {
     ethnicityTotals: monthGuestStats.ethnicityTotals,
     timePeriodSales: monthTimePeriodSales,
     timePeriods,
+    paymentMethods,
+    paymentMethodTotals: monthMethodTotals,
   });
 }, { deny: ['sub_manager'] });

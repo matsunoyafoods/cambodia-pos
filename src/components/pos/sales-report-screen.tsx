@@ -137,11 +137,13 @@ function SalesReportPanel() {
   function handleDailyCsvExport() {
     if (!daily || daily.days.length === 0) return;
     const periods = daily.timePeriods;
+    const methods = daily.paymentMethods ?? [];
     downloadCsv(
       `${t('salesReport.dailyCsvFilename')}_${month}`,
       [
         t('salesReport.csvDate'),
         t('salesReport.csvSalesUsd'),
+        ...methods,
         t('salesReport.csvOrderCount'),
         t('salesReport.csvGuestCount'),
         t('salesReport.csvPartyCount'),
@@ -151,6 +153,7 @@ function SalesReportPanel() {
       daily.days.map((d) => [
         d.date,
         d.total.toFixed(2),
+        ...methods.map((m) => (d.paymentMethodTotals?.[m] ?? 0).toFixed(2)),
         d.orderCount,
         d.guestCount,
         d.partyCount,
@@ -246,6 +249,9 @@ function SalesReportPanel() {
                   <tr>
                     <th className="px-3 py-2 text-left font-semibold">{t('salesReport.csvDate')}</th>
                     <th className="px-3 py-2 text-right font-semibold">{t('salesReport.salesColumn')}</th>
+                    {(daily.paymentMethods ?? []).map((m) => (
+                      <th key={m} className="whitespace-nowrap px-3 py-2 text-right font-semibold">{m}</th>
+                    ))}
                     <th className="px-3 py-2 text-right font-semibold">{t('salesReport.csvOrderCount')}</th>
                     <th className="px-3 py-2 text-right font-semibold">{t('salesReport.csvGuestCount')}</th>
                     <th className="px-3 py-2 text-right font-semibold">{t('salesReport.csvPartyCount')}</th>
@@ -259,7 +265,15 @@ function SalesReportPanel() {
                   {daily.days.map((d) => (
                     <tr key={d.date} className="border-t border-border">
                       <td className="px-3 py-2">{d.date}</td>
-                      <td className="px-3 py-2 text-right">${d.total.toFixed(2)}</td>
+                      <td className="px-3 py-2 text-right font-semibold">${d.total.toFixed(2)}</td>
+                      {(daily.paymentMethods ?? []).map((m) => {
+                        const v = d.paymentMethodTotals?.[m] ?? 0;
+                        return (
+                          <td key={m} className={'px-3 py-2 text-right' + (v === 0 ? ' text-muted-foreground' : '')}>
+                            ${v.toFixed(2)}
+                          </td>
+                        );
+                      })}
                       <td className="px-3 py-2 text-right">{d.orderCount}</td>
                       <td className="px-3 py-2 text-right">{d.guestCount}</td>
                       <td className="px-3 py-2 text-right">{d.partyCount}</td>
