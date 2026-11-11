@@ -7,10 +7,11 @@ import { useLanguage } from './language-context';
 
 // レジ締め月報 (Cash Register Closing Report、2026-11-11 追加)。
 // Tom「税理士がこの情報が入っていてほしい」→ 従来手作業で作っていた月報と同じ列で、
-// POS のデータから毎月出力できるようにした。列見出しは税理士に渡す書式のため、画面の表示言語に
-// 関係なく「英語 + 日本語」で固定する (元の月報と同じ)。CSV (Excel) と 印刷/PDF の2形式で出力。
+// POS のデータから毎月出力できるようにした。CSV (Excel) と 印刷/PDF の2形式で出力。
+// 列見出し・曜日・タイトル行は画面の表示言語に合わせる (2026-11-11 Tom 指示)。日本語のときは
+// 元の月報と同じ「英語 + 日本語」併記、その他の言語はその言語のみ。
 
-const DOW_JA = ['日', '月', '火', '水', '木', '金', '土'];
+const DOW_LOCALE: Record<string, string> = { ja: 'ja-JP', en: 'en-US', km: 'km-KH', zh: 'zh-CN', ko: 'ko-KR' };
 
 function money(n: number | null | undefined, blankZero = true): string {
   if (n === null || n === undefined) return '';
@@ -33,7 +34,7 @@ type Row = {
 };
 
 export function ClosingReportSection({ month }: { month: string }) {
-  const { t } = useLanguage();
+  const { t, lang } = useLanguage();
   const [report, setReport] = useState<ClosingReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [carryDraft, setCarryDraft] = useState('0');
@@ -55,13 +56,14 @@ export function ClosingReportSection({ month }: { month: string }) {
 
   const rows: Row[] = useMemo(() => {
     if (!report) return [];
+    const dowFmt = new Intl.DateTimeFormat(DOW_LOCALE[lang] ?? 'en-US', { weekday: 'short', timeZone: 'UTC' });
     let balance = carryForward;
     return report.days.map((d) => {
       balance = Math.round((balance + d.netCash - d.deposit) * 100) / 100;
       if (report.baseline && d.date === report.baseline.asOfDate) balance = report.baseline.amountUsd;
       return {
         date: d.date,
-        dow: DOW_JA[new Date(`${d.date}T00:00:00Z`).getUTCDay()],
+        dow: dowFmt.format(new Date(`${d.date}T00:00:00Z`)),
         open: d.open,
         final: d.final,
         cash: d.cash,
@@ -73,7 +75,7 @@ export function ClosingReportSection({ month }: { month: string }) {
         balance,
       };
     });
-  }, [report, carryForward]);
+  }, [report, carryForward, lang]);
 
   if (error) {
     return (
@@ -84,17 +86,17 @@ export function ClosingReportSection({ month }: { month: string }) {
   const methods = report?.methods ?? [];
   const cashLabel = report?.cashLabel ?? 'Cash';
   const headers = [
-    'date',
-    'DoW',
-    'OPEN レジ開け現金',
-    'FINAL レジ締め現金',
-    `${cashLabel} 現金`,
+    t('closingReport.col.date'),
+    t('closingReport.col.dow'),
+    t('closingReport.col.open'),
+    t('closingReport.col.final'),
+    t('closingReport.col.cash', { name: cashLabel }),
     ...methods,
-    'TOTAL 合計売上',
-    'unknown(+) 不明金',
-    'Net Cash Sales 現金売上',
-    'Bank Deposit 納金額',
-    'Cash Balance 納金袋残高',
+    t('closingReport.col.total'),
+    t('closingReport.col.unknown'),
+    t('closingReport.col.netCash'),
+    t('closingReport.col.deposit'),
+    t('closingReport.col.balance'),
   ];
   const sum = (f: (r: Row) => number) => Math.round(rows.reduce((s, r) => s + f(r), 0) * 100) / 100;
   const totals = {
@@ -124,7 +126,7 @@ export function ClosingReportSection({ month }: { month: string }) {
   }
   function totalCells(): string[] {
     return [
-      'TOTAL',
+      t('closingReport.col.totalRow'),
       '',
       '',
       '',
@@ -138,7 +140,12 @@ export function ClosingReportSection({ month }: { month: string }) {
     ];
   }
   const [yy, mm] = month.split('-');
-  const titleLine = `${yy} / ${Number(mm)}  Cash Register Closing Report  1$=${report?.khrRate ?? ''}Riel  Carry-forward Balance 前月繰越 ${money(carryForward, false)}`;
+  const titleLine = t('closingReport.titleLine', {
+    year: yy,
+    month: String(Number(mm)),
+    rate: String(report?.khrRate ?? ''),
+    carry: money(carryForward, false),
+  });
 
   function exportCsv() {
     if (!report) return;
@@ -150,7 +157,7 @@ export function ClosingReportSection({ month }: { month: string }) {
         headers,
         ...rows.map((r) => plain(rowCells(r))),
         plain(totalCells()),
-        ...(note.trim() ? [[`Note 備考: ${note.trim()}`]] : []),
+        ...(note.trim() ? [[`${t('closingReport.notePrefix')}: ${note.trim()}`]] : []),
       ],
     );
   }
@@ -163,12 +170,12 @@ export function ClosingReportSection({ month }: { month: string }) {
       .map((r) => `<tr>${rowCells(r).map((c, i) => `<td class="${i < 2 ? 'l' : ''}">${esc(c)}</td>`).join('')}</tr>`)
       .join('');
     const foot = `<tr class="tot">${totalCells().map((c, i) => `<td class="${i < 2 ? 'l' : ''}">${esc(c)}</td>`).join('')}</tr>`;
-    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Cash Register Closing Report ${month}</title>
+    const html = `<!DOCTYPE html><html lang="${lang}"><head><meta charset="utf-8"><title>${esc(t('closingReport.title'))} ${month}</title>
 <style>@page{size:A4 landscape;margin:8mm}body{font-family:-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;font-size:9px;color:#111}
 h1{font-size:12px;margin:0 0 6px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #bbb;padding:2px 4px;text-align:right;white-space:nowrap}
 th{background:#f3f3f3;font-size:8.5px;text-align:center;white-space:normal}td.l{text-align:left}tr.tot td{font-weight:bold;background:#fafafa}.note{margin-top:8px;font-size:10px;white-space:pre-wrap}</style>
 </head><body><h1>${esc(titleLine)}</h1><table><thead><tr>${th}</tr></thead><tbody>${body}${foot}</tbody></table>
-${note.trim() ? `<div class="note">Note 備考: ${esc(note.trim())}</div>` : ''}</body></html>`;
+${note.trim() ? `<div class="note">${esc(t('closingReport.notePrefix'))}: ${esc(note.trim())}</div>` : ''}</body></html>`;
     const w = window.open('', '_blank');
     if (!w) return;
     w.document.write(html);
