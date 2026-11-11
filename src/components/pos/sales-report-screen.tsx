@@ -18,6 +18,7 @@ import { listPaymentMethods, PosPrinterApiError } from '@/lib/printer-client';
 import type { PaymentMethodConfig } from '@/lib/pos-types';
 import { downloadCsv } from '@/lib/csv-export';
 import { LanguageProvider, useLanguage, STAFF_LANGUAGE_STORAGE_KEY } from './language-context';
+import { ClosingReportSection } from './closing-report-section';
 
 // 売上レポート画面 (2026-09-02 追加)。Tom「月間日々売上・日々のテーブルごとの詳細（金額、
 // 国籍、人数、単価）が出るようにしてダウンロードできるように」への対応。AI分析 (/pos/insights)
@@ -199,6 +200,8 @@ function SalesReportPanel() {
           <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="h-10 rounded-lg border border-border px-2.5 text-[13px]" />
         </div>
       </div>
+
+      <ClosingReportSection month={month} />
 
       {error && <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-4 text-[13px] text-destructive">{error}</div>}
       {loading && <div className="text-[13px] text-muted-foreground">{t('common.loadingEllipsis')}</div>}

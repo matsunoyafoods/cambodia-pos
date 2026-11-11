@@ -146,3 +146,34 @@ export type VoidHistory = {
 export function getVoidHistory(month: string): Promise<VoidHistory> {
   return request(`/api/orders/void-history?month=${encodeURIComponent(month)}`);
 }
+
+// レジ締め月報 (Cash Register Closing Report、2026-11-11 追加。税理士提出用)。
+export type ClosingReportDay = {
+  date: string;
+  hasClosing: boolean;
+  open: number | null;
+  final: number | null;
+  byMethod: Record<string, number>;
+  cash: number;
+  total: number;
+  unknown: number;
+  pettyCash: number;
+  netCash: number;
+  deposit: number;
+};
+
+export type ClosingReport = {
+  month: string;
+  khrRate: number;
+  cashLabel: string;
+  methods: string[];
+  days: ClosingReportDay[];
+  /** 前月繰越。現金残高の起点より前の月は null (画面で手入力)。 */
+  carryForward: number | null;
+  /** 月内に現金残高の起点がある場合のみ。その日の終わりで納金袋残高を起点の額に合わせ直す。 */
+  baseline: { asOfDate: string; amountUsd: number } | null;
+};
+
+export function getClosingReport(month: string): Promise<ClosingReport> {
+  return request(`/api/sales-report/closing-report?month=${encodeURIComponent(month)}`);
+}
