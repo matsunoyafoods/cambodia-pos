@@ -27,7 +27,6 @@ type Row = {
   byMethod: Record<string, number>;
   total: number;
   unknown: number;
-  pettyCash: number;
   netCash: number;
   deposit: number;
   balance: number;
@@ -69,7 +68,6 @@ export function ClosingReportSection({ month }: { month: string }) {
         byMethod: d.byMethod,
         total: d.total,
         unknown: d.unknown,
-        pettyCash: d.pettyCash,
         netCash: d.netCash,
         deposit: d.deposit,
         balance,
@@ -94,7 +92,6 @@ export function ClosingReportSection({ month }: { month: string }) {
     ...methods,
     'TOTAL 合計売上',
     'unknown(+) 不明金',
-    'petty cash(-) 小口資金',
     'Net Cash Sales 現金売上',
     'Bank Deposit 納金額',
     'Cash Balance 納金袋残高',
@@ -105,7 +102,6 @@ export function ClosingReportSection({ month }: { month: string }) {
     byMethod: Object.fromEntries(methods.map((m) => [m, sum((r) => r.byMethod[m] ?? 0)])),
     total: sum((r) => r.total),
     unknown: sum((r) => r.unknown),
-    pettyCash: sum((r) => r.pettyCash),
     netCash: sum((r) => r.netCash),
     deposit: sum((r) => r.deposit),
   };
@@ -121,7 +117,6 @@ export function ClosingReportSection({ month }: { month: string }) {
       ...methods.map((m) => money(r.byMethod[m] ?? 0)),
       money(r.total),
       money(r.unknown),
-      money(r.pettyCash),
       money(r.netCash, false),
       money(r.deposit),
       money(r.balance, false),
@@ -137,7 +132,6 @@ export function ClosingReportSection({ month }: { month: string }) {
       ...methods.map((m) => money(totals.byMethod[m], false)),
       money(totals.total, false),
       money(totals.unknown, false),
-      money(totals.pettyCash, false),
       money(totals.netCash, false),
       money(totals.deposit, false),
       money(endBalance, false),

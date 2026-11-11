@@ -157,7 +157,6 @@ export type ClosingReportDay = {
   cash: number;
   total: number;
   unknown: number;
-  pettyCash: number;
   netCash: number;
   deposit: number;
 };

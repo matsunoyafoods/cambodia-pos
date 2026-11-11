@@ -4,7 +4,7 @@ import { withPosStaff } from '@/lib/pos-auth';
 
 // レジ締め月報 (Cash Register Closing Report、2026-11-11 追加)。
 // Tom「税理士がこの情報が入っていてほしい」→ 税理士向けに従来手作業で作っていた月報
-// (日付・曜日・レジ開け/締め現金・支払い方法別売上・合計・不明金・小口資金・現金売上・納金額・納金袋残高)
+// (日付・曜日・レジ開け/締め現金・支払い方法別売上・合計・不明金・現金売上・納金額・納金袋残高)
 // を POS のデータから毎月出せるようにする。
 //
 // 各列の定義:
@@ -13,8 +13,8 @@ import { withPosStaff } from '@/lib/pos-auth';
 // - 支払い方法別         = その日に会計確定した注文の pos.payments を決済方法名ごとに合計
 //                          (現金は店舗設定で「現金として扱う」(is_cash) の決済方法)
 // - unknown (不明金)     = レジ締めの差額 (difference_usd、数えた額 − (レジ金 + システム現金売上))
-// - pettyCash (小口資金) = 支払元「レジの現金」で支払い済みの経費 (expenses.paid_from = register_cash)
-// - netCash (現金売上)   = 現金 + 不明金 − 小口資金
+// - netCash (現金売上)   = 現金 + 不明金
+//   (小口資金の列は Tom の指示で削除、2026-11-11。経費は Telegram 経由の ABA 払いが基本のため)
 // - deposit (納金額)     = 銀行入金 (cash_deposits)
 // - 納金袋残高           = 前月繰越 + Σ(netCash − deposit)。画面側で累計する。
 //
@@ -47,7 +47,6 @@ type DayAgg = {
   cash: number;
   total: number;
   unknown: number;
-  pettyCash: number;
   netCash: number;
   deposit: number;
 };
@@ -57,7 +56,7 @@ async function aggregateDays(supabase: Supabase, storeId: string, fromDate: stri
   const startIso = new Date(`${fromDate}T00:00:00+07:00`).toISOString();
   const endIso = new Date(`${addDays(toDate, 1)}T00:00:00+07:00`).toISOString();
 
-  const [ordersRes, closingsRes, expensesRes, depositsRes] = await Promise.all([
+  const [ordersRes, closingsRes, depositsRes] = await Promise.all([
     supabase.from('orders').select('id, paid_at').eq('store_id', storeId).eq('status', 'paid').gte('paid_at', startIso).lt('paid_at', endIso),
     supabase
       .from('register_closings')
@@ -66,17 +65,9 @@ async function aggregateDays(supabase: Supabase, storeId: string, fromDate: stri
       .gte('date', fromDate)
       .lte('date', toDate)
       .order('confirmed_at'),
-    supabase
-      .from('expenses')
-      .select('date, amount_usd')
-      .eq('store_id', storeId)
-      .eq('paid_from', 'register_cash')
-      .eq('payment_status', 'paid')
-      .gte('date', fromDate)
-      .lte('date', toDate),
     supabase.from('cash_deposits').select('date, amount_usd').eq('store_id', storeId).gte('date', fromDate).lte('date', toDate),
   ]);
-  for (const r of [ordersRes, closingsRes, expensesRes, depositsRes]) {
+  for (const r of [ordersRes, closingsRes, depositsRes]) {
     if (r.error) throw new Error(r.error.message);
   }
 
@@ -84,7 +75,7 @@ async function aggregateDays(supabase: Supabase, storeId: string, fromDate: stri
   const get = (date: string): DayAgg => {
     let d = days.get(date);
     if (!d) {
-      d = { date, hasClosing: false, open: null, final: null, byMethod: {}, cash: 0, total: 0, unknown: 0, pettyCash: 0, netCash: 0, deposit: 0 };
+      d = { date, hasClosing: false, open: null, final: null, byMethod: {}, cash: 0, total: 0, unknown: 0, netCash: 0, deposit: 0 };
       days.set(date, d);
     }
     return d;
@@ -128,16 +119,12 @@ async function aggregateDays(supabase: Supabase, storeId: string, fromDate: stri
     d.final = round2((d.final ?? 0) + Number(c.counted_total_usd) - float);
     d.unknown = round2(d.unknown + Number(c.difference_usd));
   }
-  for (const e of (expensesRes.data as { date: string; amount_usd: number }[] | null) ?? []) {
-    const d = get(e.date);
-    d.pettyCash = round2(d.pettyCash + Number(e.amount_usd));
-  }
   for (const dep of (depositsRes.data as { date: string; amount_usd: number }[] | null) ?? []) {
     const d = get(dep.date);
     d.deposit = round2(d.deposit + Number(dep.amount_usd));
   }
   for (const d of days.values()) {
-    d.netCash = round2(d.cash + d.unknown - d.pettyCash);
+    d.netCash = round2(d.cash + d.unknown);
   }
   return days;
 }
@@ -215,7 +202,6 @@ export const GET = withPosStaff('manager', async (_session, req) => {
           cash: 0,
           total: 0,
           unknown: 0,
-          pettyCash: 0,
           netCash: 0,
           deposit: 0,
         },
